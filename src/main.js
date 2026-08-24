@@ -26,7 +26,7 @@ function saveSettings() {
   try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); } catch {}
 }
 
-// 小kiki 的数值（持久化到 userData/stats.json）
+// 小Kira 的数值（持久化到 userData/stats.json）
 const STATS_FILE = path.join(app.getPath('userData'), 'stats.json');
 
 // 动作/交互日志（持久化到 userData/logs.json，最多留 300 条）
@@ -119,35 +119,15 @@ function openSettings() {
   settingsWin.on('closed', () => { settingsWin = null; });
 }
 
-// 日志窗口（普通窗口，单例）
-let logWin = null;
-function openLogs() {
-  if (logWin) { logWin.focus(); return; }
-  logWin = new BrowserWindow({
-    width: 480,
-    height: 640,
-    resizable: true,
-    title: '小kiki 的日志',
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  logWin.loadFile(path.join(__dirname, 'log.html'));
-  logWin.on('closed', () => { logWin = null; });
-}
-
 // 笔记本窗口（普通窗口，单例）
 let notebookWin = null;
 function openNotebook() {
   if (notebookWin) { notebookWin.focus(); return; }
   notebookWin = new BrowserWindow({
-    width: 440,
-    height: 560,
+    width: 560,
+    height: 640,
     resizable: true,
-    title: 'kiki 的小本子',
+    title: 'Kira 的小本子',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -255,6 +235,24 @@ app.whenReady().then(() => {
     if (win) win.webContents.send('drive-end');
   });
 
+  // 捣乱：转发给覆盖层；被晃掉或到时间后再通知桌宠归位
+  ipcMain.on('mischief-start', () => {
+    if (!win || !overlay) return;
+    const b = win.getBounds();
+    const area = screen.getPrimaryDisplay().workArea;
+    overlay.webContents.send('fx-mischief', {
+      x: b.x + b.width / 2 - area.x,
+      y: b.y + b.height / 2 - area.y,
+    });
+  });
+  ipcMain.on('mischief-done', () => {
+    if (win) win.webContents.send('mischief-end');
+  });
+  // 覆盖层的点击捕获开关（捣乱时本子区域拦截点击用）
+  ipcMain.on('ov-ignore', (_e, flag) => {
+    if (overlay) overlay.setIgnoreMouseEvents(flag, { forward: true });
+  });
+
   // 动作开关设置
   ipcMain.handle('get-settings', () => settings);
   ipcMain.on('set-actions', (_e, patch) => {
@@ -276,7 +274,7 @@ app.whenReady().then(() => {
     logs.push(entry);
     if (logs.length > 300) logs = logs.slice(-300);
     saveLogs();
-    if (logWin) logWin.webContents.send('log-new', entry);
+    if (notebookWin) notebookWin.webContents.send('log-new', entry);
   });
   ipcMain.handle('get-logs', () => logs);
   ipcMain.on('clear-logs', () => {
@@ -318,11 +316,12 @@ app.whenReady().then(() => {
       { label: '你讨厌！', click: () => win.webContents.send('menu-action', 'poop') },
       { label: '化身成剑', click: () => win.webContents.send('menu-action', 'sword') },
       { label: '去兜风', click: () => win.webContents.send('menu-action', 'drive') },
+      { label: '捣乱', click: () => win.webContents.send('menu-action', 'mischief') },
       { label: '来张桌子', click: () => win.webContents.send('menu-action', 'desk') },
       { label: '收进法宝', click: () => win.webContents.send('menu-action', 'seal') },
       { type: 'separator' },
       { label: '看看状态', click: () => win.webContents.send('menu-action', 'stats') },
-      { label: '看看日志', click: openLogs },
+      { label: '小本子', click: openNotebook },
       { label: '设置', click: openSettings },
       { label: '退出', click: () => app.quit() },
     ]);

@@ -119,13 +119,17 @@ const LINES = {
   seal: ['收！', '进法宝里待着~', '法宝，开！'],
   sword: ['剑来！', '变成剑咯', '御剑……不如成剑！'],
   drive: ['去兜风！', '上车！', '带你飞一圈'],
+  mischief: ['嘿嘿，捣乱咯', '挡住挡住~', '就不让你点！'],
   lonely: ['喂——还在吗？', '看我一眼嘛…', '我是不是很透明？', '有人吗…'],
+  angry: ['你别碰我。', '把你的脏手拿开。', '烦死了！', '手拿开！（超凶）', '再戳我真的生气了！', '呜……你欺负我！'],
 };
 
 function enter(next, dur = 0) {
   state = next;
   stateT = 0;
   stateDur = dur;
+  // 离开飘移状态时清掉影子和灯笼
+  if (next !== 'walk' && next !== 'gohome') hideFloatFx();
 }
 
 function say(text, ms = 1800) {
@@ -185,6 +189,46 @@ function fxRaw(tag, attrs, parent = fx) {
   for (const k in attrs) el.setAttribute(k, attrs[k]);
   parent.appendChild(el);
   return el;
+}
+
+// ---------- 飘移特效：地面影子 + 两个红灯笼 ----------
+let shadowEl = null;
+let lanternA = null, lanternB = null;
+
+function makeLantern() {
+  const g = fxRaw('g', {});
+  fxRaw('ellipse', { cx: 0, cy: 0, rx: 13, ry: 16, fill: '#e04536', stroke: '#a02618', 'stroke-width': 1.5 }, g);
+  fxRaw('ellipse', { cx: 0, cy: -3, rx: 6, ry: 9, fill: 'rgba(255,190,120,.35)' }, g); // 灯光
+  fxRaw('rect', { x: -6, y: -20, width: 12, height: 5, rx: 2, fill: '#e8c86a', stroke: '#a8842a', 'stroke-width': 1 }, g);
+  fxRaw('rect', { x: -6, y: 15, width: 12, height: 5, rx: 2, fill: '#e8c86a', stroke: '#a8842a', 'stroke-width': 1 }, g);
+  fxRaw('line', { x1: 0, y1: 20, x2: 0, y2: 30, stroke: '#a02618', 'stroke-width': 1.5 }, g);
+  fxRaw('rect', { x: -2.5, y: 30, width: 5, height: 9, rx: 2, fill: '#e04536' }, g); // 穗子
+  return g;
+}
+
+function showFloatFx() {
+  if (!shadowEl) shadowEl = fxRaw('ellipse', { cx: 170, cy: 612, rx: 60, ry: 10, fill: 'rgba(20,20,50,0.28)' });
+  if (!lanternA) lanternA = makeLantern();
+  if (!lanternB) lanternB = makeLantern();
+}
+
+function updateFloatFx(h, dir, t) {
+  // 影子：飘得越高，影子越小越淡
+  const k = Math.max(0.5, 1 - h / 60);
+  shadowEl.setAttribute('rx', 60 * k);
+  shadowEl.setAttribute('ry', 10 * k);
+  shadowEl.setAttribute('opacity', 0.28 * k);
+  // 灯笼一前一后跟在后面，各有自己的起伏节奏
+  lanternA.setAttribute('transform',
+    `translate(${170 - dir * 88 + 8 * Math.sin(t * 1.3)},${380 - h * 0.6 + 10 * Math.sin(t * 2.1)}) rotate(${6 * Math.sin(t * 1.7)})`);
+  lanternB.setAttribute('transform',
+    `translate(${170 - dir * 138 + 10 * Math.sin(t * 1.1 + 2)},${320 - h * 0.6 + 12 * Math.sin(t * 1.8 + 1)}) rotate(${-5 * Math.sin(t * 1.5)})`);
+}
+
+function hideFloatFx() {
+  if (shadowEl) { shadowEl.remove(); shadowEl = null; }
+  if (lanternA) { lanternA.remove(); lanternA = null; }
+  if (lanternB) { lanternB.remove(); lanternB = null; }
 }
 
 // 爆裂星：多角星形，漫画冲击效果
@@ -299,13 +343,26 @@ function resetDesk() {
 
 // ---------- 动作 ----------
 let pokeTimes = []; // 近期被戳时间，连续戳太多次她会生气扔屎
+let pokeStreak = 0;   // 连续点击计数（间隔超过 2.5 秒清零）
+let lastPokeAt = 0;
 
 function doPoke() {
   addStat('shen', -6);  // 被戳消耗耐心
   addStat('mood', 2);   // 但也开心被关注
   const now = performance.now();
+  // 隐藏彩蛋的连续点击计数：先记上这一下
+  pokeStreak = now - lastPokeAt < 2500 ? pokeStreak + 1 : 1;
+  lastPokeAt = now;
   pokeTimes = pokeTimes.filter((t) => now - t < 8000);
   pokeTimes.push(now);
+  // 隐藏彩蛋：连续点击 10 次，炸毛（优先于扔屎判定）
+  if (pokeStreak >= 10) {
+    pokeStreak = 0;
+    logEvent('交互', '被连续戳了 10 下，炸毛了');
+    enter('poke', 0.38);
+    say(pick(LINES.angry), 2200);
+    return;
+  }
   // 耐心耗尽或连戳太多次：生气扔屎
   if (pokeTimes.length >= 5 || stats.shen < 15) {
     pokeTimes = [];
@@ -697,6 +754,20 @@ window.pet.onDriveEnd(() => {
   enter('driveback', 0.5);
 });
 
+// ---------- 捣乱 ----------
+// 跑去覆盖层追鼠标，被晃掉或到时间后归位
+function doMischief() {
+  enter('mischiefform', 0.5);
+  say(pick(LINES.mischief), 1500);
+}
+
+window.pet.onMischiefEnd(() => {
+  sprite.style.visibility = 'visible';
+  fxBurst(FOOT_X, 300, 12, 12, 56);
+  say(pick(['哼，算你狠', '下次还敢', '呜呜，被甩掉了']), 1800);
+  enter('swordback', 0.5);
+});
+
 // ---------- 收进法宝（姐姐形态专属） ----------
 // 腰间的 K 卡牌飞出 → 她被吸入卡牌 → 卡牌悬浮一阵 → 放她出来
 const cardImg = document.createElement('img');
@@ -704,7 +775,8 @@ cardImg.id = 'cardImg';
 cardImg.src = '../assets/card.png';
 stage.appendChild(cardImg);
 
-const WAIST = { x: 195, y: 346 }; // 卡牌在腰间时的窗口坐标
+const WAIST = { x: 195, y: 346 }; // 卡牌在腰间时的窗口坐标（姐姐形态）
+const WAIST_CHIBI = { x: 168, y: 505 }; // Q版腰间卡牌的窗口坐标
 const FLOAT_POS = { x: 170, y: 290 }; // 卡牌悬浮位置
 let seal = null;
 let pendingSeal = false;
@@ -878,7 +950,7 @@ function freqFactor() { return actionEnabled._freq || 1; }
 
 function nextIdleWait(a, b) { return rand(a, b) / freqFactor(); }
 
-// ---------- 小kiki 的数值 ----------
+// ---------- 小Kira 的数值 ----------
 // 精（体力）：做动作消耗，剧烈动作耗得多，随时间/坐桌子恢复
 // 气（法力）：法术类动作消耗（飞行/变身/收法宝），不足时放不出法术
 // 神（耐心）：被戳/被拎消耗，太低会生气扔屎，不被打扰时缓慢恢复
@@ -923,6 +995,7 @@ const EFFECTS = {
   leave: { mood: -5 },
   sword: { qi: -10, jing: -4, mood: 3 },
   drive: { jing: -3, mood: 5 },
+  mischief: { jing: -3, mood: 4 },
 };
 
 // 体力和法力不够的动作做不来
@@ -940,7 +1013,7 @@ const DISPATCH = {
   walk: doWalk, hop: doHop, spin: doSpin, sway: doSway,
   qbounce: doQBounce, qsway: doQSway, morph: doMorph,
   desk: doDesk, seal: doSeal, goledge: doGoLedge,
-  dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive,
+  dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive, mischief: doMischief,
 };
 
 // 心情好更爱玩开心动作，心情差不想玩
@@ -996,6 +1069,7 @@ async function idleRandom() {
 }
 
 // 数值缓慢变化：恢复精/气/神，冷落涨透明值和降心情
+let lastChatter = performance.now() / 1000;
 setInterval(() => {
   const idleFor = performance.now() / 1000 - lastInteract;
   if (idleFor > 45) addStat('touming', 0.8);
@@ -1007,6 +1081,12 @@ setInterval(() => {
   if (stats.touming > 50 && state === 'idle' && Math.random() < 0.05) {
     say(pick(LINES.lonely), 2000);
     logEvent('系统', '存在感太低，主动求关注');
+  }
+  // 没事就冒一句：肉麻话 / 梗 / 她自己的台词
+  const nowSec = performance.now() / 1000;
+  if (state === 'idle' && nowSec - lastChatter > 25 && Math.random() < 0.08) {
+    lastChatter = nowSec;
+    say(pickPhrase(), 2800);
   }
 }, 1000);
 
@@ -1020,20 +1100,27 @@ window.pet.getStats().then((s) => {
 let pressing = false;
 let dragging = false;
 let downX = 0, downY = 0;
+let pressTimer = null;      // 长按头发的计时器
+let longPressFired = false; // 本次按压已触发过长按彩蛋
+
+// 头部区域（姐姐形态立绘的头发范围，窗口坐标）
+const HEAD_REGION = { x1: 95, y1: 95, x2: 250, y2: 270 };
 
 stage.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   lastInteract = performance.now() / 1000;
   addStat('touming', -100); // 被注意到了，立刻恢复存在感
-  // 点腰间的小本子 = 打开笔记本（姐姐形态、安静站着时）
-  if (form === 'normal' && (state === 'idle' || state === 'walk') &&
-      Math.hypot(e.clientX - WAIST.x, e.clientY - WAIST.y) < 42) {
+  // 点腰间的小本子 = 打开笔记本（两种形态、安静站着时）
+  const waistPos = form === 'normal' ? WAIST : form === 'chibi' ? WAIST_CHIBI : null;
+  if (waistPos && (state === 'idle' || state === 'walk') &&
+      Math.hypot(e.clientX - waistPos.x, e.clientY - waistPos.y) < 42) {
     window.pet.openNotebook();
     logEvent('交互', '打开了她腰间的小本子');
     return;
   }
-  // 化剑/兜风期间不响应戳/拖
-  if (state === 'swordform' || state === 'swordwait' || state === 'driveform' || state === 'drivewait') return;
+  // 化剑/兜风/捣乱期间不响应戳/拖
+  if (state === 'swordform' || state === 'swordwait' || state === 'driveform' || state === 'drivewait' ||
+      state === 'mischiefform' || state === 'mischiefwait') return;
   // 收进法宝过程中：点卡牌 = 提前放她出来，其余时间不响应戳/拖
   if (state === 'seal') {
     if (seal.sub === 'float') {
@@ -1049,6 +1136,20 @@ stage.addEventListener('mousedown', (e) => {
   dragging = false;
   downX = e.screenX;
   downY = e.screenY;
+  // 隐藏彩蛋：长按头发超过 5 秒
+  longPressFired = false;
+  clearTimeout(pressTimer);
+  if (form === 'normal' && e.clientX >= HEAD_REGION.x1 && e.clientX <= HEAD_REGION.x2 &&
+      e.clientY >= HEAD_REGION.y1 && e.clientY <= HEAD_REGION.y2) {
+    pressTimer = setTimeout(() => {
+      if (pressing && !dragging) {
+        longPressFired = true;
+        say('你压我头发了', 2000);
+        logEvent('交互', '被按住头发 5 秒：你压我头发了');
+        addStat('shen', -3);
+      }
+    }, 5000);
+  }
   // 她走远的时候点她 = 叫她回来
   if (state === 'away' || state === 'gone') doBack();
   window.pet.dragStart();
@@ -1076,6 +1177,7 @@ window.addEventListener('mousemove', (e) => {
 window.addEventListener('mouseup', () => {
   if (!pressing) return;
   pressing = false;
+  clearTimeout(pressTimer);
   window.pet.dragEnd();
   if (dragging) {
     dragging = false;
@@ -1089,8 +1191,8 @@ window.addEventListener('mouseup', () => {
       window.pet.setActions({ _home: homePos });
     });
     logEvent('交互', '被安置在新的常驻位置');
-  } else if (state === 'idle' || state === 'walk' || state === 'sway' || state === 'land') {
-    doPoke(); // 原地点击 = 戳一戳（走了走了系列状态下点击是叫她回来，不戳）
+  } else if (!longPressFired && (state === 'idle' || state === 'walk' || state === 'sway' || state === 'land')) {
+    doPoke(); // 原地点击 = 戳一戳（长按触发过彩蛋就不再戳；走了走了系列状态下点击是叫她回来，不戳）
   }
 });
 
@@ -1153,10 +1255,19 @@ function frame(now) {
       break;
     }
     case 'walk': {
-      // 走路颠簸 + 前倾
-      const ph = stateT * 9;
-      ty = -Math.abs(Math.sin(ph)) * 7;
-      rot = Math.sin(ph) * 2.5 + walkDir * 3;
+      if (form === 'normal') {
+        // 飘移：悬浮慢起伏 + 前倾，地面影子跟随，两个红灯笼一前一后
+        const h = 15 + 8 * Math.sin(stateT * 4.2);
+        ty = -h;
+        rot = walkDir * 5 + 2.5 * Math.sin(stateT * 2.1);
+        showFloatFx();
+        updateFloatFx(h, walkDir, t);
+      } else {
+        // Q版：走路颠簸 + 前倾
+        const ph = stateT * 9;
+        ty = -Math.abs(Math.sin(ph)) * 7;
+        rot = Math.sin(ph) * 2.5 + walkDir * 3;
+      }
       window.pet.moveBy(walkDir * WALK_SPEED * dt, 0);
       if (stateT >= stateDur) {
         // 姐姐形态翻牌转回正面，Q版直接回待机
@@ -1180,12 +1291,22 @@ function frame(now) {
       break;
     }
     case 'gohome': {
-      // 朝常驻位置走（斜线移动），走路颠簸
+      // 朝常驻位置飘回去（斜线移动）
       const dx = homeward.tx - homeward.px, dy = homeward.ty - homeward.py;
       const dist = Math.hypot(dx, dy);
       const step = 220 * dt;
-      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
-      rot = Math.sin(stateT * 9) * 2.5;
+      const dir = Math.sign(dx) || 1;
+      if (form === 'normal') {
+        // 飘移：悬浮慢起伏 + 影子灯笼跟随
+        const h = 15 + 8 * Math.sin(stateT * 4.2);
+        ty = -h;
+        rot = dir * 5 + 2.5 * Math.sin(stateT * 2.1);
+        showFloatFx();
+        updateFloatFx(h, dir, t);
+      } else {
+        ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+        rot = Math.sin(stateT * 9) * 2.5;
+      }
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
         if (form === 'normal') enter('gohomeout', 0.3);
@@ -1467,6 +1588,23 @@ function frame(now) {
       // 在覆盖层上兜风，窗口里先空着
       break;
     }
+    case 'mischiefform': {
+      // 小跳消失，跑去追鼠标
+      const k = Math.min(stateT / stateDur, 1);
+      ty = -50 * Math.sin(Math.PI * k);
+      const sc = 1 - 0.9 * k * k;
+      sx = sc; sy = sc;
+      if (k >= 1) {
+        sprite.style.visibility = 'hidden';
+        window.pet.mischiefStart();
+        enter('mischiefwait');
+      }
+      break;
+    }
+    case 'mischiefwait': {
+      // 在覆盖层上捣乱，窗口里先空着
+      break;
+    }
     case 'driveback': {
       // 下车：回弹出现
       const k = Math.min(stateT / stateDur, 1);
@@ -1529,5 +1667,5 @@ function easeInOut(k) {
 // 笔记本带话：气泡提示
 window.pet.onNotebookSay((text) => say(text, 1500));
 
-logEvent('系统', '小kiki 起床啦');
+logEvent('系统', '小Kira 起床啦');
 requestAnimationFrame(frame);

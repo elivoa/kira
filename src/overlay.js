@@ -319,3 +319,147 @@ function driveCar(homeX) {
 }
 
 window.pet.onDrive(({ x }) => driveCar(x));
+
+// ---------- 捣乱 ----------
+// 小本子直接盖住鼠标指针（哪里都点不穿），人物用绳子挂在鼠标下面按单摆物理甩动
+// 使劲晃鼠标把她甩掉地，然后归位
+const MISCHIEF_YELLS = ['啊', '疼', '你弄疼我了！', '干嘛！', '呜哇哇'];
+const ROPE_LEN = 104; // 绳长
+
+function mischief(startX, startY) {
+  const layer = el('g', {});
+  // 盖住指针的小本子（以鼠标为中心，放大版）
+  const bookG = el('g', {}, layer);
+  el('image', { href: '../assets/card.png', x: -60, y: -118, width: 120, height: 130 }, bookG);
+  // 绳子 + 挂在下面的人物
+  const rope = el('line', { stroke: '#6b5a3a', 'stroke-width': 2.5 }, layer);
+  const charG = el('g', {}, layer);
+  el('image', { href: '../assets/chibi.png', x: -52, y: 0, width: 104, height: 104 * 1125 / 1012 }, charG);
+
+  function textPop(str, x, y, size = 30) {
+    el('text', {
+      x, y, 'text-anchor': 'middle',
+      'font-family': '"PingFang SC", sans-serif', 'font-weight': 900, 'font-style': 'italic',
+      'font-size': size, fill: '#1a1a2e', stroke: '#fff', 'stroke-width': 7, 'paint-order': 'stroke',
+      class: 'fx-pop',
+    }, layer).textContent = str;
+  }
+
+  let mx = startX, my = startY;           // 鼠标（锚点）
+  let cx = startX, cy = startY + ROPE_LEN; // 人物位置（绳末端）
+  let pcx = cx, pcy = cy;                  // verlet 上一帧位置
+  let shaking = false;
+  let done = false;
+  const samples = [];
+  const t0 = performance.now();
+  let last = t0;
+
+  function onMove(e) {
+    mx = e.clientX; my = e.clientY;
+    samples.push({ x: mx, t: performance.now() });
+    if (samples.length > 60) samples.shift();
+  }
+  function onDown() {
+    if (done || shaking) return;
+    // 本子盖在指针上，点哪里都点在她本子上
+    textPop(MISCHIEF_YELLS[(Math.random() * MISCHIEF_YELLS.length) | 0], mx, my - 140);
+  }
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mousedown', onDown);
+  window.pet.ovIgnore(false); // 挂住期间：覆盖层全程捕获，指针处真的点不穿
+
+  // 晃掉检测：500ms 内横向大幅来回 ≥4 次换向
+  function isShaken() {
+    const now = performance.now();
+    const s = samples.filter((p) => now - p.t < 500);
+    if (s.length < 6) return false;
+    let flips = 0, travel = 0, prevSign = 0;
+    for (let i = 1; i < s.length; i++) {
+      const d = s[i].x - s[i - 1].x;
+      travel += Math.abs(d);
+      const sign = d > 4 ? 1 : d < -4 ? -1 : 0;
+      if (sign && prevSign && sign !== prevSign) flips++;
+      if (sign) prevSign = sign;
+    }
+    return flips >= 4 && travel > 900;
+  }
+
+  let fallVx = 0, fallVy = 0, fallX = 0, fallY = 0;
+
+  function finish() {
+    if (done) return;
+    done = true;
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mousedown', onDown);
+    window.pet.ovIgnore(true); // 恢复穿透
+    layer.style.transition = 'opacity .5s';
+    layer.style.opacity = 0;
+    setTimeout(() => layer.remove(), 550);
+    window.pet.mischiefDone();
+  }
+
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.033);
+    last = now;
+
+    if (!shaking) {
+      // verlet 单摆：重力积分 + 绳长约束（鼠标是移动锚点）
+      const vx = (cx - pcx) * 0.995, vy = (cy - pcy) * 0.995;
+      pcx = cx; pcy = cy;
+      cx += vx;
+      cy += vy + 2400 * dt * dt;
+      for (let i = 0; i < 2; i++) {
+        const dx = cx - mx, dy = cy - my;
+        const d = Math.hypot(dx, dy) || 1;
+        cx = mx + dx / d * ROPE_LEN;
+        cy = my + dy / d * ROPE_LEN;
+      }
+      // 本子压住指针，绳子从本子下沿垂到她头顶
+      const wob = 2.5 * Math.sin(now / 280);
+      bookG.setAttribute('transform', `translate(${mx + wob},${my}) rotate(${wob})`);
+      rope.setAttribute('x1', mx); rope.setAttribute('y1', my + 10);
+      rope.setAttribute('x2', cx); rope.setAttribute('y2', cy + 4);
+      // 她沿绳角摆动
+      const ang = Math.atan2(cx - mx, cy - my) * 180 / Math.PI;
+      charG.setAttribute('transform', `translate(${cx},${cy}) rotate(${ang * 0.7})`);
+
+      if (isShaken()) {
+        // 被甩出去了：沿鼠标横向速度抛飞，本子和绳子脱手
+        shaking = true;
+        const recent = samples.filter((p) => now - p.t < 200);
+        fallVx = recent.length > 1 ? Math.max(-700, Math.min(700, (recent[recent.length - 1].x - recent[0].x) * 8)) : 400;
+        fallVy = -260;
+        fallX = cx; fallY = cy;
+        bookG.style.transition = 'opacity .25s';
+        bookG.style.opacity = 0;
+        rope.style.opacity = 0;
+        textPop('呜哇——', cx, cy - 60, 34);
+        window.pet.ovIgnore(true);
+      } else if (now - t0 > 25000) {
+        // 捣乱够了自己回去
+        finish();
+        return;
+      }
+    } else {
+      // 抛飞落地：重力 + 翻滚
+      fallVy += 3000 * dt;
+      fallX += fallVx * dt;
+      fallY += fallVy * dt;
+      const ground = innerHeight - 80;
+      if (fallY >= ground) {
+        fallY = ground;
+        charG.setAttribute('transform', `translate(${fallX},${fallY - 40}) rotate(70)`); // 趴在地上
+        textPop('呜', fallX, ground - 100, 26);
+        setTimeout(finish, 700);
+        requestAnimationFrame(frame);
+        return;
+      }
+      charG.setAttribute('transform', `translate(${fallX},${fallY}) rotate(${(now / 100 % 6.28) * 57})`);
+      return requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+window.pet.onMischief(({ x, y }) => mischief(x, y));

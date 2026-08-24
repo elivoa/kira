@@ -32,5 +32,10 @@ contextBridge.exposeInMainWorld('pet', {
   notebookSay: (text) => ipcRenderer.send('notebook-say', text),
   onNotebookSay: (fn) => ipcRenderer.on('notebook-say', (_e, text) => fn(text)),
   findLedge: () => ipcRenderer.invoke('find-ledge'),
+  ovIgnore: (flag) => ipcRenderer.send('ov-ignore', flag),
+  mischiefStart: () => ipcRenderer.send('mischief-start'),
+  mischiefDone: () => ipcRenderer.send('mischief-done'),
+  onMischief: (fn) => ipcRenderer.on('fx-mischief', (_e, data) => fn(data)),
+  onMischiefEnd: (fn) => ipcRenderer.on('mischief-end', () => fn()),
   onMenuAction: (fn) => ipcRenderer.on('menu-action', (_e, id) => fn(id)),
 });
