@@ -1,0 +1,17 @@
+{
+  "name": "summon-pet",
+  "version": "0.1.0",
+  "description": "桌面宠物",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "cutout": "node tools/cutout.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "electron": "^43.4.1"
+  }
+}

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+  }
+  #ov { position: absolute; inset: 0; }
+  /* 啪叽拟声词 */
+  .fx-pop {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fxpop .5s ease-out forwards;
+  }
+  @keyframes fxpop {
+    0%   { opacity: 1; transform: scale(.3) rotate(-8deg); }
+    55%  { opacity: 1; transform: scale(1.15) rotate(3deg); }
+    100% { opacity: 0; transform: scale(1.35) rotate(0deg); }
+  }
+</style>
+</head>
+<body>
+  <svg id="ov"></svg>
+  <script src="overlay.js"></script>
+</body>
+</html>

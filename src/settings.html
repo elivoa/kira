@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>桌宠设置</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 18px 20px;
+    font: 14px/1.6 "PingFang SC", sans-serif;
+    color: #33304f;
+    background: #f6f5fb;
+    user-select: none;
+  }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .tip { font-size: 12px; color: #8a86a8; margin-bottom: 14px; }
+  .section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(60, 50, 120, 0.06);
+  }
+  .section-title { font-weight: 700; margin-bottom: 6px; }
+  .subgroup {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 8px 0 2px;
+    padding: 4px 0;
+    border-top: 1px dashed #e4e1f0;
+    font-weight: 600;
+    color: #5b5680;
+  }
+  .subgroup .warn { color: #c05a7a; font-size: 12px; font-weight: 400; margin-left: 6px; }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 0 5px 12px;
+  }
+  /* 开关 */
+  .sw { position: relative; width: 36px; height: 20px; flex: none; cursor: pointer; }
+  .sw input { display: none; }
+  .sw i {
+    position: absolute; inset: 0;
+    background: #d5d2e4; border-radius: 10px;
+    transition: background .15s;
+  }
+  .sw i::after {
+    content: '';
+    position: absolute; left: 2px; top: 2px;
+    width: 16px; height: 16px;
+    background: #fff; border-radius: 50%;
+    transition: transform .15s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  }
+  .sw input:checked + i { background: #7d6fd0; }
+  .sw input:checked + i::after { transform: translateX(16px); }
+</style>
+</head>
+<body>
+  <h1>桌宠设置</h1>
+  <div class="tip">开关只控制待机时的自动播放，右键菜单始终可以手动触发。</div>
+  <div id="list"></div>
+  <script src="actions.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>
