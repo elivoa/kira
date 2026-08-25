@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('pet', {
   openNotebook: () => ipcRenderer.send('open-notebook'),
   notebookSay: (text) => ipcRenderer.send('notebook-say', text),
   onNotebookSay: (fn) => ipcRenderer.on('notebook-say', (_e, text) => fn(text)),
+  onNotebookTab: (fn) => ipcRenderer.on('notebook-tab', (_e, tab) => fn(tab)),
   findLedge: () => ipcRenderer.invoke('find-ledge'),
   ovIgnore: (flag) => ipcRenderer.send('ov-ignore', flag),
   mischiefStart: () => ipcRenderer.send('mischief-start'),
@@ -41,7 +42,21 @@ contextBridge.exposeInMainWorld('pet', {
   nbResizeStart: () => ipcRenderer.send('nb-resize-start'),
   nbResizeMove: () => ipcRenderer.send('nb-resize-move'),
   nbResizeEnd: () => ipcRenderer.send('nb-resize-end'),
-  chatSend: (text) => ipcRenderer.invoke('chat-send', text),
+  chatSend: (text, id) => ipcRenderer.invoke('chat-send', text, id),
+  // 流式 token 订阅，返回取消订阅函数
+  onChatToken: (fn) => {
+    const h = (_e, data) => fn(data);
+    ipcRenderer.on('chat-token', h);
+    return () => ipcRenderer.removeListener('chat-token', h);
+  },
   chatHistory: () => ipcRenderer.invoke('chat-history'),
+  getHistoryDays: () => ipcRenderer.invoke('history-days'),
+  getHistoryDay: (key) => ipcRenderer.invoke('history-day', key),
+  getChatConfig: () => ipcRenderer.invoke('get-chat-config'),
+  setChatConfig: (patch) => ipcRenderer.send('set-chat-config', patch),
   onMenuAction: (fn) => ipcRenderer.on('menu-action', (_e, id) => fn(id)),
+  // 星盘右键菜单（overlay 侧）
+  onMenuOpen: (fn) => ipcRenderer.on('menu-open', (_e, data) => fn(data)),
+  menuSelect: (id) => ipcRenderer.send('menu-select', id),
+  menuClosed: () => ipcRenderer.send('menu-closed'),
 });

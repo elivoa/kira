@@ -11,6 +11,94 @@
     background: transparent;
   }
   #ov { position: absolute; inset: 0; }
+  /* ---------- 星盘右键菜单 ---------- */
+  #menuLayer { position: absolute; inset: 0; pointer-events: none; }
+  .rm-root { position: absolute; inset: 0; }
+  .rm-backdrop { position: absolute; inset: 0; pointer-events: auto; }
+  .rm-ring {
+    position: absolute;
+    border: 1.5px dashed rgba(125, 111, 208, 0.45);
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+  .rm-ring.r2 { border-color: rgba(185, 168, 255, 0.35); }
+  /* 扇区高亮光楔：随聚焦项指向旋转，淡淡一层 */
+  .rm-sector {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  @keyframes rmSpin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+  @keyframes rmSpinR { to { transform: translate(-50%, -50%) rotate(-360deg); } }
+  .rm-ring.r1 { animation: rmSpin 26s linear infinite; }
+  .rm-ring.r2 { animation: rmSpinR 34s linear infinite; }
+  .rm-item {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    pointer-events: auto;
+    transition: transform 0.3s cubic-bezier(0.18, 1.35, 0.36, 1), opacity 0.22s ease;
+  }
+  .rm-btn {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 1.5px solid rgba(230, 224, 255, 0.85);
+    background: radial-gradient(circle at 32% 28%, #9d92e2, #7d6fd0 62%, #6b5dc4);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-family: "PingFang SC", sans-serif;
+    box-shadow: 0 4px 16px rgba(80, 66, 170, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.35);
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+  }
+  .rm-btn:hover {
+    transform: scale(1.16);
+    box-shadow: 0 6px 22px rgba(109, 93, 196, 0.65), 0 0 14px rgba(185, 168, 255, 0.8),
+      inset 0 1px 2px rgba(255, 255, 255, 0.5);
+  }
+  /* 扇区聚焦的淡淡高亮（与 hover 同放大倍率，光圈更柔） */
+  .rm-item.focus .rm-btn {
+    transform: scale(1.16);
+    box-shadow: 0 6px 22px rgba(109, 93, 196, 0.6), 0 0 18px rgba(185, 168, 255, 0.9),
+      inset 0 1px 2px rgba(255, 255, 255, 0.5);
+  }
+  @keyframes rmBob { from { transform: translateY(-1.5px); } to { transform: translateY(2.5px); } }
+  .rm-icon { font-size: 20px; line-height: 1; animation: rmBob 2.2s ease-in-out infinite alternate; }
+  .rm-label { font-size: 11px; margin-top: 3px; text-shadow: 0 1px 2px rgba(60, 48, 140, 0.5); }
+  .rm-hub {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(230, 224, 255, 0.9);
+    background: radial-gradient(circle at 35% 30%, #b9a8ff, #7d6fd0 70%);
+    color: #fff;
+    font-size: 19px;
+    cursor: pointer;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 18px rgba(185, 168, 255, 0.7), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+    animation: rmPulse 2s ease-in-out infinite alternate;
+    transition: transform 0.16s ease;
+  }
+  .rm-hub:hover { transform: translate(-50%, -50%) scale(1.12); }
+  @keyframes rmPulse {
+    from { box-shadow: 0 0 10px rgba(185, 168, 255, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4); }
+    to { box-shadow: 0 0 22px rgba(185, 168, 255, 0.9), inset 0 1px 2px rgba(255, 255, 255, 0.4); }
+  }
   /* 啪叽拟声词 */
   .fx-pop {
     transform-box: fill-box;
@@ -26,6 +114,7 @@
 </head>
 <body>
   <svg id="ov"></svg>
+  <div id="menuLayer"></div>
   <script src="overlay.js"></script>
 </body>
 </html>

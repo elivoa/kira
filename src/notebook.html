@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Kira 的小本子</title>
+<title>Kira Note</title>
 <style>
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -138,6 +138,28 @@
     white-space: pre-wrap;
   }
   .msg.me .bubble { background: #7d6fd0; color: #fff; }
+  /* markdown 渲染气泡（Kira 的回答） */
+  .bubble.md { white-space: normal; line-height: 1.6; }
+  .bubble.md p { margin: 0 0 8px; }
+  .bubble.md p:last-child, .bubble.md .md-block:last-child > :last-child { margin-bottom: 0; }
+  .bubble.md h1, .bubble.md h2, .bubble.md h3, .bubble.md h4 { margin: 6px 0; font-size: 15px; }
+  .bubble.md ul, .bubble.md ol { margin: 0 0 8px; padding-left: 20px; }
+  .bubble.md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid #d9d5ec; color: #6a6490; }
+  .bubble.md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: #f3f1fb; border-radius: 4px; padding: 1px 4px; }
+  .bubble.md pre { background: #f3f1fb; border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
+  .bubble.md pre code { background: none; padding: 0; }
+  .bubble.md table { border-collapse: collapse; margin: 0 0 8px; font-size: 12px; }
+  .bubble.md th, .bubble.md td { border: 1px solid #d9d5ec; padding: 3px 8px; }
+  .bubble.md hr { border: none; border-top: 1px dashed #d9d5ec; margin: 8px 0; }
+  .bubble.md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+  /* 「正在输入…」等待动画 */
+  .bubble.typing::after { content: ''; animation: typingDots 1.2s steps(1) infinite; }
+  @keyframes typingDots {
+    0% { content: ''; }
+    25% { content: '  ·'; }
+    50% { content: '  · ·'; }
+    75% { content: '  · · ·'; }
+  }
   .msg.Kira .bubble.cmd {
     font-family: "SF Mono", Menlo, monospace;
     font-size: 12px;
@@ -209,6 +231,142 @@
   .type-交互 { background: #e06a8a; }
   .type-系统 { background: #9a93b8; }
   .empty { color: #a49ec4; text-align: center; margin-top: 60px; }
+  /* 历史页：日期 banner */
+  .date-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0 2px;
+  }
+  .date-banner::before, .date-banner::after { content: ''; flex: 1; border-top: 1px dashed #d9d5ec; }
+  .date-banner span {
+    font-size: 11px;
+    color: #8f88b8;
+    background: #f3f1fb;
+    padding: 2px 12px;
+    border-radius: 10px;
+    flex: none;
+  }
+  /* 历史页右侧 Time Machine 式导航条 */
+  #page-history { position: relative; }
+  #historyMsgs { padding-right: 64px; }
+  .tm-strip {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 5;
+  }
+  .tm-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    cursor: pointer;
+  }
+  .tm-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #c9c2ea;
+    box-shadow: 0 0 4px rgba(125, 111, 208, 0.4);
+    transition: all 0.18s;
+    flex: none;
+  }
+  .tm-item.active .tm-dot { background: #7d6fd0; transform: scale(1.5); box-shadow: 0 0 8px rgba(125, 111, 208, 0.8); }
+  .tm-item:hover .tm-dot { transform: scale(1.5); background: #7d6fd0; }
+  .tm-date { font-size: 10px; color: #a49ec4; margin-right: 5px; font-variant-numeric: tabular-nums; }
+  /* hover 才展开的信息卡 */
+  .tm-card {
+    position: absolute;
+    right: 22px;
+    top: 50%;
+    transform: translateY(-50%) scale(0.9);
+    width: 180px;
+    background: #fff;
+    border: 1px solid #e3defa;
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(60, 50, 120, 0.18);
+    padding: 8px 10px;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.15s;
+  }
+  .tm-item:hover .tm-card { opacity: 1; transform: translateY(-50%) scale(1); }
+  .tm-card .d { font-weight: 600; font-size: 12px; color: #33304f; }
+  .tm-card .c { font-size: 11px; color: #a49ec4; margin-top: 2px; }
+  .tm-card .p { font-size: 11px; color: #6a6490; margin-top: 4px; line-height: 1.4; word-break: break-all; }
+  /* 配置页 */
+  .cfg { flex: 1; overflow-y: auto; padding: 14px 16px 14px 36px; display: flex; flex-direction: column; gap: 10px; }
+  .cfg-sec {
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 1px 4px rgba(60, 50, 120, 0.1);
+  }
+  .cfg-title { font-weight: 700; }
+  .cfg-tip { font-size: 12px; color: #8a86a8; }
+  .cfg input {
+    border: 1px solid #d9d5ec;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font: 13px "PingFang SC", sans-serif;
+    outline: none;
+    background: #fff;
+  }
+  .cfg input:focus { border-color: #7d6fd0; }
+  .cfg input[type="range"] { border: none; padding: 0; }
+  .cfg-btns { display: flex; gap: 8px; }
+  .cfg-btn {
+    border: none;
+    background: #7d6fd0;
+    color: #fff;
+    font: 13px "PingFang SC", sans-serif;
+    padding: 6px 18px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  .cfg-btn:hover { background: #6b5dc4; }
+  .cfg-btn.ghost { background: #e8e6f2; color: #5b5680; }
+  .cfg-btn.ghost:hover { background: #dcd9ec; }
+  .cfg-status { font-size: 12px; color: #8a86a8; }
+  .cfg-status.ok { color: #4f9d69; }
+  /* 配置页动作开关（沿用原设置页分组） */
+  .cfg-subgroup {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 8px 0 2px;
+    padding: 4px 0;
+    border-top: 1px dashed #e4e1f0;
+    font-weight: 600;
+    color: #5b5680;
+  }
+  .cfg-subgroup .warn { color: #c05a7a; font-size: 12px; font-weight: 400; margin-left: 6px; }
+  .cfg-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0 5px 12px; }
+  .sw { position: relative; width: 36px; height: 20px; flex: none; cursor: pointer; }
+  .sw input { display: none; }
+  .sw i {
+    position: absolute; inset: 0;
+    background: #d5d2e4; border-radius: 10px;
+    transition: background .15s;
+  }
+  .sw i::after {
+    content: '';
+    position: absolute; left: 2px; top: 2px;
+    width: 16px; height: 16px;
+    background: #fff; border-radius: 50%;
+    transition: transform .15s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  }
+  .sw input:checked + i { background: #7d6fd0; }
+  .sw input:checked + i::after { transform: translateX(16px); }
   /* 右下角拉伸手柄 */
   #resizeHandle {
     position: absolute;
@@ -225,27 +383,49 @@
         rgba(125, 111, 208, 0.5) 80%, transparent 80%);
   }
 </style>
+  <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
 </head>
 <body>
   <div class="frame">
     <div class="titlebar">
       <button class="tl-btn tl-close" id="tlClose" title="关闭"></button>
       <button class="tl-btn tl-min" id="tlMin" title="最小化"></button>
-      <span style="margin-left:6px">Kira 的小本子</span>
+      <span style="margin-left:6px">Kira Note</span>
       <span class="spacer"></span>
     </div>
     <div class="bodywrap">
       <div class="spine">
         <button class="tab active" data-tab="chat">实时聊天</button>
+        <button class="tab" data-tab="history">历史</button>
         <button class="tab" data-tab="mr">MR Link</button>
         <button class="tab" data-tab="log">日志</button>
+        <button class="tab" data-tab="config">配置</button>
       </div>
       <div class="main">
         <div id="page-chat" class="page"><div id="chatMsgs" class="msgs"></div></div>
+        <div id="page-history" class="page hidden">
+          <div id="historyMsgs" class="msgs"></div>
+          <div id="tmStrip" class="tm-strip"></div>
+        </div>
         <div id="page-mr" class="page hidden"><div id="mrMsgs" class="msgs"></div></div>
         <div id="page-log" class="page hidden">
           <div class="logbar"><button id="clearLog">清空日志</button></div>
           <div id="logList" class="msgs"></div>
+        </div>
+        <div id="page-config" class="page hidden">
+          <div class="cfg">
+            <div class="cfg-sec">
+              <div class="cfg-title">Kimi API Key</div>
+              <div class="cfg-tip">配上 key 之后 Kira 才会用 Kimi 大模型回答。所有配置都存本机 ~/.config/kira/config.json，不进仓库、不上传别处。</div>
+              <input id="kimiKey" type="password" placeholder="sk-…" autocomplete="off">
+              <div class="cfg-btns">
+                <button id="saveKey" class="cfg-btn">保存</button>
+                <button id="clearKey" class="cfg-btn ghost">清除</button>
+              </div>
+              <div id="keyStatus" class="cfg-status"></div>
+            </div>
+            <div id="cfgActions" style="display:contents"></div>
+          </div>
         </div>
         <div class="inputrow">
           <input id="input" placeholder="说点什么，或拖入链接…" autofocus>
@@ -255,7 +435,12 @@
     </div>
   </div>
   <div id="resizeHandle"></div>
+  <script src="../node_modules/markdown-it/dist/browser/markdown-it.umd.min.js"></script>
+  <script src="../node_modules/katex/dist/katex.min.js"></script>
+  <script src="../node_modules/katex/dist/contrib/auto-render.min.js"></script>
+  <script src="markdown-stream.js"></script>
   <script src="phrases.js"></script>
+  <script src="actions.js"></script>
   <script src="notebook.js"></script>
 </body>
 </html>
