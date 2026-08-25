@@ -230,16 +230,24 @@ function flySword(homeX, homeY) {
 window.pet.onSword(({ x, y }) => flySword(x, y));
 
 // ---------- 兜风 ----------
-// 保时捷敞篷（真车侧面图）：大头从座舱里探出来，高出车顶一截；
-// 头在车身图层后面——车窗玻璃半透明，她的脸从玻璃里透出来，门框不透明部分自然压在她前面
+// 保时捷敞篷（真车侧面图）三层精细合成：
+// 底层整车 → 中层大头（在座椅前面，脸不被座椅挡，头顶超出车顶）
+// 前层用同一车身抠出车窗洞口：前挡风边框、A柱、前车盖都压在她边缘，其余部分在她身后
 function makeCar() {
   const g = el('g', {});
   const CAR_W = 440, CAR_H = CAR_W * 974 / 2054;
-  const HEAD_W = 130, HEAD_H = HEAD_W * 210 / 240;
-  // 大头先画（在车身后面）：抬高到超出车顶，下沿藏进车门里
-  el('image', { href: '../assets/head.png', x: -22, y: -224, width: HEAD_W, height: HEAD_H }, g);
-  // 完整车身压在前面（车头朝左；组原点在车轮着地点）
+  const HEAD_W = 115, HEAD_H = HEAD_W * 222 / 240;
+  // 底层：完整车身（车头朝左；组原点在车轮着地点）
   el('image', { href: '../assets/car.png', x: -CAR_W / 2, y: -CAR_H, width: CAR_W, height: CAR_H }, g);
+  // 中层：大头（抬高超出车顶，下巴以下被前车盖盖住）
+  el('image', { href: '../assets/head.png', x: -11, y: -222, width: HEAD_W, height: HEAD_H }, g);
+  // 前层：同一车身抠出车窗洞口：上沿挡风边框、下沿前车盖、左右 A/B 柱都压她边缘
+  const cp = el('clipPath', { id: 'carFrontClip', clipPathUnits: 'userSpaceOnUse' }, g);
+  el('path', {
+    d: `M${-CAR_W / 2},${-CAR_H} h${CAR_W} v${CAR_H} h${-CAR_W} Z M8,-192 L85,-192 L87,-136 L2,-136 Z`,
+    'clip-rule': 'evenodd',
+  }, cp);
+  el('image', { href: '../assets/car.png', x: -CAR_W / 2, y: -CAR_H, width: CAR_W, height: CAR_H, 'clip-path': 'url(#carFrontClip)' }, g);
   return g;
 }
 
@@ -321,19 +329,43 @@ window.pet.onDrive(({ x }) => driveCar(x));
 // 小本子直接盖住鼠标指针（哪里都点不穿），人物用绳子挂在鼠标下面按单摆物理甩动
 // 使劲晃鼠标把她甩掉地，然后归位
 const MISCHIEF_YELLS = ['啊', '疼', '你弄疼我了！', '干嘛！', '呜哇哇'];
+const LAND_YELLS_1 = ['呜', '好痛…', '呜哇哇', '哎哟…'];
+const LAND_YELLS_2 = ['你给我等着！', '哼！', '下次还敢（嘴硬）', '呜呜，欺负人…'];
 const ROPE_LEN = 104; // 绳长
-const ROPE_N = 6;     // 软绳链条段数
+const ROPE_N = 10;    // 软绳链条段数（多一点才圆滑）
+
+// Catmull-Rom 转贝塞尔，把链条画成平滑曲线（不然一节节的很僵硬）
+function smoothPath(pts) {
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+    const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
 
 function mischief(startX, startY) {
   const layer = el('g', {});
-  // 盖住指针的笔记本（紫壳横线本，以鼠标为中心）
+  // 精细笔记本：B5 竖版（1:1.42）紫壳封面 + 螺旋装订 + 横线内页 + 红丝带（以鼠标为中心）
   const bookG = el('g', {}, layer);
-  el('rect', { x: -64, y: -122, width: 128, height: 110, rx: 7, fill: '#7d6fd0', stroke: '#5a4db0', 'stroke-width': 2 }, bookG);
-  el('rect', { x: -55, y: -113, width: 110, height: 92, rx: 3, fill: '#fbfaf5', stroke: '#d9d5ec', 'stroke-width': 1.5 }, bookG);
-  el('line', { x1: -40, y1: -113, x2: -40, y2: -21, stroke: 'rgba(224,106,138,.5)', 'stroke-width': 2 }, bookG);
-  for (let i = 0; i < 5; i++) {
-    el('line', { x1: -55, y1: -96 + i * 17, x2: 55, y2: -96 + i * 17, stroke: '#dfe4f0', 'stroke-width': 1.5 }, bookG);
+  const nbDefs = el('defs', {}, bookG);
+  const nbCover = el('linearGradient', { id: 'nbCover', x1: 0, y1: 0, x2: 0, y2: 1 }, nbDefs);
+  el('stop', { offset: '0%', 'stop-color': '#8f83d8' }, nbCover);
+  el('stop', { offset: '100%', 'stop-color': '#6b5dc4' }, nbCover);
+  el('rect', { x: -46, y: -66, width: 96, height: 136, rx: 8, fill: 'rgba(20,20,60,.28)' }, bookG); // 投影
+  el('rect', { x: -50, y: -72, width: 96, height: 136, rx: 8, fill: 'url(#nbCover)', stroke: '#5a4db0', 'stroke-width': 1.5 }, bookG); // 封面
+  el('rect', { x: 42, y: -64, width: 5, height: 120, rx: 2, fill: '#f0edf8', stroke: '#d9d5ec', 'stroke-width': 1 }, bookG); // 书页侧边
+  el('rect', { x: -41, y: -63, width: 80, height: 120, rx: 3, fill: '#fbfaf5', stroke: '#d9d5ec', 'stroke-width': 1.5 }, bookG); // 内页
+  el('line', { x1: -28, y1: -63, x2: -28, y2: 57, stroke: 'rgba(224,106,138,.5)', 'stroke-width': 2 }, bookG); // 红边线
+  for (let i = 0; i < 7; i++) { // 横线
+    el('line', { x1: -41, y1: -48 + i * 15, x2: 39, y2: -48 + i * 15, stroke: '#dfe4f0', 'stroke-width': 1.5 }, bookG);
   }
+  for (let i = 0; i < 7; i++) { // 螺旋装订环
+    el('circle', { cx: -46, cy: -56 + i * 16, r: 4.2, fill: 'none', stroke: '#c8c4dc', 'stroke-width': 2.2 }, bookG);
+  }
+  el('path', { d: 'M20,64 L28,64 L28,84 L24,78 L20,84 Z', fill: '#e04536', stroke: '#a02618', 'stroke-width': 1 }, bookG); // 红丝带
   // 软绳（verlet 链条）+ 挂在下面的人物
   const rope = el('path', { fill: 'none', stroke: '#6b5a3a', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, layer);
   const charG = el('g', {}, layer);
@@ -348,7 +380,8 @@ function mischief(startX, startY) {
     }, layer).textContent = str;
   }
 
-  let mx = startX, my = startY; // 鼠标（锚点）
+  let mx = startX, my = startY;   // 鼠标原始位置
+  let ax = startX, ay = startY;   // 平滑后的锚点（迟缓跟随，防止一抖就甩飞）
   // 软绳链条：pts[0] 是锚点，pts[ROPE_N] 是人物
   const SEG = ROPE_LEN / ROPE_N;
   const pts = Array.from({ length: ROPE_N + 1 }, (_, i) => ({
@@ -391,6 +424,11 @@ function mischief(startX, startY) {
   }
 
   let fallVx = 0, fallVy = 0, fallX = 0, fallY = 0;
+  let landed = false;
+  let slideT = 0; // 落地滑行计时
+  let fallAng = 0, fallAngV = 0; // 抛飞时的姿态角与角速度（绕头顶绳结点）
+  let charAng = 0; // 悬挂时的姿态角（带角阻尼，缓慢趋近绳角）
+  let charX = startX, charY = startY + ROPE_LEN; // 位置（带惯性阻尼，不跟绳子乱跳）
 
   function finish() {
     if (done) return;
@@ -404,39 +442,56 @@ function mischief(startX, startY) {
     window.pet.mischiefDone();
   }
 
+  // 兜底：帧循环任何异常都自动收尾，绝不让覆盖层卡在捕获态
   function frame(now) {
+    try { frameInner(now); } catch (e) { finish(); }
+  }
+
+  function frameInner(now) {
     const dt = Math.min((now - last) / 1000, 0.033);
     last = now;
 
     if (!shaking) {
-      // 软绳 verlet：除锚点外全部重力积分，再逐段做长度约束
+      // 锚点迟缓跟随鼠标：鼠标小抖不会直接拽飞她
+      ax += (mx - ax) * Math.min(dt * 8, 1);
+      ay += (my - ay) * Math.min(dt * 8, 1);
+      // 软绳 verlet：除锚点外全部重力积分（高阻尼，动作更缓），再逐段做长度约束
+      // 重坠物模型：小人有重量有惯性，锚点传下来的约束力对末端大幅衰减；
+      // 但重力保持全额（自然下垂），且绳长超 1.5 倍时强制拉满（绳子永不断开）
       for (let i = 1; i <= ROPE_N; i++) {
         const p = pts[i];
-        const vx = (p.x - p.px) * 0.99, vy = (p.y - p.py) * 0.99;
+        const vx = (p.x - p.px) * 0.92, vy = (p.y - p.py) * 0.92;
         p.px = p.x; p.py = p.y;
         p.x += vx;
-        p.y += vy + 2400 * dt * dt;
+        p.y += vy + 1600 * dt * dt;
       }
       for (let iter = 0; iter < 3; iter++) {
-        pts[0].x = mx; pts[0].y = my - 6; // 锚点钉在笔记本下沿
+        pts[0].x = ax; pts[0].y = ay + 66; // 锚点钉在笔记本下沿（B5 竖版底边）
         for (let i = 0; i < ROPE_N; i++) {
           const a = pts[i], b = pts[i + 1];
           const dx = b.x - a.x, dy = b.y - a.y;
           const d = Math.hypot(dx, dy) || 1;
-          const fix = (d - SEG) / d;
+          // 末端：约束力衰减到 0.15，但拉伸超过 1.5 倍绳长时不再衰减
+          const fix = (d - SEG) / d * (i + 1 === ROPE_N && d <= SEG * 1.5 ? 0.15 : 1);
           b.x -= dx * fix;
           b.y -= dy * fix;
         }
       }
-      const cx = pts[ROPE_N].x, cy = pts[ROPE_N].y;
+      const rx = pts[ROPE_N].x, ry = pts[ROPE_N].y;
+      // 位置惯性阻尼：绳末端猛动，她也只依惯性缓跟
+      charX += (rx - charX) * Math.min(dt * 6, 1);
+      charY += (ry - charY) * Math.min(dt * 6, 1);
       // 笔记本压住指针（轻微晃动）
       const wob = 2.5 * Math.sin(now / 280);
-      bookG.setAttribute('transform', `translate(${mx + wob},${my}) rotate(${wob})`);
-      // 软绳画成穿过链条的折线
-      rope.setAttribute('d', 'M' + pts.map((p) => `${p.x},${p.y}`).join(' L'));
-      // 她沿最末段绳角倾斜
-      const ang = Math.atan2(cx - pts[ROPE_N - 1].x, cy - pts[ROPE_N - 1].y) * 180 / Math.PI;
-      charG.setAttribute('transform', `translate(${cx},${cy}) rotate(${ang * 0.7})`);
+      bookG.setAttribute('transform', `translate(${ax + wob},${ay}) rotate(${wob})`);
+      // 软绳画成平滑曲线（末端画到阻尼后的小人位置，绳子不断）
+      const drawPts = pts.slice();
+      drawPts[ROPE_N] = { x: charX, y: charY };
+      rope.setAttribute('d', smoothPath(drawPts));
+      // 她沿最末段绳角倾斜（角阻尼：缓慢趋近，不跟绳子急转）
+      const targetAng = Math.atan2(charX - pts[ROPE_N - 1].x, charY - pts[ROPE_N - 1].y) * 180 / Math.PI * 0.7;
+      charAng += (targetAng - charAng) * Math.min(dt * 8, 1);
+      charG.setAttribute('transform', `translate(${charX},${charY}) rotate(${charAng})`);
 
       if (isShaken()) {
         // 被甩出去了：沿鼠标横向速度抛飞，笔记本和绳子脱手
@@ -444,11 +499,11 @@ function mischief(startX, startY) {
         const recent = samples.filter((p) => now - p.t < 200);
         fallVx = recent.length > 1 ? Math.max(-700, Math.min(700, (recent[recent.length - 1].x - recent[0].x) * 8)) : 400;
         fallVy = -260;
-        fallX = cx; fallY = cy;
+        fallX = charX; fallY = charY;
         bookG.style.transition = 'opacity .25s';
         bookG.style.opacity = 0;
         rope.style.opacity = 0;
-        textPop('呜哇——', cx, cy - 60, 34);
+        textPop('呜哇——', charX, charY - 60, 34);
         window.pet.ovIgnore(true);
       } else if (now - t0 > 25000) {
         // 捣乱够了自己回去
@@ -456,16 +511,28 @@ function mischief(startX, startY) {
         return;
       }
     } else {
-      // 抛飞落地：重力 + 翻滚
+      // 抛飞落地：重力 + 翻滚（第一版手感）
       fallVy += 3000 * dt;
       fallX += fallVx * dt;
       fallY += fallVy * dt;
       const ground = innerHeight - 80;
       if (fallY >= ground) {
-        fallY = ground;
-        charG.setAttribute('transform', `translate(${fallX},${fallY - 40}) rotate(70)`); // 趴在地上
-        textPop('呜', fallX, ground - 100, 26);
-        setTimeout(finish, 700);
+        // 落地后趴着出溜一段：摩擦减速，滑停时嘴硬一句再走
+        if (!landed) {
+          landed = true;
+          fallY = ground;
+          textPop(LAND_YELLS_1[(Math.random() * LAND_YELLS_1.length) | 0], fallX, ground - 100, 26);
+        }
+        fallVx *= Math.max(0, 1 - 4 * dt); // 地面摩擦
+        if (Math.abs(fallVx) < 20) fallVx = 0;
+        fallX = Math.min(innerWidth - 60, Math.max(60, fallX + fallVx * dt));
+        charG.setAttribute('transform', `translate(${fallX},${fallY - 40}) rotate(70)`);
+        slideT += dt;
+        if (slideT > 0.9) {
+          textPop(LAND_YELLS_2[(Math.random() * LAND_YELLS_2.length) | 0], fallX, ground - 110, 24);
+          finish();
+          return;
+        }
         requestAnimationFrame(frame);
         return;
       }
@@ -478,3 +545,224 @@ function mischief(startX, startY) {
 }
 
 window.pet.onMischief(({ x, y }) => mischief(x, y));
+
+// ---------- 星盘右键菜单 ----------
+// 以右键点击时的鼠标位置为圆心展开圆形菜单（锚定屏幕坐标，人物走开菜单不动）。
+// 一级为分类 + 小本子/设置直选项，「取消」固定在正下方；中心枢纽顶层 ✦ 关闭、子层 ↩ 返回。
+// 鼠标进入某项的扇区即聚焦并淡淡高亮（光楔 + 按钮发光），离得足够远才取消高亮。
+const menuLayer = document.getElementById('menuLayer');
+
+const MENU_TREE = [
+  { id: 'act', icon: '🐾', label: '动作', children: [
+    { id: 'walk', icon: '🐾', label: '走一走' },
+    { id: 'hop', icon: '🐇', label: '跳一下' },
+    { id: 'spin', icon: '🌀', label: '转个圈' },
+    { id: 'sway', icon: '💗', label: '撒个娇' },
+    { id: 'leave', icon: '👋', label: '走了走了' },
+  ] },
+  { id: 'form', icon: '✨', label: '变身', children: [
+    { id: 'morph', icon: '🎭', label: '变个身' },
+    { id: 'form-normal', icon: '👩', label: '姐姐形态' },
+    { id: 'form-chibi', icon: '🐣', label: 'Q版形态' },
+  ] },
+  { id: 'play', icon: '🎈', label: '玩耍', children: [
+    { id: 'goledge', icon: '🪟', label: '去窗台玩' },
+    { id: 'dash', icon: '💨', label: '暴走模式' },
+    { id: 'fly', icon: '🕊️', label: '御剑飞行' },
+    { id: 'sword', icon: '⚔️', label: '化身成剑' },
+    { id: 'drive', icon: '🚗', label: '去兜风' },
+    { id: 'mischief', icon: '😈', label: '捣乱' },
+    { id: 'poop', icon: '💩', label: '你讨厌！' },
+    { id: 'desk', icon: '🪑', label: '来张桌子' },
+  ] },
+  { id: 'sys', icon: '🃏', label: '法宝', children: [
+    { id: 'seal', icon: '🃏', label: '收进法宝' },
+    { id: 'stats', icon: '📊', label: '看看状态' },
+    { id: 'quit', icon: '🚪', label: '退出' },
+  ] },
+  { id: 'notebook', icon: '📖', label: '小本子' },
+  { id: 'settings', icon: '⚙️', label: '设置' },
+  { id: '_close', icon: '✕', label: '取消' },
+];
+
+let menuState = null; // { cx, cy, root, hub, ring1, ring2, sector, sectors, sectorHalf, focusSel, farR, level }
+let menuIdleTimer = null;
+
+// 10s 没人碰菜单就自动退出；悬停/点击任何菜单项都会重置计时
+function armMenuIdle() {
+  clearTimeout(menuIdleTimer);
+  menuIdleTimer = setTimeout(() => closeMenu(), 10000);
+}
+
+// 关闭菜单：所有项缩回圆心后移除；notify 时通知主进程恢复覆盖层穿透
+function closeMenu(notify = true) {
+  if (!menuState) return;
+  clearTimeout(menuIdleTimer);
+  menuIdleTimer = null;
+  const { root } = menuState;
+  menuState = null;
+  root.querySelectorAll('.rm-item').forEach((it) => {
+    it.style.transitionDelay = '0ms';
+    it.style.opacity = '0';
+    it.style.transform = `translate(${-parseFloat(it.dataset.dx)}px, ${-parseFloat(it.dataset.dy)}px) scale(0)`;
+  });
+  root.querySelectorAll('.rm-hub, .rm-ring, .rm-backdrop, .rm-sector').forEach((e2) => {
+    e2.style.transition = 'opacity .22s';
+    e2.style.opacity = '0';
+  });
+  setTimeout(() => root.remove(), 260);
+  if (notify) window.pet.menuClosed();
+}
+
+function openMenu(x, y) {
+  closeMenu(false); // 已有菜单先静默关掉，由本次重新锚定
+  const M = 185; // 最大外半径 + 余量，防贴边
+  const cx = Math.min(Math.max(x, M), innerWidth - M);
+  const cy = Math.min(Math.max(y, M), innerHeight - M);
+  const root = document.createElement('div');
+  root.className = 'rm-root';
+  menuLayer.appendChild(root);
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'rm-backdrop';
+  backdrop.addEventListener('mousedown', () => closeMenu());
+  // 菜单展开时在空白处再点右键：换位置重新展开
+  backdrop.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openMenu(e.clientX, e.clientY);
+  });
+  root.appendChild(backdrop);
+
+  // 装饰双环（反向慢旋），尺寸随当前环半径调整
+  const ring1 = document.createElement('div');
+  const ring2 = document.createElement('div');
+  ring1.className = 'rm-ring r1';
+  ring2.className = 'rm-ring r2';
+  for (const r of [ring1, ring2]) {
+    r.style.left = `${cx}px`;
+    r.style.top = `${cy}px`;
+    root.appendChild(r);
+  }
+
+  const hub = document.createElement('button');
+  hub.className = 'rm-hub';
+  hub.style.left = `${cx}px`;
+  hub.style.top = `${cy}px`;
+  root.appendChild(hub);
+
+  // 扇区高亮光楔：指向当前聚焦项，层级压在菜单项下面
+  const sector = document.createElement('div');
+  sector.className = 'rm-sector';
+  sector.style.left = `${cx}px`;
+  sector.style.top = `${cy}px`;
+  root.appendChild(sector);
+
+  menuState = { cx, cy, root, hub, ring1, ring2, sector, sectors: [], sectorHalf: 0, focusSel: null, farR: 0, level: 0 };
+  root.addEventListener('mousemove', onMenuHover);
+  armMenuIdle();
+  renderLevel(MENU_TREE, 0);
+}
+
+// 扇区悬停：按最近角度判定鼠标落在哪项的扇区，聚焦并淡淡高亮；
+// 只有鼠标离得足够远（超出菜单圈外一截）或回到枢纽上才取消高亮
+function onMenuHover(e) {
+  const st = menuState;
+  if (!st || !st.sectors.length) return;
+  armMenuIdle(); // 在扇区里移动也算有人碰
+  const dx = e.clientX - st.cx;
+  const dy = e.clientY - st.cy;
+  const d = Math.hypot(dx, dy);
+  if (d > st.farR || d < 26) return setMenuFocus(null);
+  const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+  let best = null;
+  let bestDiff = Infinity;
+  for (const s of st.sectors) {
+    let diff = Math.abs(ang - s.angle) % 360;
+    if (diff > 180) diff = 360 - diff;
+    if (diff < bestDiff) { bestDiff = diff; best = s; }
+  }
+  setMenuFocus(best);
+}
+
+function setMenuFocus(sel) {
+  const st = menuState;
+  if (!st || st.focusSel === sel) return;
+  if (st.focusSel) st.focusSel.el.classList.remove('focus');
+  st.focusSel = sel;
+  if (sel) {
+    sel.el.classList.add('focus');
+    const h = st.sectorHalf;
+    // conic-gradient 0deg 在正上方、顺时针为正，换算菜单角度（0°=右、y 向下）
+    st.sector.style.background = `conic-gradient(from ${sel.angle + 90 - h}deg, rgba(185, 168, 255, 0.2) 0deg ${h * 2}deg, transparent ${h * 2}deg 360deg)`;
+    st.sector.style.opacity = '1';
+  } else {
+    st.sector.style.opacity = '0';
+  }
+}
+
+function renderLevel(items, level) {
+  const st = menuState;
+  if (!st) return;
+  st.level = level;
+  st.focusSel = null;
+  st.sectors = [];
+  st.sector.style.opacity = '0';
+  // 旧项缩回圆心后移除
+  for (const it of st.root.querySelectorAll('.rm-item')) {
+    it.style.transitionDelay = '0ms';
+    it.style.opacity = '0';
+    it.style.transform = `translate(${-parseFloat(it.dataset.dx)}px, ${-parseFloat(it.dataset.dy)}px) scale(0)`;
+    setTimeout(() => it.remove(), 240);
+  }
+  st.hub.textContent = level === 0 ? '✦' : '↩';
+  st.hub.onclick = () => { if (level === 0) closeMenu(); else renderLevel(MENU_TREE, 0); };
+  st.hub.onmouseenter = armMenuIdle;
+  armMenuIdle(); // 每次切换层级也重置闲置计时
+
+  const r = items.length <= 4 ? 98 : items.length <= 6 ? 116 : 132;
+  st.farR = r + 90; // 超出这个距离才取消扇区高亮
+  st.ring1.style.width = st.ring1.style.height = `${r * 2 + 74}px`;
+  st.ring2.style.width = st.ring2.style.height = `${r * 2 + 40}px`;
+  st.sector.style.width = st.sector.style.height = `${r * 2 + 92}px`;
+
+  // 均布圆周；末项是「取消」时整体旋转，让取消固定在正下方（90°）
+  const hasClose = items[items.length - 1].id === '_close';
+  const step = 360 / items.length;
+  const start = hasClose ? 90 - step * (items.length - 1) : -90;
+  st.sectorHalf = step / 2;
+
+  items.forEach((item, i) => {
+    const aDeg = start + step * i;
+    const a = (aDeg * Math.PI) / 180;
+    const dx = Math.cos(a) * r;
+    const dy = Math.sin(a) * r;
+    const it = document.createElement('div');
+    it.className = 'rm-item';
+    it.style.left = `${st.cx + dx - 32}px`;
+    it.style.top = `${st.cy + dy - 32}px`;
+    it.style.opacity = '0';
+    it.style.transform = `translate(${-dx}px, ${-dy}px) scale(0)`;
+    it.dataset.dx = dx;
+    it.dataset.dy = dy;
+    it.innerHTML = `<button class="rm-btn"><span class="rm-icon" style="animation-delay:${i * 0.18}s">${item.icon}</span><span class="rm-label">${item.label}</span></button>`;
+    it.querySelector('button').addEventListener('click', () => {
+      if (item.id === '_close') closeMenu();
+      else if (item.children) renderLevel(item.children, level + 1);
+      else {
+        window.pet.menuSelect(item.id);
+        closeMenu();
+      }
+    });
+    it.addEventListener('mouseenter', armMenuIdle); // 碰到就算有人碰
+    st.root.appendChild(it);
+    st.sectors.push({ el: it, angle: aDeg });
+    // 错峰从圆心飞出
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      it.style.transitionDelay = `${i * 40}ms`;
+      it.style.opacity = '1';
+      it.style.transform = 'translate(0px, 0px) scale(1)';
+    }));
+  });
+}
+
+window.pet.onMenuOpen(({ x, y }) => openMenu(x, y));

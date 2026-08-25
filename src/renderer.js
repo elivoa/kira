@@ -1124,7 +1124,7 @@ stage.addEventListener('mousedown', (e) => {
   if (waistPos && (state === 'idle' || state === 'walk') &&
       Math.hypot(e.clientX - waistPos.x, e.clientY - waistPos.y) < 42) {
     window.pet.openNotebook();
-    logEvent('交互', '打开了她腰间的小本子');
+    logEvent('交互', '打开了 Kira Note');
     return;
   }
   // 化剑/兜风/捣乱期间不响应戳/拖
