@@ -1,93 +1,76 @@
-# kira
+# Kira 桌面宠物
 
+一只住在你 Mac 桌面上的桌宠女仆 **Kira**（Electron 实现）。银白长卷星空裙，腰间挂着 K 卡牌法宝，有三种形态（姐姐 / Q版 / 卡牌），会自己做动作、会跟你互动、还会用 Kimi 聊天。
 
+## 启动
 
-## Getting started
+```bash
+# 1. 安装依赖
+npm install
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+# 如果 Electron 二进制下载太慢（国内网络），用镜像：
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+# 2. （可选）编译窗口枚举工具，「去窗台玩」功能需要
+swiftc -O tools/windows.swift -o tools/windows
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://dev.msh.team/engineering/playground/kira.git
-git branch -M master
-git push -uf origin master
+# 3. 启动
+npm start
 ```
 
-## Integrate with your tools
+> `npm start` 走不通时（node 版本管理器抽风），也可以直接用本机 node 跑：
+> `node node_modules/electron/cli.js .`
 
-* [Set up project integrations](https://dev.msh.team/engineering/playground/kira/-/settings/integrations)
+## 聊天功能（Kimi API）
 
-## Collaborate with your team
+在小本子（点她腰间的小本子）的「实时聊天」页签里和 Kira 对话，带 memory（对话历史持久化）。
 
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+key 配置在本机 `~/Library/Application Support/summon-pet/config.json`（**不进仓库**）：
 
-## Test and Deploy
+```json
+{ "kimiKey": "sk-kimi-..." }
+```
 
-Use the built-in continuous integration in GitLab.
+没配 key 时回退本地规则应答。对话历史存于 `~/Library/Application Support/summon-pet/chat-history.json`。
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+## 玩法
 
-***
+- **戳一戳**：点她（连戳 5 下扔屎、10 下炸毛，长按头发 5 秒有彩蛋）
+- **拖拽**：拎起来到处放，落点会被记为常驻位置，她玩够了会自己走回去
+- **腰间小本子**：点 K 卡牌打开笔记本（实时聊天 / MR Link 格式化 / 日志 三页签）
+- **右键菜单**：全部动作手动触发 + 设置 + 数值查看
+- **点击穿透**：默认只有点在角色身上才响应，其余位置穿透到下层窗口（可在设置里关）
 
-# Editing this README
+**自主动作**（待机随机播放）：散步（阿飘+红灯笼）、跳、转圈、撒娇、蹦蹦跳、走了走了、去窗台玩、暴走（正面/侧面两种）、御剑飞行、你讨厌！、来张桌子、收进法宝、化身成剑、兜风（保时捷敞篷）、捣乱（挂你鼠标上）、变身。
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+**数值系统**：精（体力）/ 气（法力）/ 神（耐心）/ 心情 / 透明值，与动作、互动、冷落时长联动。太久不理她，她会变透明、会走了走了、会主动求关注。
 
-## Suggestions for a good README
+**设置页**：动作频率滑块、按形态 × 是否打扰分组的动作开关、点击穿透开关。配置持久化在 `~/Library/Application Support/summon-pet/settings.json`。
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## 目录结构
 
-## Name
-Choose a self-explaining name for your project.
+```
+src/
+  main.js       主进程：窗口管理、IPC、设置/日志/数值/聊天后端
+  renderer.js   桌宠渲染层：动作状态机 + 全部交互
+  overlay.js    全屏覆盖层：扔屎、御剑飞行、兜风、捣乱等离窗特效
+  preload.js    contextBridge API
+  actions.js    动作注册表（名称/形态/打扰性/权重）
+  phrases.js    台词库（肉麻话 + 梗）
+  notebook.*    小本子（三页签）
+  settings.*    设置页
+assets/         立绘与道具图（从设定图抠出）
+tools/
+  cutout.js     立绘抠图工具：node tools/cutout.js <out.png> <x> <y> <w> <h> [src.png]
+  windows.swift macOS 窗口枚举（CGWindowList），编译后供「去窗台玩」使用
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## 换立绘
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+设定图放 `assets/source.png`，用抠图脚本重新生成各形态素材（边缘洪水填充去白底，保原图精度）：
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```bash
+node tools/cutout.js assets/pet.png 100 50 800 1370        # 正面
+node tools/cutout.js assets/pet_back.png 1680 50 850 1370  # 背面
+node tools/cutout.js assets/pet_side.png 1000 50 680 1360  # 侧面
+```
