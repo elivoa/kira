@@ -230,19 +230,16 @@ function flySword(homeX, homeY) {
 window.pet.onSword(({ x, y }) => flySword(x, y));
 
 // ---------- 兜风 ----------
-// 保时捷敞篷（真车侧面图）载着坐在驾驶座的大头，在屏幕底部来回巡游，最后回到出发点
+// 保时捷敞篷（真车侧面图）：大头从座舱里探出来，高出车顶一截；
+// 头在车身图层后面——车窗玻璃半透明，她的脸从玻璃里透出来，门框不透明部分自然压在她前面
 function makeCar() {
   const g = el('g', {});
   const CAR_W = 440, CAR_H = CAR_W * 974 / 2054;
-  const HEAD_W = 110, HEAD_H = HEAD_W * 195 / 235;
-  // 完整车身（最底层），车头朝左；组原点在车轮着地点
+  const HEAD_W = 130, HEAD_H = HEAD_W * 210 / 240;
+  // 大头先画（在车身后面）：抬高到超出车顶，下沿藏进车门里
+  el('image', { href: '../assets/head.png', x: -22, y: -224, width: HEAD_W, height: HEAD_H }, g);
+  // 完整车身压在前面（车头朝左；组原点在车轮着地点）
   el('image', { href: '../assets/car.png', x: -CAR_W / 2, y: -CAR_H, width: CAR_W, height: CAR_H }, g);
-  // 大头：坐在座舱里，下半截伸到车门下沿之下
-  el('image', { href: '../assets/head.png', x: 24, y: -205, width: HEAD_W, height: HEAD_H }, g);
-  // 车门遮罩条：同一张车图裁出车门区域压在大头底部，形成坐在车里的半遮掩效果
-  const cp = el('clipPath', { id: 'sillClip' }, g);
-  el('rect', { x: -36, y: -150, width: 176, height: 64 }, cp);
-  el('image', { href: '../assets/car.png', x: -CAR_W / 2, y: -CAR_H, width: CAR_W, height: CAR_H, 'clip-path': 'url(#sillClip)' }, g);
   return g;
 }
 
@@ -325,14 +322,20 @@ window.pet.onDrive(({ x }) => driveCar(x));
 // 使劲晃鼠标把她甩掉地，然后归位
 const MISCHIEF_YELLS = ['啊', '疼', '你弄疼我了！', '干嘛！', '呜哇哇'];
 const ROPE_LEN = 104; // 绳长
+const ROPE_N = 6;     // 软绳链条段数
 
 function mischief(startX, startY) {
   const layer = el('g', {});
-  // 盖住指针的小本子（以鼠标为中心，放大版）
+  // 盖住指针的笔记本（紫壳横线本，以鼠标为中心）
   const bookG = el('g', {}, layer);
-  el('image', { href: '../assets/card.png', x: -60, y: -118, width: 120, height: 130 }, bookG);
-  // 绳子 + 挂在下面的人物
-  const rope = el('line', { stroke: '#6b5a3a', 'stroke-width': 2.5 }, layer);
+  el('rect', { x: -64, y: -122, width: 128, height: 110, rx: 7, fill: '#7d6fd0', stroke: '#5a4db0', 'stroke-width': 2 }, bookG);
+  el('rect', { x: -55, y: -113, width: 110, height: 92, rx: 3, fill: '#fbfaf5', stroke: '#d9d5ec', 'stroke-width': 1.5 }, bookG);
+  el('line', { x1: -40, y1: -113, x2: -40, y2: -21, stroke: 'rgba(224,106,138,.5)', 'stroke-width': 2 }, bookG);
+  for (let i = 0; i < 5; i++) {
+    el('line', { x1: -55, y1: -96 + i * 17, x2: 55, y2: -96 + i * 17, stroke: '#dfe4f0', 'stroke-width': 1.5 }, bookG);
+  }
+  // 软绳（verlet 链条）+ 挂在下面的人物
+  const rope = el('path', { fill: 'none', stroke: '#6b5a3a', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, layer);
   const charG = el('g', {}, layer);
   el('image', { href: '../assets/chibi.png', x: -52, y: 0, width: 104, height: 104 * 1125 / 1012 }, charG);
 
@@ -345,9 +348,12 @@ function mischief(startX, startY) {
     }, layer).textContent = str;
   }
 
-  let mx = startX, my = startY;           // 鼠标（锚点）
-  let cx = startX, cy = startY + ROPE_LEN; // 人物位置（绳末端）
-  let pcx = cx, pcy = cy;                  // verlet 上一帧位置
+  let mx = startX, my = startY; // 鼠标（锚点）
+  // 软绳链条：pts[0] 是锚点，pts[ROPE_N] 是人物
+  const SEG = ROPE_LEN / ROPE_N;
+  const pts = Array.from({ length: ROPE_N + 1 }, (_, i) => ({
+    x: startX, y: startY + SEG * i, px: startX, py: startY + SEG * i,
+  }));
   let shaking = false;
   let done = false;
   const samples = [];
@@ -361,7 +367,7 @@ function mischief(startX, startY) {
   }
   function onDown() {
     if (done || shaking) return;
-    // 本子盖在指针上，点哪里都点在她本子上
+    // 笔记本盖在指针上，点哪里都点在她本子上
     textPop(MISCHIEF_YELLS[(Math.random() * MISCHIEF_YELLS.length) | 0], mx, my - 140);
   }
   window.addEventListener('mousemove', onMove);
@@ -403,28 +409,37 @@ function mischief(startX, startY) {
     last = now;
 
     if (!shaking) {
-      // verlet 单摆：重力积分 + 绳长约束（鼠标是移动锚点）
-      const vx = (cx - pcx) * 0.995, vy = (cy - pcy) * 0.995;
-      pcx = cx; pcy = cy;
-      cx += vx;
-      cy += vy + 2400 * dt * dt;
-      for (let i = 0; i < 2; i++) {
-        const dx = cx - mx, dy = cy - my;
-        const d = Math.hypot(dx, dy) || 1;
-        cx = mx + dx / d * ROPE_LEN;
-        cy = my + dy / d * ROPE_LEN;
+      // 软绳 verlet：除锚点外全部重力积分，再逐段做长度约束
+      for (let i = 1; i <= ROPE_N; i++) {
+        const p = pts[i];
+        const vx = (p.x - p.px) * 0.99, vy = (p.y - p.py) * 0.99;
+        p.px = p.x; p.py = p.y;
+        p.x += vx;
+        p.y += vy + 2400 * dt * dt;
       }
-      // 本子压住指针，绳子从本子下沿垂到她头顶
+      for (let iter = 0; iter < 3; iter++) {
+        pts[0].x = mx; pts[0].y = my - 6; // 锚点钉在笔记本下沿
+        for (let i = 0; i < ROPE_N; i++) {
+          const a = pts[i], b = pts[i + 1];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const fix = (d - SEG) / d;
+          b.x -= dx * fix;
+          b.y -= dy * fix;
+        }
+      }
+      const cx = pts[ROPE_N].x, cy = pts[ROPE_N].y;
+      // 笔记本压住指针（轻微晃动）
       const wob = 2.5 * Math.sin(now / 280);
       bookG.setAttribute('transform', `translate(${mx + wob},${my}) rotate(${wob})`);
-      rope.setAttribute('x1', mx); rope.setAttribute('y1', my + 10);
-      rope.setAttribute('x2', cx); rope.setAttribute('y2', cy + 4);
-      // 她沿绳角摆动
-      const ang = Math.atan2(cx - mx, cy - my) * 180 / Math.PI;
+      // 软绳画成穿过链条的折线
+      rope.setAttribute('d', 'M' + pts.map((p) => `${p.x},${p.y}`).join(' L'));
+      // 她沿最末段绳角倾斜
+      const ang = Math.atan2(cx - pts[ROPE_N - 1].x, cy - pts[ROPE_N - 1].y) * 180 / Math.PI;
       charG.setAttribute('transform', `translate(${cx},${cy}) rotate(${ang * 0.7})`);
 
       if (isShaken()) {
-        // 被甩出去了：沿鼠标横向速度抛飞，本子和绳子脱手
+        // 被甩出去了：沿鼠标横向速度抛飞，笔记本和绳子脱手
         shaking = true;
         const recent = samples.filter((p) => now - p.t < 200);
         fallVx = recent.length > 1 ? Math.max(-700, Math.min(700, (recent[recent.length - 1].x - recent[0].x) * 8)) : 400;

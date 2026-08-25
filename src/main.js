@@ -26,8 +26,46 @@ function saveSettings() {
   try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); } catch {}
 }
 
-// 小Kira 的数值（持久化到 userData/stats.json）
+// Kira 的数值（持久化到 userData/stats.json）
 const STATS_FILE = path.join(app.getPath('userData'), 'stats.json');
+
+// ---------- Kira 聊天后端（Kimi API + memory） ----------
+// key 放在 userData/config.json（不进仓库）；对话历史持久化到 userData/chat-history.json
+const CHAT_CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
+const CHAT_HISTORY_FILE = path.join(app.getPath('userData'), 'chat-history.json');
+let chatConfig = {};
+try { chatConfig = JSON.parse(fs.readFileSync(CHAT_CONFIG_FILE, 'utf8')); } catch {}
+let chatHistory = [];
+try { chatHistory = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf8')); } catch {}
+
+const KIRA_SYSTEM = `你是 Kira，一只住在用户 Mac 桌面上的桌宠女仆。
+设定：银白色长卷发、星空裙、腰间挂着 K 卡牌法宝，会御剑飞行、会变小消失。
+性格：元气、爱撒娇、偶尔肉麻，会玩中文互联网梗（awsl、绝绝子、哈基米之类），对主人有点小占有欲。
+说话方式：中文口语，一两句话说完，简短可爱，可以用 emoji 和「~」。不要长篇大论，不要使用列表。`;
+
+async function kimiChat(userText) {
+  if (!chatConfig.kimiKey) return null; // 没配 key 时回退本地规则
+  chatHistory.push({ role: 'user', content: userText });
+  const messages = [{ role: 'system', content: KIRA_SYSTEM }, ...chatHistory.slice(-40)];
+  const resp = await fetch('https://api.kimi.com/coding/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${chatConfig.kimiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ model: 'kimi-k2-0905-preview', messages, max_tokens: 300 }),
+  });
+  if (!resp.ok) {
+    chatHistory.pop(); // 没聊成不计入历史
+    throw new Error(`API ${resp.status}`);
+  }
+  const data = await resp.json();
+  const reply = (data.choices && data.choices[0] && data.choices[0].message.content) || '（大脑空白了一下）';
+  chatHistory.push({ role: 'assistant', content: reply });
+  if (chatHistory.length > 100) chatHistory = chatHistory.slice(-100);
+  try { fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chatHistory)); } catch {}
+  return reply;
+}
 
 // 动作/交互日志（持久化到 userData/logs.json，最多留 300 条）
 const LOG_FILE = path.join(app.getPath('userData'), 'logs.json');
@@ -127,6 +165,9 @@ function openNotebook() {
     width: 560,
     height: 640,
     resizable: true,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
     title: 'Kira 的小本子',
     autoHideMenuBar: true,
     webPreferences: {
@@ -224,6 +265,34 @@ app.whenReady().then(() => {
     if (win) win.webContents.send('notebook-say', text);
   });
 
+  // 聊天后端：Kimi API（带 memory），历史也提供给笔记本渲染
+  ipcMain.handle('chat-send', async (_e, text) => {
+    try {
+      const reply = await kimiChat(text);
+      return { ok: true, text: reply };
+    } catch (err) {
+      return { ok: false, text: `呜，连不上脑子了…（${err.message}）` };
+    }
+  });
+  ipcMain.handle('chat-history', () => chatHistory.slice(-30));
+
+  // 笔记本自绘边框：最小化和自定义拉伸
+  ipcMain.on('nb-min', () => { if (notebookWin) notebookWin.minimize(); });
+  let nbResize = null;
+  ipcMain.on('nb-resize-start', () => {
+    if (!notebookWin) return;
+    const c = screen.getCursorScreenPoint();
+    nbResize = { cx: c.x, cy: c.y, size: notebookWin.getSize() };
+  });
+  ipcMain.on('nb-resize-move', () => {
+    if (!notebookWin || !nbResize) return;
+    const c = screen.getCursorScreenPoint();
+    const w = Math.max(400, nbResize.size[0] + (c.x - nbResize.cx));
+    const h = Math.max(380, nbResize.size[1] + (c.y - nbResize.cy));
+    notebookWin.setSize(Math.round(w), Math.round(h));
+  });
+  ipcMain.on('nb-resize-end', () => { nbResize = null; });
+
   // 兜风：转发给覆盖层；车回来接她时再通知桌宠
   ipcMain.on('drive-start', () => {
     if (!win || !overlay) return;
@@ -310,6 +379,8 @@ app.whenReady().then(() => {
       { label: '撒个娇', click: () => win.webContents.send('menu-action', 'sway') },
       { label: '走了走了', click: () => win.webContents.send('menu-action', 'leave') },
       { label: '变个身', click: () => win.webContents.send('menu-action', 'morph') },
+      { label: '切到姐姐形态', click: () => win.webContents.send('menu-action', 'form-normal') },
+      { label: '切到Q版形态', click: () => win.webContents.send('menu-action', 'form-chibi') },
       { label: '去窗台玩', click: () => win.webContents.send('menu-action', 'goledge') },
       { label: '暴走模式', click: () => win.webContents.send('menu-action', 'dash') },
       { label: '御剑飞行', click: () => win.webContents.send('menu-action', 'fly') },

@@ -1,4 +1,21 @@
 // Kira 的小本子：三个页签 —— 实时聊天 / MR Link / 日志
+// 自绘边框：关闭/最小化/右下角拉伸
+document.getElementById('tlClose').addEventListener('click', () => window.close());
+document.getElementById('tlMin').addEventListener('click', () => window.pet.nbMin());
+{
+  const handle = document.getElementById('resizeHandle');
+  let resizing = false;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    resizing = true;
+    window.pet.nbResizeStart();
+  });
+  window.addEventListener('mousemove', () => { if (resizing) window.pet.nbResizeMove(); });
+  window.addEventListener('mouseup', () => {
+    if (resizing) { resizing = false; window.pet.nbResizeEnd(); }
+  });
+}
+
 const input = document.getElementById('input');
 const inputrow = document.querySelector('.inputrow');
 const chatMsgs = document.getElementById('chatMsgs');
@@ -43,6 +60,7 @@ function addMsg(list, who, text, cmd) {
   m.appendChild(b);
   list.appendChild(m);
   list.scrollTop = list.scrollHeight;
+  return b;
 }
 
 // ---------- 实时聊天 ----------
@@ -91,7 +109,16 @@ function submit(text) {
     window.pet.logAppend({ t: Date.now(), type: '交互', text: r.cmd ? `小本子记了一条链接：${r.text}` : '在小本子里收到一条看不懂的输入' });
   } else if (activeTab === 'chat') {
     addMsg(chatMsgs, 'me', text);
-    addMsg(chatMsgs, 'Kira', chatAnswer(text));
+    window.pet.logAppend({ t: Date.now(), type: '交互', text: `和小本子聊天：${text.slice(0, 30)}` });
+    // 异步接 Kimi，先给 typing 指示；失败或没配 key 回退本地规则
+    const typing = addMsg(chatMsgs, 'Kira', '正在输入…');
+    window.pet.chatSend(text).then((r) => {
+      typing.textContent = r.ok && r.text != null ? r.text : chatAnswer(text);
+      chatMsgs.scrollTop = chatMsgs.scrollHeight;
+      if (r.ok && r.text != null) window.pet.notebookSay('回你啦');
+    }).catch(() => {
+      typing.textContent = chatAnswer(text);
+    });
   }
 }
 
@@ -156,6 +183,12 @@ document.getElementById('clearLog').addEventListener('click', () => {
   renderLogs([]);
 });
 
-// ---------- 开场白 ----------
-addMsg(chatMsgs, 'Kira', '我是 Kira~\n想说什么都可以跟我说哦');
+// ---------- 开场白：有历史就渲染历史，没有就打招呼 ----------
+window.pet.chatHistory().then((history) => {
+  if (history && history.length) {
+    for (const m of history) addMsg(chatMsgs, m.role === 'user' ? 'me' : 'Kira', m.content);
+  } else {
+    addMsg(chatMsgs, 'Kira', '我是 Kira~\n想说什么都可以跟我说哦');
+  }
+});
 addMsg(mrMsgs, 'Kira', '把 MR 链接拖进来，我帮你记成好看的格式');

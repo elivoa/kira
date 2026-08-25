@@ -9,8 +9,53 @@
   body {
     margin: 0;
     display: flex;
+    flex-direction: column;
     font: 14px/1.6 "PingFang SC", sans-serif;
     color: #33304f;
+    background: transparent;
+    overflow: hidden;
+  }
+  /* 自绘窗口边框 */
+  .frame {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 34px rgba(30, 25, 80, 0.35);
+    border: 1px solid rgba(125, 111, 208, 0.4);
+  }
+  .titlebar {
+    flex: none;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    background: linear-gradient(180deg, #8f83d8, #7d6fd0);
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+  .titlebar .spacer { flex: 1; }
+  .tl-btn {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    -webkit-app-region: no-drag;
+  }
+  .tl-close { background: #ff5f57; }
+  .tl-min { background: #febc2e; }
+  .tl-btn:hover { filter: brightness(0.88); }
+  .bodywrap {
+    flex: 1;
+    display: flex;
+    min-height: 0;
     background: #fff;
   }
   /* 左侧书脊 + 侧页签 */
@@ -164,27 +209,52 @@
   .type-交互 { background: #e06a8a; }
   .type-系统 { background: #9a93b8; }
   .empty { color: #a49ec4; text-align: center; margin-top: 60px; }
+  /* 右下角拉伸手柄 */
+  #resizeHandle {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 18px;
+    height: 18px;
+    cursor: nwse-resize;
+    -webkit-app-region: no-drag;
+    background:
+      linear-gradient(135deg, transparent 50%, rgba(125, 111, 208, 0.5) 50%,
+        rgba(125, 111, 208, 0.5) 60%, transparent 60%,
+        transparent 70%, rgba(125, 111, 208, 0.5) 70%,
+        rgba(125, 111, 208, 0.5) 80%, transparent 80%);
+  }
 </style>
 </head>
 <body>
-  <div class="spine">
-    <div class="brand">Kira<br>的小本子</div>
-    <button class="tab active" data-tab="chat">实时聊天</button>
-    <button class="tab" data-tab="mr">MR Link</button>
-    <button class="tab" data-tab="log">日志</button>
-  </div>
-  <div class="main">
-    <div id="page-chat" class="page"><div id="chatMsgs" class="msgs"></div></div>
-    <div id="page-mr" class="page hidden"><div id="mrMsgs" class="msgs"></div></div>
-    <div id="page-log" class="page hidden">
-      <div class="logbar"><button id="clearLog">清空日志</button></div>
-      <div id="logList" class="msgs"></div>
+  <div class="frame">
+    <div class="titlebar">
+      <button class="tl-btn tl-close" id="tlClose" title="关闭"></button>
+      <button class="tl-btn tl-min" id="tlMin" title="最小化"></button>
+      <span style="margin-left:6px">Kira 的小本子</span>
+      <span class="spacer"></span>
     </div>
-    <div class="inputrow">
-      <input id="input" placeholder="说点什么，或拖入链接…" autofocus>
-      <button id="send">发送</button>
+    <div class="bodywrap">
+      <div class="spine">
+        <button class="tab active" data-tab="chat">实时聊天</button>
+        <button class="tab" data-tab="mr">MR Link</button>
+        <button class="tab" data-tab="log">日志</button>
+      </div>
+      <div class="main">
+        <div id="page-chat" class="page"><div id="chatMsgs" class="msgs"></div></div>
+        <div id="page-mr" class="page hidden"><div id="mrMsgs" class="msgs"></div></div>
+        <div id="page-log" class="page hidden">
+          <div class="logbar"><button id="clearLog">清空日志</button></div>
+          <div id="logList" class="msgs"></div>
+        </div>
+        <div class="inputrow">
+          <input id="input" placeholder="说点什么，或拖入链接…" autofocus>
+          <button id="send">发送</button>
+        </div>
+      </div>
     </div>
   </div>
+  <div id="resizeHandle"></div>
   <script src="phrases.js"></script>
   <script src="notebook.js"></script>
 </body>

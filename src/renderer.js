@@ -440,7 +440,13 @@ function turnFrame(k, newSrc, onSwap) {
 // 变身：翻牌中途切换形态和立绘高度
 let nextForm = 'chibi';
 function doMorph() {
-  nextForm = form === 'normal' ? 'chibi' : 'normal';
+  doMorphTo(form === 'normal' ? 'chibi' : 'normal');
+}
+
+// 切换到指定形态
+function doMorphTo(target) {
+  if (target === form || state === 'morph') return;
+  nextForm = target;
   enter('morph', 0.6);
   spawnHeart();
   say(pick(LINES.morph), 1000);
@@ -1103,6 +1109,9 @@ let downX = 0, downY = 0;
 let pressTimer = null;      // 长按头发的计时器
 let longPressFired = false; // 本次按压已触发过长按彩蛋
 
+// 可以被戳一戳打断的状态（在这些状态下点击会立即重新触发戳一戳）
+const POKEABLE_STATES = new Set(['idle', 'walk', 'sway', 'land', 'poke', 'hop', 'spin', 'qbounce', 'qsway']);
+
 // 头部区域（姐姐形态立绘的头发范围，窗口坐标）
 const HEAD_REGION = { x1: 95, y1: 95, x2: 250, y2: 270 };
 
@@ -1191,8 +1200,8 @@ window.addEventListener('mouseup', () => {
       window.pet.setActions({ _home: homePos });
     });
     logEvent('交互', '被安置在新的常驻位置');
-  } else if (!longPressFired && (state === 'idle' || state === 'walk' || state === 'sway' || state === 'land')) {
-    doPoke(); // 原地点击 = 戳一戳（长按触发过彩蛋就不再戳；走了走了系列状态下点击是叫她回来，不戳）
+  } else if (!longPressFired && POKEABLE_STATES.has(state)) {
+    doPoke(); // 原地点击 = 戳一戳，可被打断并立即重新触发
   }
 });
 
@@ -1210,6 +1219,16 @@ window.pet.onMenuAction((id) => {
     applyEffect('leave');
     logEvent('交互', '你让她走了走了');
     doLeave();
+    return;
+  }
+  // 菜单切换形态
+  if (id === 'form-normal' || id === 'form-chibi') {
+    const target = id === 'form-chibi' ? 'chibi' : 'normal';
+    if (target !== form) {
+      applyEffect('morph');
+      logEvent('交互', `你让她切到${target === 'chibi' ? 'Q版' : '姐姐'}形态`);
+      doMorphTo(target);
+    }
     return;
   }
   const fn = DISPATCH[id];
@@ -1371,11 +1390,12 @@ function frame(now) {
       break;
     }
     case 'poke': {
+      // 温柔的回弹：轻轻压一下再晃回来，点击可立即重新触发
       const k = stateT / stateDur;
       const s = Math.sin(Math.PI * k);
-      sy = 1 - 0.14 * s;
-      sx = 1 + 0.12 * s;
-      rot = 4 * Math.sin(k * Math.PI * 2);
+      sy = 1 - 0.07 * s;
+      sx = 1 + 0.06 * s;
+      rot = 2 * Math.sin(k * Math.PI * 2);
       if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(2, 5); }
       break;
     }
@@ -1667,5 +1687,5 @@ function easeInOut(k) {
 // 笔记本带话：气泡提示
 window.pet.onNotebookSay((text) => say(text, 1500));
 
-logEvent('系统', '小Kira 起床啦');
+logEvent('系统', 'Kira 起床啦');
 requestAnimationFrame(frame);

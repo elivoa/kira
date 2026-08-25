@@ -37,5 +37,11 @@ contextBridge.exposeInMainWorld('pet', {
   mischiefDone: () => ipcRenderer.send('mischief-done'),
   onMischief: (fn) => ipcRenderer.on('fx-mischief', (_e, data) => fn(data)),
   onMischiefEnd: (fn) => ipcRenderer.on('mischief-end', () => fn()),
+  nbMin: () => ipcRenderer.send('nb-min'),
+  nbResizeStart: () => ipcRenderer.send('nb-resize-start'),
+  nbResizeMove: () => ipcRenderer.send('nb-resize-move'),
+  nbResizeEnd: () => ipcRenderer.send('nb-resize-end'),
+  chatSend: (text) => ipcRenderer.invoke('chat-send', text),
+  chatHistory: () => ipcRenderer.invoke('chat-history'),
   onMenuAction: (fn) => ipcRenderer.on('menu-action', (_e, id) => fn(id)),
 });
