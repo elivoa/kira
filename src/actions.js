@@ -17,6 +17,7 @@ const ACTIONS = {
   poop:    { name: '你讨厌！', forms: ['normal', 'chibi'], intrusive: true,  w: 3,  auto: true },
   sword:   { name: '化身成剑', forms: ['normal', 'chibi'], intrusive: true,  w: 3,  auto: true },
   drive:   { name: '兜风',     forms: ['normal', 'chibi'], intrusive: true,  w: 3,  auto: true },
+  mischief:{ name: '捣乱',     forms: ['normal', 'chibi'], intrusive: true,  w: 2,  auto: true },
   leave:   { name: '走了走了（不理她时）', forms: ['normal', 'chibi'], intrusive: false, w: 0, auto: false },
 };
 
