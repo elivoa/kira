@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('pet', {
   moveBy: (dx, dy) => ipcRenderer.send('move-by', dx, dy),
@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('pet', {
   dragEnd: () => ipcRenderer.send('drag-end'),
   openMenu: () => ipcRenderer.send('context-menu'),
   getPos: () => ipcRenderer.invoke('get-pos'),
+  getCursor: () => ipcRenderer.invoke('get-cursor'),
+  onArrowKey: (fn) => ipcRenderer.on('arrow-key', () => fn()),
   getStage: () => ipcRenderer.invoke('get-stage'),
   throwPoop: () => ipcRenderer.send('poop'),
   onPoop: (fn) => ipcRenderer.on('fx-poop', (_e, data) => fn(data)),
@@ -50,11 +52,18 @@ contextBridge.exposeInMainWorld('pet', {
     return () => ipcRenderer.removeListener('chat-token', h);
   },
   chatHistory: () => ipcRenderer.invoke('chat-history'),
+  chatProactive: () => ipcRenderer.invoke('chat-proactive'),
   getHistoryDays: () => ipcRenderer.invoke('history-days'),
   getHistoryDay: (key) => ipcRenderer.invoke('history-day', key),
   getChatConfig: () => ipcRenderer.invoke('get-chat-config'),
   setChatConfig: (patch) => ipcRenderer.send('set-chat-config', patch),
+  decideAction: (ctx) => ipcRenderer.invoke('decide-action', ctx),
   onMenuAction: (fn) => ipcRenderer.on('menu-action', (_e, id) => fn(id)),
+  onPowerState: (fn) => ipcRenderer.on('power-state', (_e, d) => fn(d)),
+  getPowerState: () => ipcRenderer.invoke('get-power-state'),
+  activeWindow: () => ipcRenderer.invoke('active-window'),
+  getPathForFile: (f) => webUtils.getPathForFile(f),
+  folderDrop: (p) => ipcRenderer.send('folder-drop', p),
   // 星盘右键菜单（overlay 侧）
   onMenuOpen: (fn) => ipcRenderer.on('menu-open', (_e, data) => fn(data)),
   menuSelect: (id) => ipcRenderer.send('menu-select', id),

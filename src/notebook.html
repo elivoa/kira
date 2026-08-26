@@ -152,8 +152,14 @@
   .bubble.md th, .bubble.md td { border: 1px solid #d9d5ec; padding: 3px 8px; }
   .bubble.md hr { border: none; border-top: 1px dashed #d9d5ec; margin: 8px 0; }
   .bubble.md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
-  /* 「正在输入…」等待动画 */
-  .bubble.typing::after { content: ''; animation: typingDots 1.2s steps(1) infinite; }
+  /* 「正在输入…」等待动画：点打在段落内部同行（直接挂 bubble 上会匿名成块换行），
+     固定宽度内联盒，点的增减不换行、气泡不跳 */
+  .bubble.typing p:last-child::after {
+    content: '';
+    display: inline-block;
+    width: 2.2em;
+    animation: typingDots 1.2s steps(1) infinite;
+  }
   @keyframes typingDots {
     0% { content: ''; }
     25% { content: '  ·'; }
@@ -228,8 +234,33 @@
   .time { color: #a49ec4; font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
   .type { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 6px; color: #fff; }
   .type-自主 { background: #7d6fd0; }
+  .type-智能 { background: #4f9d69; }
   .type-交互 { background: #e06a8a; }
   .type-系统 { background: #9a93b8; }
+  .type-大模型 { background: linear-gradient(135deg, #b9a8ff, #7d6fd0); }
+  /* 同类合并条数徽标 */
+  .cnt {
+    flex: none;
+    font-size: 10px;
+    color: #7d6fd0;
+    background: #efecfa;
+    border-radius: 8px;
+    padding: 1px 7px;
+    font-weight: 600;
+    margin-left: auto;
+  }
+  /* 日志页筛选开关 */
+  .filter-btn {
+    border: none;
+    background: #e8e6f2;
+    color: #5b5680;
+    font: 12px "PingFang SC", sans-serif;
+    padding: 4px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .filter-btn.on { background: #7d6fd0; color: #fff; }
+  .filter-btn:hover { filter: brightness(0.94); }
   .empty { color: #a49ec4; text-align: center; margin-top: 60px; }
   /* 历史页：日期 banner */
   .date-banner {
@@ -409,7 +440,11 @@
         </div>
         <div id="page-mr" class="page hidden"><div id="mrMsgs" class="msgs"></div></div>
         <div id="page-log" class="page hidden">
-          <div class="logbar"><button id="clearLog">清空日志</button></div>
+          <div class="logbar">
+            <button id="mergeSame" class="filter-btn on">合并同类</button>
+            <button id="filterLLM" class="filter-btn">只看大模型</button>
+            <button id="clearLog">清空日志</button>
+          </div>
           <div id="logList" class="msgs"></div>
         </div>
         <div id="page-config" class="page hidden">

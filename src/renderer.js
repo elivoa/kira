@@ -21,6 +21,12 @@ let curSize = 1;         // 走远时的缩放（1 = 正常大小）
 let sizeFrom = 1;        // 走回来时的起始缩放
 let goneStarT = 2;       // 消失期间星光闪烁的间隔计时
 let lastInteract = performance.now() / 1000; // 最近一次互动时间，太久不理她会走掉
+let screenAsleep = false; // 熄屏/锁屏/休眠中：暂停自主动作和冷落累计
+window.pet.onPowerState(({ locked }) => {
+  screenAsleep = locked;
+  if (!locked) lastInteract = performance.now() / 1000; // 醒来重新计时，睡的时间不算冷落
+});
+window.pet.getPowerState().then((v) => { screenAsleep = !!v; });
 
 const IGNORE_AFTER = 40; // 秒，超过这么久没互动就「走了走了」
 const FAR_Y = -50;       // 走远后向上飘的距离（px）
@@ -32,16 +38,21 @@ const FRONT_SRC = '../assets/pet.png';
 const BACK_SRC = '../assets/pet_back.png';
 const CHIBI_SRC = '../assets/chibi.png';
 const SIDE_SRC = '../assets/pet_side.png'; // 侧面图（朝左，镜像即朝右），姐姐形态走路/侧面暴走用
+const FLUTE_SRC = '../assets/flute.png';   // 法宝形态（银笛）
 
-// 双形态：正常版 / Q版（Q版没有背面图，走远时沿用正面图）
+// 四种形态：姐姐 / Q版 / 法宝 / 背对
+// 背对形态 front=背面图、back=正面图，转身类动作（笛子乱飞/走了走了）自然变成「转过来又转回去」
 const FORMS = {
   normal: { front: FRONT_SRC, back: BACK_SRC, height: 512 },
   chibi: { front: CHIBI_SRC, back: CHIBI_SRC, height: 330 },
+  flute: { front: FLUTE_SRC, back: FLUTE_SRC, height: 300 },
+  back: { front: BACK_SRC, back: FRONT_SRC, height: 512 },
 };
 let form = 'normal';
 new Image().src = BACK_SRC;  // 预加载，转身/变身时不闪
 new Image().src = CHIBI_SRC;
 new Image().src = SIDE_SRC;
+new Image().src = FLUTE_SRC;
 
 // ---------- 点击穿透 ----------
 // 默认鼠标事件穿透到下层窗口；光标落在角色不透明像素（或法宝卡牌）上时才接管交互
@@ -82,6 +93,11 @@ function overSprite(cx, cy) {
     const cr = cardImg.getBoundingClientRect();
     if (cx >= cr.left && cx <= cr.right && cy >= cr.top && cy <= cr.bottom) return true;
   }
+  // 主动搭话的粘性气泡显示期间也可点（要点击才能关闭）
+  if (stickyActive) {
+    const br = bubble.getBoundingClientRect();
+    if (cx >= br.left && cx <= br.right && cy >= br.top && cy <= br.bottom) return true;
+  }
   return false;
 }
 
@@ -116,28 +132,65 @@ const LINES = {
   fly: ['御剑飞行！', '起飞咯~', '看我能飞多高'],
   poop: ['你讨厌！', '哼！接招！', '讨厌鬼！'],
   desk: ['喝口茶~', '休息一下', '工作辛苦啦', '陪我坐会儿吧'],
+  work: ['赶稿中！', '马上就好！', '哒哒哒哒…', '别催了别催了', 'DDL 是第一生产力！'],
   seal: ['收！', '进法宝里待着~', '法宝，开！'],
   sword: ['剑来！', '变成剑咯', '御剑……不如成剑！'],
   drive: ['去兜风！', '上车！', '带你飞一圈'],
   mischief: ['嘿嘿，捣乱咯', '挡住挡住~', '就不让你点！'],
   lonely: ['喂——还在吗？', '看我一眼嘛…', '我是不是很透明？', '有人吗…'],
   angry: ['你别碰我。', '把你的脏手拿开。', '烦死了！', '手拿开！（超凶）', '再戳我真的生气了！', '呜……你欺负我！'],
+  scared: ['呜哇！撞死我了！', '鬼呀👻！别过来！', '救命！什么东西撞我！', '呜啊啊别碰我！', '撞、撞死我了……快跑！', '鬼呀👻👻！'],
+  peek: ['才、才没有偷看你！', '别误会…我只是看看你在干嘛', '哼，就瞄一眼', '没在看你，看风景呢'],
+  brock: ['哼', '就不回头', '你自己玩吧', '不想理你了', '哄不好了'],
 };
 
 function enter(next, dur = 0) {
   state = next;
   stateT = 0;
   stateDur = dur;
-  // 离开飘移状态时清掉影子和灯笼
+  // 离开飘移状态时清掉影子和灯笼，离开飞行时收掉踏板，离开乱飞时收掉笛子，离开睡觉时撤被褥
   if (next !== 'walk' && next !== 'gohome') hideFloatFx();
+  if (next !== 'fly') boardHide();
+  if (next !== 'flutefly' && next !== 'fluteback' && next !== 'fluteturn' && next !== 'working') fluteHide();
+  // 离开睡觉时撤场景、立绘恢复
+  if (!String(next).startsWith('sleep')) {
+    sleepImg.style.opacity = 0;
+    setSpriteVeiled(false);
+  }
 }
 
 function say(text, ms = 1800) {
+  if (stickyActive) return; // 粘性气泡没被点掉前，自言自语气泡不抢屏
+  bubble.style.width = ''; // 清掉粘性气泡的自适应宽度
   bubble.textContent = text;
   bubble.classList.add('show');
   clearTimeout(bubbleTimer);
   bubbleTimer = setTimeout(() => bubble.classList.remove('show'), ms);
 }
+
+// 主动搭话的粘性气泡：不自动消失，点一下才关；样式与自言自语气泡区分
+let stickyActive = false;
+function saySticky(text) {
+  stickyActive = true;
+  // 文字多的框宽一点：按字数自适应（160~300px，含 36px 内边距后总宽不超出窗口留边）
+  bubble.style.width = `${Math.min(WIN_W - 52, Math.max(160, Math.min(300, 40 + text.length * 9)))}px`;
+  bubble.textContent = text;
+  const hint = document.createElement('span');
+  hint.className = 'sticky-hint';
+  hint.textContent = '✦ 点我消失';
+  bubble.appendChild(hint);
+  bubble.classList.add('show', 'sticky');
+  clearTimeout(bubbleTimer); // 防止被普通 say 留下的计时器收走
+}
+// 气泡在 stage 内部：粘性状态下点气泡不能误触 stage 的戳一戳/拖拽
+bubble.addEventListener('mousedown', (e) => { if (stickyActive) e.stopPropagation(); });
+bubble.addEventListener('click', (e) => {
+  if (!stickyActive) return;
+  e.stopPropagation();
+  stickyActive = false;
+  bubble.classList.remove('show', 'sticky');
+  logEvent('交互', '点掉了 Kira 的主动搭话');
+});
 
 // ---------- 数值面板 ----------
 const statsPanel = document.getElementById('statsPanel');
@@ -384,6 +437,110 @@ function doHop() {
   say(pick(LINES.hop), 1200);
 }
 
+// ---------- 睡觉模式（真睡姿场景图版） ----------
+// 趴桌场景三张：埋臂趴睡 / 侧头趴睡 / 横躺伸手，睡觉中三张轮换（点一下也换一张）
+// 过渡：睡觉场景图淡入盖过立绘 → 睡觉中翻身换图 → 伸手图伸个懒腰 → 淡出回立绘
+const SLEEP1_SRC = '../assets/sleep1.png';
+const SLEEP2_SRC = '../assets/sleep2.png';
+const SLEEP3_SRC = '../assets/sleep3.png';
+// 睡姿轮换顺序（sleep3 伸手图既是轮换姿势，也是睡醒伸懒腰图）
+const SLEEP_POSES = [SLEEP1_SRC, SLEEP2_SRC, SLEEP3_SRC];
+// 各睡姿头部位置（Zzz 出生点），按窗口坐标标定
+const SLEEP_HEAD = {
+  'sleep1.png': { x: 150, y: 255 },
+  'sleep2.png': { x: 105, y: 195 },
+  'sleep3.png': { x: 85, y: 240 },
+};
+// 各睡姿的人物区域（柔边椭圆遮罩）：呼吸起伏只作用于被罩住的人物层，桌子保持不动
+const SLEEP_MASK = {
+  'sleep1.png': 'radial-gradient(ellipse 30% 52% at 48% 50%, #000 60%, transparent 80%)',
+  'sleep2.png': 'radial-gradient(ellipse 36% 51% at 47% 50%, #000 60%, transparent 80%)',
+  'sleep3.png': 'radial-gradient(ellipse 40% 50% at 46% 50%, #000 60%, transparent 80%)',
+};
+new Image().src = SLEEP1_SRC;
+new Image().src = SLEEP2_SRC;
+new Image().src = SLEEP3_SRC;
+const SLEEP_MUMBLE = ['zzZ…', '唔嗯…', '呼…', '嗯…再五分钟…', '嘿嘿…嘿嘿…'];
+let pendingSleep = false;
+let zzzT = 0;
+let flipT = 0; // 翻身计时
+let spriteVeiled = false; // 睡觉场景盖住立绘时，applyTouming 不准把她恢复可见
+
+const sleepImg = document.createElement('div');
+sleepImg.id = 'sleepImg';
+const sleepBase = document.createElement('img'); // 完整场景（桌子在这层，不动）
+const sleepTop = document.createElement('img');  // 人物层（遮罩+呼吸）
+sleepBase.className = 'base';
+sleepTop.className = 'top';
+sleepImg.appendChild(sleepBase);
+sleepImg.appendChild(sleepTop);
+// 插在 fx 层下面，Zzz/气泡才不会被场景图挡住
+stage.insertBefore(sleepImg, fx);
+
+// 设置睡觉场景图：两层用同一张图，top 层按姿势上人物遮罩
+function setSleepScene(src) {
+  sleepBase.src = src;
+  sleepTop.src = src;
+  const m = SLEEP_MASK[src.split('/').pop()];
+  sleepTop.style.maskImage = m;
+  sleepTop.style.webkitMaskImage = m;
+}
+setSleepScene(SLEEP2_SRC);
+
+function setSpriteVeiled(v) {
+  spriteVeiled = v;
+  sprite.style.transition = 'opacity .7s ease';
+  sprite.style.opacity = v ? 0 : 1;
+}
+
+function swapSleepPose(src) {
+  sleepImg.style.opacity = 0;
+  setTimeout(() => {
+    setSleepScene(src);
+    sleepImg.style.opacity = 1;
+  }, 380);
+}
+
+function sleepPoseFile() { return sleepBase.src.split('/').pop(); }
+
+// 换到下一张睡姿（三张三张轮换）
+function cycleSleepPose() {
+  const i = SLEEP_POSES.findIndex(s => s.endsWith(sleepPoseFile()));
+  swapSleepPose(SLEEP_POSES[(i + 1) % SLEEP_POSES.length]);
+}
+
+let pendingSleepDur = null;
+
+function doSleep(dur = null) {
+  if (form !== 'normal') { pendingSleep = true; pendingSleepDur = dur; doMorphTo('normal'); return; }
+  pendingSleepDur = dur;
+  setSleepScene(SLEEP1_SRC);
+  sleepImg.style.opacity = 1;
+  setSpriteVeiled(true);
+  flipT = rand(6, 9);
+  enter('sleepin', 0.9);
+  say('哈啊~ 困了', 1600);
+}
+
+function doWake() {
+  sleepTop.style.transform = ''; // 停掉呼吸再伸懒腰
+  swapSleepPose(SLEEP3_SRC);
+  enter('sleepout', 0.9);
+  say('嗯…早上了？', 1500);
+}
+
+// 背对专属：偷偷回头瞟一眼——翻牌到侧面停一下，再翻回去继续背对
+function doPeek() {
+  enter('peekout', 0.35);
+  say(pick(LINES.peek), 1500);
+}
+
+// 背对专属：赌气晃晃
+function doBrock() {
+  enter('brock', rand(1.6, 2.2));
+  if (Math.random() < 0.7) say(pick(LINES.brock), 1500);
+}
+
 function doSpin() {
   enter('spin', 0.65);
   say(pick(LINES.spin), 1200);
@@ -392,6 +549,31 @@ function doSpin() {
 function doSway() {
   enter('sway', 1.8);
   say(pick(LINES.sway), 1500);
+}
+
+// ---------- 笛子乱飞（姐姐形态专属） ----------
+// 背对着站定，笛子绕身高速乱飞（会穿到身后），持续 ~9 秒
+const fluteImg = document.createElement('img');
+fluteImg.id = 'fluteImg';
+fluteImg.src = '../assets/flute.png';
+stage.appendChild(fluteImg);
+sprite.style.zIndex = 2; // 让笛子能穿到她身后（z=1）或飞在前面（z=3）
+let pendingFlute = false;
+
+function fluteShow(x, y, rot, behind) {
+  fluteImg.style.display = 'block';
+  fluteImg.style.zIndex = behind ? 1 : 3;
+  fluteImg.style.opacity = behind ? 0.55 : 1; // 身后时压暗模拟遮挡
+  fluteImg.style.transform = `translate(${x - 30}px, ${y - 64}px) rotate(${rot}deg)`;
+}
+
+function fluteHide() { fluteImg.style.display = 'none'; }
+
+function doFluteFly() {
+  if (form === 'chibi') { pendingFlute = true; doMorph(); return; }
+  if (form === 'flute') { pendingFlute = true; doMorphTo('normal'); return; }
+  enter('fluteturn', 0.5);
+  say(pick(['看我的！', '笛子，去！', '给你表演一个~']), 1500);
 }
 
 function doWalk() {
@@ -485,30 +667,67 @@ async function doGoLedge() {
   say(pick(LINES.ledge), 1500);
 }
 
+// ---------- 撞墙模式 ----------
+// 烦躁时跑到活跃窗口的边沿，助跑拿头撞墙，撞完发晕，然后回家
+let wall = null;
+let pendingWall = false;
+
+async function doWallBang() {
+  const st = await window.pet.getStage();
+  const [px, py] = await window.pet.getPos();
+  let wallX, dir;
+  const aw = await window.pet.activeWindow();
+  if (aw) {
+    // 选近的一侧：贴左墙外沿或右墙外沿
+    const dLeft = Math.abs(px - (aw.x - WIN_W));
+    const dRight = Math.abs(px - (aw.x + aw.w));
+    wallX = dLeft <= dRight ? aw.x - WIN_W : aw.x + aw.w;
+    dir = dLeft <= dRight ? 1 : -1; // 撞的方向（朝墙）
+  } else {
+    // 读不到活跃窗口就拿屏幕边撞
+    const dLeft = Math.abs(px - st.minX), dRight = Math.abs(px - st.maxX);
+    wallX = dLeft <= dRight ? st.minX : st.maxX;
+    dir = dLeft <= dRight ? 1 : -1;
+  }
+  const tx = Math.min(Math.max(wallX, st.minX), st.maxX);
+  wall = {
+    tx, ty: st.floorY, dir, px, py: st.floorY,
+    floorY: st.floorY,
+    phase: 'go', phaseT: 0,
+    count: 0, maxCount: 3 + ((Math.random() * 3) | 0),
+  };
+  logEvent('自主', aw ? `烦躁了，去撞「${aw.owner}」的墙` : '烦躁了，去撞屏幕边');
+  if (form === 'flute') { pendingWall = true; doMorphTo('normal'); return; }
+  if (form === 'normal') { facing = -dir; enter('wallgoin', 0.3); }
+  else { facing = dir; enter('wallgo'); }
+  say(pick(['烦死了！', '让我撞一撞！', '啊啊啊——']), 1500);
+}
+
 // ---------- 暴走模式 ----------
 // 在屏幕底部高速往返：起步蓄力 → 加速冲刺 → 到边急转（纸片人翻牌）→ 来回数趟 → 急停冒烟
 let dash = null;
 
-async function doDash() {
+// 暴走/逃跑：opts.dir 指定起步方向，opts.maxLaps 覆盖趟数（0 = 冲到边上就停），opts.line 替换台词
+async function doDash(opts = {}) {
   const st = await window.pet.getStage();
   const [px, py] = await window.pet.getPos();
   // 姐姐形态一半概率换成侧面奔跑版暴走
   const side = form === 'normal' && Math.random() < 0.5;
-  // 先朝更远的那侧跑，第一趟更长
-  const dir = px > (st.minX + st.maxX) / 2 ? -1 : 1;
+  // 默认先朝更远的那侧跑，第一趟更长
+  const dir = opts.dir || (px > (st.minX + st.maxX) / 2 ? -1 : 1);
   dash = {
     ...st, px, py,
     sub: py < st.floorY - 4 ? 'pre' : 'start', // 不在地面先落地
     subT: 0,
     v: 0, dir, side,
-    laps: 0, maxLaps: 5 + ((Math.random() * 3) | 0),
+    laps: 0, maxLaps: opts.maxLaps ?? (5 + ((Math.random() * 3) | 0)),
     flipT: 1,        // 转身翻牌进度（1 = 没在翻）
     lineT: 0,        // 速度线生成间隔
     dustT: 0,
     skidDusted: false,
   };
   enter('dash');
-  say(side ? pick(LINES.dashSide) : pick(LINES.dash), 1500);
+  say(opts.line || (side ? pick(LINES.dashSide) : pick(LINES.dash)), opts.line ? 2400 : 1500);
 }
 
 // 暴走单帧逻辑，返回是否已消费本帧（true 时不再走其它状态）
@@ -654,6 +873,21 @@ async function doFly() {
   say(pick(LINES.fly), 1600);
 }
 
+// ---------- 御法宝飞行 ----------
+// 踩一块放大的法宝（笛子）踏板巡航：起飞时踏板从脚下升起，落地后踏板飞走
+const boardImg = document.createElement('img');
+boardImg.id = 'boardImg';
+boardImg.src = '../assets/flute.png';
+stage.appendChild(boardImg);
+
+// boardY: 踏板中心在窗口里的 y（脚下）；boardRot: 角度
+function boardShow(yC, rot) {
+  boardImg.style.display = 'block';
+  boardImg.style.transform = `translate(${FOOT_X - 70}px, ${yC - 150}px) rotate(${rot}deg)`;
+}
+
+function boardHide() { boardImg.style.display = 'none'; }
+
 function flyFrame(dt) {
   const f = fly;
   f.subT += dt;
@@ -665,19 +899,20 @@ function flyFrame(dt) {
   }
 
   if (f.sub === 'takeoff') {
-    // 爬升：窗口升到巡航高度，前倾加大
+    // 爬升：窗口升到巡航高度，踏板同步从脚下升上来，人微前倾
     const k = easeInOut(Math.min(f.subT / 0.9, 1));
     const ny = f.startY + (f.cruiseY - f.startY) * k;
     window.pet.moveBy(f.dir * 120 * dt, ny - f.py);
     f.py = ny;
     f.px += f.dir * 120 * dt;
-    rot = f.dir * 10 * k;
-    skew = -f.dir * 4 * k;
+    rot = f.dir * 6 * k;
+    skew = -f.dir * 2 * k;
     sy = 1 + 0.05 * Math.sin(f.subT * 10);
+    boardShow(680 - 74 * k, 90 - f.dir * 10 * k);
     if (!f.texted) { f.texted = true; fxText('嗖——', FOOT_X, 300); }
     if (k >= 1) { f.sub = 'cruise'; f.subT = 0; }
   } else if (f.sub === 'cruise') {
-    // 波浪巡航：y 随 x 正弦起伏，身体随坡度倾斜
+    // 波浪巡航：y 随 x 正弦起伏，踏板贴坡度，人站在板上小倾
     const SPEED = 650;
     let nx = f.px + f.dir * SPEED * dt;
     let turned = false;
@@ -686,9 +921,11 @@ function flyFrame(dt) {
     const ny = f.cruiseY + 45 * Math.sin(nx / 160);
     window.pet.moveBy(nx - f.px, ny - f.py);
     f.px = nx; f.py = ny;
-    rot = f.dir * 8 + f.dir * Math.cos(nx / 160) * 4;
-    skew = -f.dir * 4;
+    const slope = 45 * Math.cos(nx / 160) / 160; // dy/dx
+    rot = f.dir * 4 + f.dir * slope * 30;
+    skew = -f.dir * 2;
     ty = -2 * Math.abs(Math.sin(f.subT * 6));
+    boardShow(606, 90 - f.dir * 6 + slope * 57.3 * f.dir * 0.7);
     f.lineT -= dt;
     if (f.lineT <= 0) { fxSpeedLine(f.dir); f.lineT = 0.08; }
     if (turned) {
@@ -699,14 +936,16 @@ function flyFrame(dt) {
       if (f.laps >= f.maxLaps) { f.sub = 'glide'; f.subT = 0; f.landFromY = f.py; }
     }
   } else if (f.sub === 'glide') {
-    // 滑翔落地：缓降 + 回正
+    // 滑翔落地：缓降 + 回正，踏板向下飞走
     const k = easeInOut(Math.min(f.subT / 0.9, 1));
     const ty2 = f.landFromY + (f.floorY - f.landFromY) * k;
     window.pet.moveBy(0, ty2 - f.py);
     f.py = ty2;
-    rot = f.dir * 10 * (1 - k);
-    skew = -f.dir * 4 * (1 - k);
+    rot = f.dir * 6 * (1 - k);
+    skew = -f.dir * 2 * (1 - k);
+    boardShow(606 + 120 * k * k, 90 - f.dir * 10 * (1 - k));
     if (k >= 1) {
+      boardHide();
       fxDust(FOOT_X, FOOT_Y, 3);
       enter('land', 0.16);
     }
@@ -775,10 +1014,10 @@ window.pet.onMischiefEnd(() => {
 });
 
 // ---------- 收进法宝（姐姐形态专属） ----------
-// 腰间的 K 卡牌飞出 → 她被吸入卡牌 → 卡牌悬浮一阵 → 放她出来
+// 腰间的长笛飞出 → 她被吸入法宝 → 法宝悬浮一阵 → 放她出来
 const cardImg = document.createElement('img');
 cardImg.id = 'cardImg';
-cardImg.src = '../assets/card.png';
+cardImg.src = '../assets/flute.png';
 stage.appendChild(cardImg);
 
 const WAIST = { x: 195, y: 346 }; // 卡牌在腰间时的窗口坐标（姐姐形态）
@@ -790,7 +1029,7 @@ let pendingSeal = false;
 function cardShow(x, y, s, r, o) {
   cardImg.style.display = 'block';
   cardImg.style.opacity = o;
-  cardImg.style.transform = `translate(${x - 24}px, ${y - 31}px) rotate(${r}deg) scale(${s})`;
+  cardImg.style.transform = `translate(${x - 32}px, ${y - 68}px) rotate(${r}deg) scale(${s})`;
 }
 
 function cardHide() { cardImg.style.display = 'none'; }
@@ -886,6 +1125,20 @@ function doDesk() {
   say(pick(LINES.desk), 1800);
 }
 
+// ---------- 工作模式（姐姐形态专属） ----------
+// 同一张课桌，但她在疯狂捯饬：高频抖动 + 烟雾 + 笛子纸张乱飞
+let work = null;
+let pendingWork = false;
+
+function doWork() {
+  if (form === 'chibi') { pendingWork = true; doMorph(); return; }
+  sprite.style.height = '700px';
+  showDesk();
+  work = { smokeT: 0.5, paperT: 0.8, lineT: 2.5 };
+  enter('workin', 0.6);
+  say('开工！', 1200);
+}
+
 // ---------- 动作开关（设置页控制，只影响待机自动播放，右键菜单始终可用） ----------
 let actionEnabled = {}; // 缺省 = 全开
 window.pet.getSettings().then((s) => {
@@ -904,7 +1157,11 @@ window.pet.onSettings((s) => {
   }
 });
 
-function enabled(id) { return actionEnabled[id] !== false; }
+// 动作开关：没设置过就用默认值（ACTIONS 里 off:true 的默认关，其余默认开）
+function enabled(id) {
+  const v = actionEnabled[id];
+  return v !== undefined ? v : !(ACTIONS[id] && ACTIONS[id].off);
+}
 
 // ---------- 常驻位置 ----------
 // 被拖拽到的落点 = 她应该呆着的位置；自主动作跑远了，闲置一段时间会自己走回去
@@ -977,10 +1234,9 @@ function addStat(key, delta) {
   if (key === 'touming') applyTouming();
 }
 
-// 透明值 → 立绘不透明度：30 以下不变，最淡也只到 0.5
+// 透明值 → 立绘不透明度（临时禁用：视觉不再变淡，数值照记；睡觉场景盖住时保持隐藏）
 function applyTouming() {
-  const t = stats.touming;
-  sprite.style.opacity = t <= 30 ? 1 : Math.max(0.5, 1 - (t - 30) / 100);
+  sprite.style.opacity = spriteVeiled ? 0 : 1;
 }
 
 // 动作对数值的影响（进入动作时结算一次）
@@ -1001,7 +1257,13 @@ const EFFECTS = {
   leave: { mood: -5 },
   sword: { qi: -10, jing: -4, mood: 3 },
   drive: { jing: -3, mood: 5 },
+  flutefly: { qi: -8, jing: -3, mood: 4 },
+  work: { jing: -6, mood: 1 },
+  wallbang: { shen: 15, jing: -6, mood: 2 },
+  sleep: { jing: 25, shen: 10, mood: 3 },
   mischief: { jing: -3, mood: 4 },
+  peek: { jing: -2, mood: 2 },
+  brock: { mood: 3 },
 };
 
 // 体力和法力不够的动作做不来
@@ -1019,7 +1281,8 @@ const DISPATCH = {
   walk: doWalk, hop: doHop, spin: doSpin, sway: doSway,
   qbounce: doQBounce, qsway: doQSway, morph: doMorph,
   desk: doDesk, seal: doSeal, goledge: doGoLedge,
-  dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive, mischief: doMischief,
+  dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive, mischief: doMischief, flutefly: doFluteFly, sleep: doSleep, wallbang: doWallBang, work: doWork,
+  peek: doPeek, brock: doBrock,
 };
 
 // 心情好更爱玩开心动作，心情差不想玩
@@ -1034,10 +1297,55 @@ function actionWeight(id) {
   return w;
 }
 
-// 待机时按权重随机挑一个已开启且做得动的动作；太久没互动且开了开关就走掉
+// ---------- 智能决策（Kimi 大脑） ----------
+// 待机动作到了「合适的时机」先问模型：动作+台词配套由它定；没配 key / 失败 / 超时回退随机。
+// 两次问脑至少隔 BRAIN_GAP 秒，避免每个待机 tick 都打 API
+const BRAIN_GAP = 45;
+let lastBrain = 0;
+const recentActs = []; // 最近做过的动作名，给模型避重复
+
+// 返回 { action: 'id' | 'none', say } 或 null（回退随机）
+async function askBrain() {
+  const nowSec = performance.now() / 1000;
+  if (nowSec - lastBrain < BRAIN_GAP) return null;
+  const pool = [];
+  for (const id in ACTIONS) {
+    const a = ACTIONS[id];
+    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id)) continue;
+    pool.push({ id, name: a.name, intrusive: !!a.intrusive });
+  }
+  if (!pool.length) return null;
+  lastBrain = nowSec; // 先占位，失败了也别连着问
+  let r;
+  try {
+    r = await window.pet.decideAction({
+      form,
+      stats: { jing: stats.jing, qi: stats.qi, shen: stats.shen, mood: stats.mood, touming: stats.touming },
+      idleSec: Math.round(nowSec - lastInteract),
+      time: new Date().toTimeString().slice(0, 5),
+      actions: pool,
+      recent: recentActs.slice(-6),
+    });
+  } catch { return null; }
+  if (!r || !r.ok || typeof r.action !== 'string') return null;
+  if (r.action !== 'none' && !pool.some((p) => p.id === r.action)) return null; // 模型瞎编的 id 不执行
+  return { action: r.action, say: typeof r.say === 'string' ? r.say.trim().slice(0, 80) : '' };
+}
+
+// 待机时决定做什么：优先模型决策，其次按权重随机；太久没互动且开了开关就走掉
+// 决策里要等模型（网络），用 idleDeciding 挡住重入，防止一次决策没完又叠一次
+let idleDeciding = false;
 async function idleRandom() {
+  if (idleDeciding) return;
+  idleDeciding = true;
+  try { await idleRandomOnce(); } finally { idleDeciding = false; }
+}
+
+async function idleRandomOnce() {
+  // 熄屏/锁屏/休眠中：不做任何自主动作，安静等主人回来
+  if (screenAsleep) { idleWait = nextIdleWait(2, 5); return; }
   if (performance.now() / 1000 - lastInteract > IGNORE_AFTER) {
-    if (enabled('leave')) {
+    if (enabled('leave') && Math.random() < 0.25) { // 走了走了概率降到 1/4
       applyEffect('leave');
       logEvent('自主', '太久没人理，自己走了走了');
       doLeave();
@@ -1046,11 +1354,40 @@ async function idleRandom() {
   }
   // 在外面浪太久了先回家
   if (await checkHome()) return;
+  // 被冷落了：没事就去趴桌睡一会儿
+  if (performance.now() / 1000 - lastInteract > 25 && enabled('sleep') && canAfford('sleep') && Math.random() < 0.45) {
+    applyEffect('sleep');
+    logEvent('自主', '没人理，趴桌上睡着了');
+    doSleep();
+    return;
+  }
   // 精快空了：姐姐形态下去桌后休息回精
   if (stats.jing < 15 && form === 'normal' && enabled('desk') && canAfford('desk') && Math.random() < 0.4) {
     say('有点累了…', 1500);
     logEvent('系统', '体力快空了，去桌后休息回精');
     doDesk();
+    return;
+  }
+  // 神（耐心）见底：烦躁了去撞墙发泄
+  if (stats.shen < 30 && enabled('wallbang') && canAfford('wallbang') && Math.random() < 0.5) {
+    applyEffect('wallbang');
+    doWallBang();
+    return;
+  }
+  // 合适的时机：问大脑，动作和台词配套由模型决定，日志记「智能」
+  const brain = await askBrain();
+  if (brain) {
+    if (brain.action === 'none') {
+      if (brain.say) say(brain.say, 2600);
+      logEvent('智能', brain.say ? `没动，就说了句：${brain.say}` : '想了想，继续趴着不动');
+      idleWait = nextIdleWait(2, 5);
+      return;
+    }
+    applyEffect(brain.action);
+    recentActs.push(ACTIONS[brain.action].name);
+    logEvent('智能', `自己决定「${ACTIONS[brain.action].name}」${brain.say ? `：${brain.say}` : ''}`);
+    DISPATCH[brain.action]();
+    if (brain.say) say(brain.say, 2600); // 在动作自带台词之后说，模型的台词优先
     return;
   }
   let total = 12 / freqFactor(); // 「继续发呆」的权重
@@ -1066,7 +1403,8 @@ async function idleRandom() {
   for (const [id, w] of pool) {
     if ((r -= w) < 0) {
       applyEffect(id);
-      logEvent('自主', `自己玩起了「${ACTIONS[id].name}」`);
+      recentActs.push(ACTIONS[id].name);
+      logEvent('自主', `随机玩起了「${ACTIONS[id].name}」`);
       DISPATCH[id]();
       return;
     }
@@ -1076,10 +1414,26 @@ async function idleRandom() {
 
 // 数值缓慢变化：恢复精/气/神，冷落涨透明值和降心情
 let lastChatter = performance.now() / 1000;
+// 主动搭话：用户闲置 4 分钟后才可能触发，两次至少隔 8 分钟
+const PROACTIVE_AFTER = 240;
+const PROACTIVE_COOLDOWN = 480;
+let lastProactive = 0;
+
+// 有 key 才调大模型；拿到的话用粘性气泡说（需点击关闭，区别于自言自语）
+async function maybeProactiveChat() {
+  try {
+    const cfg = await window.pet.getChatConfig();
+    if (!cfg || !cfg.hasKey) return;
+    const r = await window.pet.chatProactive();
+    if (r && r.ok && r.text) saySticky(r.text);
+  } catch {}
+}
+
 setInterval(() => {
+  if (screenAsleep) return; // 熄屏/休眠中：一切暂停，安静等主人回来
   const idleFor = performance.now() / 1000 - lastInteract;
   if (idleFor > 45) addStat('touming', 0.8);
-  addStat('jing', state.startsWith('desk') ? 2.5 : 0.4);
+  addStat('jing', state === 'sleeping' ? 3 : state.startsWith('desk') ? 2.5 : 0.4);
   addStat('qi', 0.35);
   if (idleFor > 10) addStat('shen', 0.4);
   if (idleFor > 60) addStat('mood', -0.15);
@@ -1094,7 +1448,73 @@ setInterval(() => {
     lastChatter = nowSec;
     say(pickPhrase(), 2800);
   }
+  // 有 key 且闲置久了：主动调大模型找主人搭话（粘性气泡，需点击关闭）
+  if (state === 'idle' && !stickyActive && idleFor > PROACTIVE_AFTER && nowSec - lastProactive > PROACTIVE_COOLDOWN) {
+    lastProactive = nowSec;
+    maybeProactiveChat();
+  }
 }, 1000);
+
+// ---------- 惊吓检测：光标贴着 Kira 时晃鼠标 / 连按方向键 → 害怕地尖叫快跑 ----------
+// 光标由渲染层 60ms 轮询（主进程 screen.getCursorScreenPoint，无需权限）；
+// 方向键由主进程的 tools/keys（CGEventTap）转发，没权限时这条路自动失效，晃鼠标检测不受影响
+const SCARE_COOLDOWN = 12; // 秒，一次吓跑后缓缓，别被连着吓
+const cursorTrail = [];    // 最近 0.9s 的光标采样 {x, y, t}
+let arrowTimes = [];       // 最近 1.2s 的方向键时间戳
+let lastScare = 0;
+
+// 轴上方向折返次数（滤掉 <4px 的抖动噪声）
+function countReversals(vals) {
+  let n = 0, prev = 0;
+  for (let i = 1; i < vals.length; i++) {
+    const d = vals[i] - vals[i - 1];
+    if (Math.abs(d) < 4) continue;
+    const s = Math.sign(d);
+    if (prev && s !== prev) n++;
+    prev = s;
+  }
+  return n;
+}
+
+// 0.9s 内同一轴折返 4 次以上且幅度 >60px = 在晃鼠标
+function isShaking(trail) {
+  if (trail.length < 6) return false;
+  const xs = trail.map((p) => p.x);
+  const ys = trail.map((p) => p.y);
+  return (countReversals(xs) >= 4 && Math.max(...xs) - Math.min(...xs) > 60) ||
+         (countReversals(ys) >= 4 && Math.max(...ys) - Math.min(...ys) > 60);
+}
+
+async function scareTick() {
+  const c = await window.pet.getCursor();
+  const t = performance.now();
+  cursorTrail.push({ x: c.x, y: c.y, t });
+  while (cursorTrail.length && t - cursorTrail[0].t > 900) cursorTrail.shift();
+  arrowTimes = arrowTimes.filter((at) => t - at < 1200);
+  const nowSec = t / 1000;
+  // 冷却中或正在做别的动作时只看不动
+  if (nowSec - lastScare < SCARE_COOLDOWN) return;
+  if (state !== 'idle' && state !== 'walk') return;
+  if (screenAsleep) return; // 熄屏中不被吓
+  const shake = isShaking(cursorTrail);
+  const arrows = arrowTimes.length >= 4; // 1.2s 内连按 4 次方向键
+  if (!shake && !arrows) return;
+  // 与光标重合或紧挨着（窗口外扩 60px）才会被吓到
+  const [px, py] = await window.pet.getPos();
+  const near = c.x >= px - 60 && c.x <= px + WIN_W + 60 && c.y >= py - 60 && c.y <= py + WIN_H + 60;
+  if (!near) return;
+  lastScare = nowSec;
+  cursorTrail.length = 0;
+  arrowTimes = [];
+  // 背对光标方向尖叫冲刺：一趟冲到边上急停，离开当前位置
+  const awayDir = c.x < px + WIN_W / 2 ? 1 : -1;
+  applyEffect('dash');
+  logEvent('交互', shake ? '被晃来晃去的鼠标吓到，尖叫着跑开了' : '被方向键一顿猛戳吓到，尖叫着跑开了');
+  doDash({ dir: awayDir, maxLaps: 0, line: pick(LINES.scared) });
+}
+
+window.pet.onArrowKey(() => { arrowTimes.push(performance.now()); });
+setInterval(() => { scareTick().catch(() => {}); }, 60);
 
 // 定期把数值存盘
 setInterval(() => window.pet.saveStats(stats), 15000);
@@ -1108,6 +1528,26 @@ let dragging = false;
 let downX = 0, downY = 0;
 let pressTimer = null;      // 长按头发的计时器
 let longPressFired = false; // 本次按压已触发过长按彩蛋
+let waistPress = false;     // 按在腰间小本子区域（松开才开笔记本，拖走则取消）
+let dragSamples = [];       // 睡觉中被拎着晃的轨迹采样（晃醒检测）
+let sleepClicks = 0;        // 睡觉中连续点击次数（8 次才醒）
+let lastSleepClick = 0;
+
+// 晃醒检测：600ms 内横向大幅来回 ≥4 次换向
+function isShakeHard(samples) {
+  const now = performance.now();
+  const s = samples.filter((p) => now - p.t < 600);
+  if (s.length < 6) return false;
+  let flips = 0, travel = 0, prevSign = 0;
+  for (let i = 1; i < s.length; i++) {
+    const d = s[i].x - s[i - 1].x;
+    travel += Math.abs(d);
+    const sign = d > 4 ? 1 : d < -4 ? -1 : 0;
+    if (sign && prevSign && sign !== prevSign) flips++;
+    if (sign) prevSign = sign;
+  }
+  return flips >= 4 && travel > 600;
+}
 
 // 可以被戳一戳打断的状态（在这些状态下点击会立即重新触发戳一戳）
 const POKEABLE_STATES = new Set(['idle', 'walk', 'sway', 'land', 'poke', 'hop', 'spin', 'qbounce', 'qsway']);
@@ -1119,20 +1559,15 @@ stage.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   lastInteract = performance.now() / 1000;
   addStat('touming', -100); // 被注意到了，立刻恢复存在感
-  // 点腰间的小本子 = 打开笔记本（两种形态、安静站着时）
+  // 腰间小本子区域：先记账（可能点开笔记本），但如果直接拖走就取消
   const waistPos = form === 'normal' ? WAIST : form === 'chibi' ? WAIST_CHIBI : null;
-  if (waistPos && (state === 'idle' || state === 'walk') &&
-      Math.hypot(e.clientX - waistPos.x, e.clientY - waistPos.y) < 42) {
-    window.pet.openNotebook();
-    logEvent('交互', '打开了 Kira Note');
-    return;
-  }
+  waistPress = !!(waistPos && (state === 'idle' || state === 'walk') &&
+    Math.hypot(e.clientX - waistPos.x, e.clientY - waistPos.y) < 42);
   // 化剑/兜风/捣乱期间不响应戳/拖
   if (state === 'swordform' || state === 'swordwait' || state === 'driveform' || state === 'drivewait' ||
       state === 'mischiefform' || state === 'mischiefwait') return;
   // 收进法宝过程中：点卡牌 = 提前放她出来，其余时间不响应戳/拖
-  if (state === 'seal') {
-    if (seal.sub === 'float') {
+  if (state === 'seal') {    if (seal.sub === 'float') {
       seal.sub = 'release';
       seal.subT = 0;
       fxBurst(FLOAT_POS.x, FLOAT_POS.y, 12, 12, 60);
@@ -1168,19 +1603,39 @@ window.addEventListener('mousemove', (e) => {
   if (!pressing) return;
   if (!dragging && Math.hypot(e.screenX - downX, e.screenY - downY) > 5) {
     dragging = true;
+    waistPress = false; // 拖走了，不开笔记本
     stage.classList.add('dragging');
     addStat('shen', -10); // 被拎着走很没耐心
     addStat('mood', -2);
     logEvent('交互', '被拎起来了');
+    dragSamples.length = 0; // 睡觉晃醒检测采样清零
     // 从走远状态直接拎回来：恢复正常大小和当前形态的正面图
     curSize = 1;
-    if (state.startsWith('desk')) resetDesk();
-    const front = FORMS[form].front;
-    if (sprite.dataset.cur !== front) { sprite.dataset.cur = front; sprite.src = front; }
-    enter('drag');
-    say(pick(LINES.drag), 1200);
+    if (state.startsWith('desk') || state.startsWith('work')) resetDesk();
+    // 睡觉中被拎走：不换图不切状态，继续睡，只挪窗口
+    if (!state.startsWith('sleep')) {
+      const front = FORMS[form].front;
+      if (sprite.dataset.cur !== front) { sprite.dataset.cur = front; sprite.src = front; }
+      enter('drag');
+      say(pick(LINES.drag), 1200);
+    }
   }
-  if (dragging) window.pet.dragMove();
+  if (dragging) {
+    window.pet.dragMove();
+    // 睡觉中被拎起来使劲晃：600ms 内来回甩 ≥4 次就晃醒
+    if (state.startsWith('sleep')) {
+      dragSamples.push({ x: e.screenX, t: performance.now() });
+      if (dragSamples.length > 50) dragSamples.shift();
+      if (isShakeHard(dragSamples)) {
+        dragging = false;
+        stage.classList.remove('dragging');
+        window.pet.dragEnd();
+        logEvent('交互', '被使劲晃醒了');
+        doWake();
+        say('呜哇别晃了别晃了！', 1800);
+      }
+    }
+  }
 });
 
 window.addEventListener('mouseup', () => {
@@ -1191,17 +1646,57 @@ window.addEventListener('mouseup', () => {
   if (dragging) {
     dragging = false;
     stage.classList.remove('dragging');
-    facing = 1; // 从侧面图状态拖走的，回正
-    enter('idle');
-    idleWait = nextIdleWait(1, 3);
     // 落点记为常驻位置并持久化
     window.pet.getPos().then(([x, y]) => {
       homePos = { x, y };
       window.pet.setActions({ _home: homePos });
     });
     logEvent('交互', '被安置在新的常驻位置');
-  } else if (!longPressFired && POKEABLE_STATES.has(state)) {
-    doPoke(); // 原地点击 = 戳一戳，可被打断并立即重新触发
+    // 睡觉中拖走放下：不切状态，继续睡
+    if (!state.startsWith('sleep')) {
+      facing = 1; // 从侧面图状态拖走的，回正
+      enter('idle');
+      idleWait = nextIdleWait(1, 3);
+    }
+    return;
+  }
+  // 睡觉中连点：点一下换个睡姿，超过 8 次才醒，偶尔嘟囔梦话
+  if (state && state.startsWith('sleep')) {
+    const now = performance.now();
+    sleepClicks = now - lastSleepClick < 3000 ? sleepClicks + 1 : 1;
+    lastSleepClick = now;
+    if (sleepClicks >= 8) {
+      sleepClicks = 0;
+      logEvent('交互', '被连点 8 下吵醒了');
+      doWake();
+      say('别点了别点了！醒啦！', 1800);
+    } else {
+      if (state === 'sleeping') cycleSleepPose();
+      if (Math.random() < 0.3) say(pick(SLEEP_MUMBLE), 1500);
+    }
+    return;
+  }
+  if (!longPressFired && POKEABLE_STATES.has(state)) {
+    if (waistPress) {
+      // 腰间原地松开：打开笔记本
+      waistPress = false;
+      window.pet.openNotebook();
+      logEvent('交互', '打开了 Kira Note');
+    } else {
+      doPoke(); // 原地点击 = 戳一戳，可被打断并立即重新触发
+    }
+  }
+});
+
+// 拖文件夹给她：识别音频 + cue 询问切分
+stage.addEventListener('dragover', (e) => e.preventDefault());
+stage.addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (!e.dataTransfer.files.length) return;
+  const p = window.pet.getPathForFile(e.dataTransfer.files[0]);
+  if (p) {
+    logEvent('交互', '拖了个文件夹给我识别');
+    window.pet.folderDrop(p);
   }
 });
 
@@ -1214,7 +1709,7 @@ window.pet.onMenuAction((id) => {
   lastInteract = performance.now() / 1000;
   addStat('touming', -100);
   if (id === 'stats') { showStats(); logEvent('交互', '查看了你的数值'); return; }
-  if (state.startsWith('desk') && id !== 'desk') resetDesk(); // 桌子状态下切别的动作，先撤桌
+  if ((state.startsWith('desk') || state.startsWith('work')) && id !== 'desk' && id !== 'work') resetDesk(); // 桌子状态下切别的动作，先撤桌
   if (id === 'leave') {
     applyEffect('leave');
     logEvent('交互', '你让她走了走了');
@@ -1222,11 +1717,21 @@ window.pet.onMenuAction((id) => {
     return;
   }
   // 菜单切换形态
-  if (id === 'form-normal' || id === 'form-chibi') {
-    const target = id === 'form-chibi' ? 'chibi' : 'normal';
-    if (target !== form) {
+  if (id.startsWith('form-')) {
+    if (id === 'form-sleep') {
+      // 睡觉形态：一直睡到被晃醒/点够 8 下/手动切走
+      if (!state.startsWith('sleep')) {
+        applyEffect('sleep');
+        logEvent('交互', '你让她进入睡觉形态');
+        doSleep(1e9);
+      }
+      return;
+    }
+    const target = id.slice(5); // normal / chibi / flute / back
+    const label = { normal: '姐姐', chibi: 'Q版', flute: '法宝', back: '背对' }[target];
+    if (label && target !== form) {
       applyEffect('morph');
-      logEvent('交互', `你让她切到${target === 'chibi' ? 'Q版' : '姐姐'}形态`);
+      logEvent('交互', `你让她切到${label}形态`);
       doMorphTo(target);
     }
     return;
@@ -1260,6 +1765,14 @@ function frame(now) {
 
   switch (state) {
     case 'idle': {
+      if (form === 'flute') {
+        // 法宝待机：悬浮 + 慢摆 + 偶尔闪星光
+        ty = -30 + 6 * Math.sin(t * 1.8);
+        rot = 8 * Math.sin(t * 0.9);
+        sy = 1 + 0.01 * Math.sin(t * 2);
+        if (Math.random() < 0.008) fxStar(170 + rand(-30, 30), 280 + rand(-40, 40), rand(0.6, 1));
+        break;
+      }
       // 呼吸起伏 + 轻微摇晃
       sy = 1 + 0.015 * Math.sin(t * 2.2);
       rot = 0.8 * Math.sin(t * 0.9);
@@ -1367,6 +1880,49 @@ function frame(now) {
       if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(1.5, 4); }
       break;
     }
+    case 'sleepin': {
+      // 趴睡场景淡入盖过立绘（CSS transition 完成过渡）
+      if (stateT >= stateDur) {
+        zzzT = 1.2;
+        enter('sleeping', pendingSleepDur ?? rand(14, 22));
+        pendingSleepDur = null;
+      }
+      break;
+    }
+    case 'sleeping': {
+      // 趴睡中：呼吸缩放（只动人物层，桌子不动）+ Zzz 飘字 + 梦话 + 偶尔翻身换姿势
+      sleepTop.style.transform = `scale(${1 + 0.012 * Math.sin(t * 1.6)})`;
+      zzzT -= dt;
+      if (zzzT <= 0) {
+        // 一串 Z 从头上飘走，越飘越大；头部位置按当前睡姿查表
+        const head = SLEEP_HEAD[sleepPoseFile()] || SLEEP_HEAD['sleep1.png'];
+        fxEl('text', {
+          x: head.x + rand(-25, 25), y: head.y + rand(-10, 10),
+          'font-family': '"PingFang SC", sans-serif', 'font-weight': 900, 'font-style': 'italic',
+          'font-size': rand(16, 30), fill: '#7d6fd0', stroke: '#fff', 'stroke-width': 5, 'paint-order': 'stroke',
+        }, 'fx-pop').textContent = 'Z';
+        zzzT = rand(1.8, 2.8);
+        if (Math.random() < 0.25) say(pick(SLEEP_MUMBLE), 1800);
+      }
+      flipT -= dt;
+      if (flipT <= 0) {
+        flipT = rand(6, 9);
+        if (Math.random() < 0.5) cycleSleepPose();
+      }
+      if (stateT >= stateDur) doWake();
+      break;
+    }
+    case 'sleepout': {
+      // 伸个懒腰（横躺伸手图），然后场景淡出、立绘回来
+      if (stateT >= stateDur) {
+        sleepImg.style.opacity = 0;
+        setSpriteVeiled(false);
+        enter('idle');
+        idleWait = nextIdleWait(3, 6);
+        if (Math.random() < 0.6) say('睡得好香~', 1800);
+      }
+      break;
+    }
     case 'spin': {
       // 绕垂直中线翻转的纸片人效果：rotateY 转一整圈
       const k = easeInOut(stateT / stateDur);
@@ -1380,6 +1936,60 @@ function frame(now) {
       rot = 9 * Math.sin(stateT * 10) * (1 - k * 0.3);
       ty = -3 * Math.abs(Math.sin(stateT * 5));
       if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(2, 5); }
+      break;
+    }
+    case 'peekout': { // 偷偷回头：翻牌转到侧面
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, SIDE_SRC);
+      if (stateT >= stateDur) enter('peekhold', rand(0.5, 0.9));
+      break;
+    }
+    case 'peekhold': { // 瞟一眼：微微倾身
+      rot = -4 + 1.5 * Math.sin(t * 3);
+      if (stateT >= stateDur) enter('peekin', 0.35);
+      break;
+    }
+    case 'peekin': { // 翻回去继续背对
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, FORMS[form].front);
+      if (stateT >= stateDur) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
+      break;
+    }
+    case 'brock': { // 赌气晃晃：背对着小幅快晃
+      const k = stateT / stateDur;
+      rot = 6 * Math.sin(stateT * 8) * (1 - k * 0.4);
+      ty = -2 * Math.abs(Math.sin(stateT * 4));
+      if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(2, 5); }
+      break;
+    }
+    case 'fluteturn': { // 转过身去
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, FORMS[form].back);
+      if (stateT >= stateDur) enter('flutefly', 9);
+      break;
+    }
+    case 'flutefly': {
+      // 她背对着轻轻起伏；笛子绕身高速乱飞，半径和高度都在变，穿到身后时压暗
+      sy = 1 + 0.012 * Math.sin(t * 2.2);
+      rot = 0.8 * Math.sin(t * 0.9);
+      const a = stateT * 3.2 + Math.sin(stateT * 0.7) * 1.2; // 变速公转
+      const rx = 90 + 40 * Math.sin(stateT * 1.1);
+      const ry = 110 + 30 * Math.sin(stateT * 0.9 + 2);
+      // 轨道钳制在窗口可视区内（含旋转余量）
+      const fx2 = Math.min(280, Math.max(60, 170 + Math.cos(a) * rx));
+      const fy = Math.min(470, Math.max(150, 320 + Math.sin(a) * ry * 0.8));
+      const behind = Math.sin(a) < -0.2;
+      // 切向角 + 快速自旋
+      fluteShow(fx2, fy, a * 57.3 + stateT * 300, behind);
+      // 拖尾星光
+      if (Math.random() < 0.12) fxEl('circle', { cx: fx2 + rand(-6, 6), cy: fy + rand(-6, 6), r: rand(1.5, 3), fill: '#cdb9ff' }, 'fx-pop');
+      if (stateT >= stateDur) { fluteHide(); enter('fluteback', 0.5); }
+      break;
+    }
+    case 'fluteback': { // 转回来
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, FORMS[form].front);
+      if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(3, 6); }
       break;
     }
     case 'drag': {
@@ -1457,6 +2067,10 @@ function frame(now) {
         // Q版点了上桌/收法宝：变回姐姐后接着执行
         if (pendingDesk) { pendingDesk = false; doDesk(); }
         else if (pendingSeal) { pendingSeal = false; doSeal(); }
+        else if (pendingFlute) { pendingFlute = false; doFluteFly(); }
+        else if (pendingSleep) { pendingSleep = false; doSleep(); }
+        else if (pendingWall) { pendingWall = false; doWallBang(); }
+        else if (pendingWork) { pendingWork = false; doWork(); }
         else { enter('idle'); idleWait = nextIdleWait(3, 6); }
       }
       break;
@@ -1524,6 +2138,87 @@ function frame(now) {
       sy = 1 + stretch;
       sx = 1 - stretch * 0.6;
       if (ledge.py >= ledge.floorY) enter('land', 0.16);
+      break;
+    }
+    case 'wallgoin': { // 翻牌转侧面，准备去撞墙
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, SIDE_SRC);
+      if (stateT >= stateDur) enter('wallgo');
+      break;
+    }
+    case 'wallgo': {
+      // 朝墙走（斜线移动）
+      const dx = wall.tx - wall.px, dy = wall.ty - wall.py;
+      const dist = Math.hypot(dx, dy);
+      const step = 280 * dt;
+      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+      rot = Math.sin(stateT * 9) * 2.5;
+      if (dist <= step + 2) {
+        window.pet.moveBy(dx, dy);
+        wall.px = wall.tx; wall.py = wall.ty;
+        wall.phase = 'wind'; wall.phaseT = 0;
+        enter('wallbang');
+      } else {
+        const mx = dx / dist * step, my = dy / dist * step;
+        window.pet.moveBy(mx, my);
+        wall.px += mx; wall.py += my;
+      }
+      if (stateT > 12) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); }
+      break;
+    }
+    case 'wallbang': {
+      // 撞墙循环：蓄力后撤 → 助跑撞 → 震屏回弹，撞 maxCount 次后发晕
+      wall.phaseT += dt;
+      const d = wall.dir; // 撞的方向
+      if (wall.phase === 'wind') {
+        // 后仰蓄力，稍微后撤
+        rot = -d * 14 * Math.min(wall.phaseT / 0.35, 1);
+        window.pet.moveBy(-d * 60 * dt, 0);
+        wall.px -= d * 60 * dt;
+        if (wall.phaseT >= 0.35) { wall.phase = 'charge'; wall.phaseT = 0; }
+      } else if (wall.phase === 'charge') {
+        // 助跑撞上去
+        rot = d * 10;
+        const step = 700 * dt;
+        window.pet.moveBy(d * step, 0);
+        wall.px += d * step;
+        if (Math.abs(wall.px - wall.tx) <= step + 2) {
+          // 撞上了：震屏 + 压扁 + 咚
+          wall.phase = 'hit'; wall.phaseT = 0;
+          wall.count++;
+          fxBurst(d > 0 ? 320 : 20, 300, 10, 8, 40);
+          fxText(pick(['咚！', '砰！', 'Duang！']), FOOT_X, 300, 30);
+          logEvent('自主', `撞墙 ${wall.count}/${wall.maxCount}`);
+        }
+      } else if (wall.phase === 'hit') {
+        // 震屏抖动 + 压扁，然后弹开
+        window.pet.moveBy(rand(-3, 3), rand(-2, 2));
+        sy = 0.84;
+        sx = 1.14;
+        if (wall.phaseT >= 0.28) {
+          window.pet.moveBy(-d * 60, 0);
+          wall.px -= d * 60;
+          wall.phase = 'back'; wall.phaseT = 0;
+        }
+      } else if (wall.phase === 'back') {
+        // 弹开退后，准备下一撞
+        window.pet.moveBy(-d * 200 * dt, 0);
+        wall.px -= d * 200 * dt;
+        rot = -d * 6;
+        if (wall.phaseT >= 0.45) {
+          wall.phaseT = 0;
+          if (wall.count >= wall.maxCount) { wall.phase = 'wind'; enter('walldizzy', 2.2); }
+          else wall.phase = 'wind';
+        }
+      }
+      break;
+    }
+    case 'walldizzy': {
+      // 撞晕了：摇晃 + 头上转星星
+      rot = 8 * Math.sin(stateT * 6);
+      sy = 1 + 0.02 * Math.sin(t * 3);
+      if (Math.random() < 0.1) fxStar(170 + rand(-50, 50), 130 + rand(-15, 15), rand(0.5, 0.9));
+      if (stateT >= stateDur) { doGoHome(); }
       break;
     }
     case 'dash': {
@@ -1659,17 +2354,85 @@ function frame(now) {
       }
       break;
     }
+    case 'workin': {
+      // 桌子升起，进入工作状态
+      const k = easeInOut(stateT / stateDur);
+      ty = DESK_TY * k;
+      if (stateT >= stateDur) enter('working', rand(8, 14));
+      break;
+    }
+    case 'working': {
+      // 快速捯饬：高频小幅抖动 + 烟雾 + 笛子纸张乱飞
+      ty = DESK_TY - 2 * Math.abs(Math.sin(stateT * 8));
+      rot = 3 * Math.sin(stateT * 14);
+      sy = 1 + 0.015 * Math.sin(stateT * 8);
+      // 烟雾
+      work.smokeT -= dt;
+      if (work.smokeT <= 0) {
+        fxEl('ellipse', {
+          cx: 170 + rand(-46, 46), cy: 470 + rand(-12, 12),
+          rx: rand(7, 13), ry: rand(5, 9),
+          fill: '#e8e6f2', stroke: '#cfc9e0', 'stroke-width': 1,
+        }, 'fx-smoke');
+        work.smokeT = rand(0.3, 0.55);
+      }
+      // 笛子绕头乱飞
+      const a = stateT * 6;
+      const fx2 = 170 + Math.cos(a) * 72;
+      const fy = 330 + Math.sin(a) * 46;
+      fluteShow(fx2, fy, a * 57.3 + stateT * 220, Math.sin(a) < -0.3);
+      // 纸张乱飞
+      work.paperT -= dt;
+      if (work.paperT <= 0) {
+        fxEl('rect', {
+          x: 170 + rand(-70, 70), y: 400 + rand(-40, 30), width: 12, height: 16,
+          fill: '#fff', stroke: '#cfc9e0', 'stroke-width': 1,
+          transform: `rotate(${rand(-35, 35)})`,
+        }, 'fx-pop');
+        work.paperT = rand(0.5, 0.9);
+      }
+      // 台词
+      work.lineT -= dt;
+      if (work.lineT <= 0) {
+        say(pick(LINES.work), 1600);
+        work.lineT = rand(3, 5);
+      }
+      if (stateT >= stateDur) { fluteHide(); hideDesk(); enter('workout', 0.5); }
+      break;
+    }
+    case 'workout': {
+      // 桌子撤走，回待机
+      const k = easeInOut(stateT / stateDur);
+      ty = DESK_TY * (1 - k);
+      if (stateT >= stateDur) {
+        sprite.style.height = FORMS[form].height + 'px';
+        enter('idle');
+        idleWait = nextIdleWait(3, 6);
+      }
+      break;
+    }
   }
 
   sprite.style.transform =
     `translateX(-50%) translate(${tx}px, ${ty}px) rotate(${rot}deg) skewX(${skew}deg) perspective(700px) rotateY(${rotY}deg) scale(${sx * facing * curSize}, ${sy * curSize})`;
 
   // 气泡每帧跟着立绘头顶走：位置 = 头顶上方，缩放 = 立绘的远近缩放
-  const spriteH = state.startsWith('desk') ? 700 : FORMS[form].height;
-  const headY = WIN_H + ty - spriteH * sy * curSize;
-  bubble.style.left = `calc(50% + ${tx}px)`;
-  bubble.style.top = `${headY - bubble.offsetHeight - 6}px`;
-  bubble.style.transform = `translateX(-50%) scale(${curSize})`;
+  const spriteH = state.startsWith('desk') || state.startsWith('work') ? 700 : FORMS[form].height;
+  // 睡觉场景中她的头在场景图上部，气泡贴那里
+  const headY = state.startsWith('sleep') ? 280 : WIN_H + ty - spriteH * sy * curSize;
+  const bScale = state.startsWith('sleep') ? 1 : curSize;
+  // 可视区域 = 当前窗口：气泡无论缩放/多宽/多高都不出界（四边各留 8px）
+  const bw = bubble.offsetWidth * bScale;
+  const bh = bubble.offsetHeight * bScale;
+  // 气泡比窗口还宽/还高时退化为居中/贴顶，钳制边界反转时不能再用
+  const minCx = 8 + bw / 2;
+  const maxCx = WIN_W - 8 - bw / 2;
+  const cx = minCx > maxCx ? WIN_W / 2 : Math.min(Math.max(WIN_W / 2 + tx, minCx), maxCx);
+  const maxTop = WIN_H - 8 - bh;
+  const top = maxTop < 8 ? 8 : Math.min(Math.max(headY - bh - 6, 8), maxTop);
+  bubble.style.left = `${cx}px`;
+  bubble.style.top = `${top}px`;
+  bubble.style.transform = `translateX(-50%) scale(${bScale})`;
 
   requestAnimationFrame(frame);
 }

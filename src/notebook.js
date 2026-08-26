@@ -189,7 +189,7 @@ function fmt(t) {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function entryEl({ t, type, text }) {
+function entryEl({ t, type, text }, count) {
   const e = document.createElement('div');
   e.className = 'entry';
   const time = document.createElement('span');
@@ -201,34 +201,75 @@ function entryEl({ t, type, text }) {
   const tx = document.createElement('span');
   tx.textContent = text;
   e.append(time, tp, tx);
+  if (count > 1) {
+    // 同类合并的条数徽标
+    const c = document.createElement('span');
+    c.className = 'cnt';
+    c.textContent = `×${count}`;
+    e.appendChild(c);
+  }
   return e;
 }
 
+// 日志页筛选/合并开关：只看大模型、同类合并（默认开）
+let logFilterLLM = false;
+let logMergeSame = true;
+let cachedLogs = [];
+
+// 同类（类型+文本相同）合并：按 key 聚合，保留最新时间戳的位置，带条数
+function mergeLogs(logs) {
+  const byKey = new Map();
+  for (const e of logs) {
+    const k = `${e.type}|${e.text}`;
+    const cur = byKey.get(k);
+    if (cur) {
+      cur.count++;
+      if (e.t > cur.entry.t) cur.entry = e;
+    } else {
+      byKey.set(k, { entry: e, count: 1 });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => b.entry.t - a.entry.t);
+}
+
 function renderLogs(logs) {
+  cachedLogs = logs;
   logList.innerHTML = '';
-  if (!logs.length) {
+  let list = logFilterLLM ? logs.filter((e) => e.type === '大模型') : logs;
+  if (!list.length) {
     const d = document.createElement('div');
     d.className = 'empty';
-    d.textContent = '还没有日志，去陪她玩一会儿吧';
+    d.textContent = logFilterLLM ? '还没有大模型参与的日志，配上 key 聊几句吧' : '还没有日志，去陪她玩一会儿吧';
     logList.appendChild(d);
     return;
   }
-  for (let i = logs.length - 1; i >= 0; i--) logList.appendChild(entryEl(logs[i]));
+  if (logMergeSame) {
+    for (const g of mergeLogs(list)) logList.appendChild(entryEl(g.entry, g.count));
+  } else {
+    for (let i = list.length - 1; i >= 0; i--) logList.appendChild(entryEl(list[i], 1));
+  }
 }
 
 function loadLogs() {
   window.pet.getLogs().then(renderLogs);
 }
 
-window.pet.onLog((entry) => {
-  const empty = logList.querySelector('.empty');
-  if (empty) empty.remove();
-  logList.prepend(entryEl(entry));
-});
+window.pet.onLog(() => loadLogs()); // 有合并/筛选时局部插一行容易错位，直接重拉
 
 document.getElementById('clearLog').addEventListener('click', () => {
   window.pet.clearLogs();
   renderLogs([]);
+});
+
+document.getElementById('filterLLM').addEventListener('click', (e) => {
+  logFilterLLM = !logFilterLLM;
+  e.target.classList.toggle('on', logFilterLLM);
+  renderLogs(cachedLogs);
+});
+document.getElementById('mergeSame').addEventListener('click', (e) => {
+  logMergeSame = !logMergeSame;
+  e.target.classList.toggle('on', logMergeSame);
+  renderLogs(cachedLogs);
 });
 
 // ---------- 历史页签：按天分文件，右侧 Time Machine 式导航 ----------
@@ -384,7 +425,11 @@ function freqIndex() {
   return best;
 }
 
-function isOn(id) { return actionSettings[id] !== false; }
+// 没设置过就用默认值（ACTIONS 里 off:true 的默认关，其余默认开）
+function isOn(id) {
+  const v = actionSettings[id];
+  return v !== undefined ? v : !(ACTIONS[id] && ACTIONS[id].off);
+}
 
 function applyPatch(patch) {
   Object.assign(actionSettings, patch);
