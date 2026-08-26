@@ -1,5 +1,5 @@
 // 桌宠主进程：透明无边框置顶窗口 + 窗口移动/菜单 IPC
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor, dialog, Tray, Menu, nativeImage } = require('electron');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const https = require('https');
@@ -12,6 +12,8 @@ const WIN_H = 620;
 
 // 枚举屏幕可见窗口的工具（CGWindowList，tools/windows.swift 编译而来）
 const WINDOWS_BIN = path.join(__dirname, '..', 'tools', 'windows');
+// 方向键全局监听（CGEventTap，tools/keys.swift 编译而来）；需要「输入监控」权限，没权限会自行退出
+const KEYS_BIN = path.join(__dirname, '..', 'tools', 'keys');
 
 let win = null;
 let overlay = null; // 全屏特效覆盖层（点击穿透）
@@ -188,6 +190,36 @@ function postSSE(url, headers, payload, onDelta) {
   });
 }
 
+// 智能决策：待机时让模型从候选动作里挑一个并配台词（动作+台词配套）
+// 返回 { action: 'id' | 'none', say }；失败抛错，由调用方兜底回退随机
+async function decideAction(ctx) {
+  const acts = ctx.actions.map((a) => `${a.id}（${a.name}${a.intrusive ? '，会跑到屏幕中间打扰用户' : ''}）`).join('、');
+  const s = ctx.stats || {};
+  const prompt = `现在是 ${ctx.time}，你以「${ctx.form === 'chibi' ? 'Q版' : '姐姐'}」形态待在用户桌面上，已经 ${ctx.idleSec} 秒没人和你互动了。
+你的数值：精 ${Math.round(s.jing ?? 0)}/100（体力）、气 ${Math.round(s.qi ?? 0)}/100（法力）、神 ${Math.round(s.shen ?? 0)}/100（耐心）、心情 ${Math.round(s.mood ?? 0)}/100、透明 ${Math.round(s.touming ?? 0)}/100（高说明被冷落）。
+接下来可以做这些动作：${acts}。
+最近做过：${(ctx.recent || []).join('、') || '无'}（别总重复）。
+结合此刻的状态和心情挑一个最想做的动作，并配一句贴合动作的台词；不想动就休息。
+只输出 JSON：{"action":"动作id或none","say":"一句台词"}，台词一两句、简短可爱。`;
+  const { content } = await postSSE(
+    'https://api.kimi.com/coding/v1/chat/completions',
+    { Authorization: `Bearer ${config.kimiKey}` },
+    {
+      model: 'kimi-k2-0905-preview',
+      messages: [{ role: 'system', content: KIRA_SYSTEM }, { role: 'user', content: prompt }],
+      max_tokens: 150,
+      stream: true,
+      thinking: { type: 'disabled' },
+    },
+    () => {}
+  );
+  const m = (content || '').match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('决策返回不是 JSON');
+  const d = JSON.parse(m[0]);
+  if (typeof d.action !== 'string') throw new Error('决策缺 action');
+  return { action: d.action, say: typeof d.say === 'string' ? d.say : '' };
+}
+
 // 动作/交互日志（持久化到 userData/logs.json，最多留 300 条）
 const LOG_FILE = path.join(app.getPath('userData'), 'logs.json');
 let logs = [];
@@ -197,6 +229,14 @@ function saveLogs() {
   try { fs.writeFileSync(LOG_FILE, JSON.stringify(logs)); } catch {}
 }
 
+// 主进程侧记日志（和渲染层的 logEvent 走 log-append 效果一致）
+function mainLog(type, text) {
+  logs.push({ t: Date.now(), type, text });
+  if (logs.length > 300) logs = logs.slice(-300);
+  saveLogs();
+  if (notebookWin) notebookWin.webContents.send('log-new', { t: Date.now(), type, text });
+}
+
 function listWindows() {
   return new Promise((resolve) => {
     execFile(WINDOWS_BIN, [], { maxBuffer: 4 * 1024 * 1024, timeout: 3000 }, (err, stdout) => {
@@ -204,6 +244,28 @@ function listWindows() {
       try { resolve(JSON.parse(stdout)); } catch { resolve([]); }
     });
   });
+}
+
+// 启动方向键监听：按一次方向键给桌宠窗口发一个 arrow-key 事件
+// 没编译 tools/keys 或没有「输入监控」权限时静默降级（只检测晃鼠标），不影响其它功能
+function startKeyMonitor() {
+  if (!fs.existsSync(KEYS_BIN)) return;
+  let child;
+  try {
+    child = execFile(KEYS_BIN, [], (err) => {
+      if (err) console.log('[keys] 监听进程退出（多半是缺输入监控权限）:', err.message.trim());
+    });
+  } catch { return; }
+  let buf = '';
+  child.stdout.on('data', (c) => {
+    buf += c;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      buf = buf.slice(i + 1);
+      if (win) win.webContents.send('arrow-key');
+    }
+  });
+  if (child.stderr) child.stderr.on('data', (c) => console.log('[keys]', String(c).trim()));
 }
 
 function createWindow() {
@@ -335,6 +397,29 @@ function clampToScreen(x, y) {
 app.whenReady().then(() => {
   createWindow();
   createOverlay();
+  startKeyMonitor();
+
+  // 菜单栏托盘图标：快速打开 Kira Note / 聊天，或退出
+  const tray = new Tray(nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray.png')));
+  tray.setToolTip('Kira');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开 Kira Note', click: () => openNotebook() },
+    { label: '实时聊天', click: () => openNotebook('chat') },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() },
+  ]));
+
+  // 熄屏/锁屏/休眠时通知桌宠暂停自主动作，唤醒恢复
+  let screenAsleep = false;
+  const notifyPower = (locked) => {
+    screenAsleep = locked;
+    if (win) win.webContents.send('power-state', { locked });
+  };
+  powerMonitor.on('lock-screen', () => notifyPower(true));
+  powerMonitor.on('unlock-screen', () => notifyPower(false));
+  powerMonitor.on('suspend', () => notifyPower(true));
+  powerMonitor.on('resume', () => notifyPower(false));
+  ipcMain.handle('get-power-state', () => screenAsleep);
 
   // 行走等自主移动：按增量移动窗口
   ipcMain.on('move-by', (_e, dx, dy) => {
@@ -367,6 +452,9 @@ app.whenReady().then(() => {
 
   // 桌宠当前窗口位置（渲染层自主移动时的基准）
   ipcMain.handle('get-pos', () => (win ? win.getPosition() : [0, 0]));
+
+  // 全局光标位置（惊吓检测轮询用，macOS 读光标不需要权限）
+  ipcMain.handle('get-cursor', () => screen.getCursorScreenPoint());
 
   // 屏幕可活动范围（暴走/御剑飞行用）
   ipcMain.handle('get-stage', () => {
@@ -422,6 +510,17 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('chat-history', () => chatHistory.slice(-30));
+
+  // 智能行动决策：待机时渲染层报上下文，模型挑动作+配台词；没配 key/失败都回 !ok，渲染层回退随机
+  ipcMain.handle('decide-action', async (_e, ctx) => {
+    if (!config.kimiKey || !ctx || !Array.isArray(ctx.actions) || !ctx.actions.length) return { ok: false };
+    try {
+      const d = await decideAction(ctx);
+      return { ok: true, action: d.action, say: d.say };
+    } catch {
+      return { ok: false };
+    }
+  });
 
   // 历史页：按天列出（新的在前，legacy 垫底），单天消息按 key 取
   ipcMain.handle('history-days', () => {
@@ -527,8 +626,7 @@ app.whenReady().then(() => {
   });
 
   // 找一块可以站上去的窗台：最前台的普通窗口的上沿
-  ipcMain.handle('find-ledge', async () => {
-    const wins = await listWindows();
+  ipcMain.handle('find-ledge', async () => {    const wins = await listWindows();
     const area = screen.getPrimaryDisplay().workArea;
     const w = wins.find((w) =>
       w.pid !== process.pid &&       // 排除桌宠自己的窗口
@@ -544,9 +642,66 @@ app.whenReady().then(() => {
     return { minX, maxX, y: Math.round(w.y), floorY: area.y + area.height - WIN_H };
   });
 
+  // 当前活跃窗口（最前台的普通窗口）：撞墙模式拿它的左右边沿当墙
+  ipcMain.handle('active-window', async () => {
+    const wins = await listWindows();
+    const w = wins.find((w) => w.pid !== process.pid && w.w >= 300 && w.h >= 200);
+    if (!w) return null;
+    return { x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h), owner: w.owner };
+  });
+
   // 右键菜单：星盘径向菜单画在全屏覆盖层上，以点击时的鼠标位置为圆心锚定（不随人物移动）
-  ipcMain.on('context-menu', () => {
-    if (!overlay) return;
+  // 拖文件夹给她：识别音频 + cue，询问是否切分（uv run musicauto/auto_split_cue.py）
+  const AUDIO_EXTS = new Set(['.flac', '.ape', '.wav', '.mp3', '.m4a', '.tak', '.tta', '.aac', '.ogg', '.wma']);
+  ipcMain.on('folder-drop', async (_e, droppedPath) => {
+    if (!win) return;
+    let dir = droppedPath;
+    try {
+      if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir);
+    } catch { return; }
+    const petSay = (t) => win.webContents.send('notebook-say', t);
+    petSay('让我看看这是什么…');
+    let files = [];
+    try { files = fs.readdirSync(dir); } catch { return; }
+    const cues = files.filter((f) => f.toLowerCase().endsWith('.cue'));
+    const audios = files.filter((f) => AUDIO_EXTS.has(path.extname(f).toLowerCase()));
+    const name = path.basename(dir);
+    if (!cues.length || !audios.length) {
+      petSay('这里面没有能切分的音频哦');
+      mainLog('系统', `拖入文件夹 ${name}：不可切分（${audios.length} 音频 / ${cues.length} cue）`);
+      return;
+    }
+    mainLog('交互', `拖入文件夹 ${name}：${audios.length} 个音频 + ${cues.length} 个 cue，询问切分`);
+    const r = await dialog.showMessageBox({
+      type: 'question',
+      message: '发现可切分的音频',
+      detail: `${name}\n${audios.length} 个音频文件 + ${cues.length} 个 CUE 文件\n要用 auto_split_cue 切分吗？`,
+      buttons: ['切分', '算了'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (r.response !== 0) {
+      petSay('好吧，那先不切了');
+      mainLog('系统', `取消切分：${name}`);
+      return;
+    }
+    petSay('好嘞，开始切分！');
+    mainLog('系统', `开始切分：${name}`);
+    const MUSIC_DIR = path.join(__dirname, '..', 'musicauto');
+    execFile('uv', ['run', '--project', MUSIC_DIR, path.join(MUSIC_DIR, 'auto_split_cue.py'), dir],
+      { timeout: 600000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          petSay('切分失败了…日志里有原因');
+          mainLog('系统', `切分失败：${name}：${String(stderr || err.message).slice(0, 300)}`);
+          return;
+        }
+        petSay('切分完成！');
+        mainLog('系统', `切分完成：${name}\n${String(stdout).slice(-500)}`);
+      });
+  });
+
+  ipcMain.on('context-menu', () => {    if (!overlay) return;
     const cursor = screen.getCursorScreenPoint();
     const b = overlay.getBounds();
     overlay.setIgnoreMouseEvents(false); // 菜单期间覆盖层接管鼠标，点击绝不穿透，关闭后恢复

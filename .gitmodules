@@ -1,0 +1,3 @@
+[submodule "musicauto"]
+	path = musicauto
+	url = https://github.com/elivoa/musicauto.git

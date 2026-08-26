@@ -1,3 +1,6 @@
 node_modules/
 .venv/
 tools/windows
+tools/keys
+shots/
+userData/
