@@ -384,7 +384,11 @@ function freqIndex() {
   return best;
 }
 
-function isOn(id) { return actionSettings[id] !== false; }
+// 没设置过就用默认值（ACTIONS 里 off:true 的默认关，其余默认开）
+function isOn(id) {
+  const v = actionSettings[id];
+  return v !== undefined ? v : !(ACTIONS[id] && ACTIONS[id].off);
+}
 
 function applyPatch(patch) {
   Object.assign(actionSettings, patch);

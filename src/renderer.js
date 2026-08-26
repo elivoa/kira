@@ -40,11 +40,13 @@ const CHIBI_SRC = '../assets/chibi.png';
 const SIDE_SRC = '../assets/pet_side.png'; // 侧面图（朝左，镜像即朝右），姐姐形态走路/侧面暴走用
 const FLUTE_SRC = '../assets/flute.png';   // 法宝形态（银笛）
 
-// 三种形态：姐姐 / Q版 / 法宝（法宝没有正背面和动作，只有悬浮待机）
+// 四种形态：姐姐 / Q版 / 法宝 / 背对
+// 背对形态 front=背面图、back=正面图，转身类动作（笛子乱飞/走了走了）自然变成「转过来又转回去」
 const FORMS = {
   normal: { front: FRONT_SRC, back: BACK_SRC, height: 512 },
   chibi: { front: CHIBI_SRC, back: CHIBI_SRC, height: 330 },
   flute: { front: FLUTE_SRC, back: FLUTE_SRC, height: 300 },
+  back: { front: BACK_SRC, back: FRONT_SRC, height: 512 },
 };
 let form = 'normal';
 new Image().src = BACK_SRC;  // 预加载，转身/变身时不闪
@@ -133,6 +135,8 @@ const LINES = {
   lonely: ['喂——还在吗？', '看我一眼嘛…', '我是不是很透明？', '有人吗…'],
   angry: ['你别碰我。', '把你的脏手拿开。', '烦死了！', '手拿开！（超凶）', '再戳我真的生气了！', '呜……你欺负我！'],
   scared: ['呜哇！撞死我了！', '鬼呀👻！别过来！', '救命！什么东西撞我！', '呜啊啊别碰我！', '撞、撞死我了……快跑！', '鬼呀👻👻！'],
+  peek: ['才、才没有偷看你！', '别误会…我只是看看你在干嘛', '哼，就瞄一眼', '没在看你，看风景呢'],
+  brock: ['哼', '就不回头', '你自己玩吧', '不想理你了', '哄不好了'],
 };
 
 function enter(next, dur = 0) {
@@ -470,6 +474,18 @@ function doWake() {
   swapSleepPose(SLEEP3_SRC);
   enter('sleepout', 0.9);
   say('嗯…早上了？', 1500);
+}
+
+// 背对专属：偷偷回头瞟一眼——翻牌到侧面停一下，再翻回去继续背对
+function doPeek() {
+  enter('peekout', 0.35);
+  say(pick(LINES.peek), 1500);
+}
+
+// 背对专属：赌气晃晃
+function doBrock() {
+  enter('brock', rand(1.6, 2.2));
+  if (Math.random() < 0.7) say(pick(LINES.brock), 1500);
 }
 
 function doSpin() {
@@ -1088,7 +1104,11 @@ window.pet.onSettings((s) => {
   }
 });
 
-function enabled(id) { return actionEnabled[id] !== false; }
+// 动作开关：没设置过就用默认值（ACTIONS 里 off:true 的默认关，其余默认开）
+function enabled(id) {
+  const v = actionEnabled[id];
+  return v !== undefined ? v : !(ACTIONS[id] && ACTIONS[id].off);
+}
 
 // ---------- 常驻位置 ----------
 // 被拖拽到的落点 = 她应该呆着的位置；自主动作跑远了，闲置一段时间会自己走回去
@@ -1189,6 +1209,8 @@ const EFFECTS = {
   wallbang: { shen: 15, jing: -6, mood: 2 },
   sleep: { jing: 25, shen: 10, mood: 3 },
   mischief: { jing: -3, mood: 4 },
+  peek: { jing: -2, mood: 2 },
+  brock: { mood: 3 },
 };
 
 // 体力和法力不够的动作做不来
@@ -1207,6 +1229,7 @@ const DISPATCH = {
   qbounce: doQBounce, qsway: doQSway, morph: doMorph,
   desk: doDesk, seal: doSeal, goledge: doGoLedge,
   dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive, mischief: doMischief, flutefly: doFluteFly, sleep: doSleep, wallbang: doWallBang, work: doWork,
+  peek: doPeek, brock: doBrock,
 };
 
 // 心情好更爱玩开心动作，心情差不想玩
@@ -1621,20 +1644,21 @@ window.pet.onMenuAction((id) => {
     return;
   }
   // 菜单切换形态
-  if (id === 'form-sleep') {
-    // 睡觉形态：一直睡到被晃醒/点够 8 下/手动切走
-    if (!state.startsWith('sleep')) {
-      applyEffect('sleep');
-      logEvent('交互', '你让她进入睡觉形态');
-      doSleep(1e9);
+  if (id.startsWith('form-')) {
+    if (id === 'form-sleep') {
+      // 睡觉形态：一直睡到被晃醒/点够 8 下/手动切走
+      if (!state.startsWith('sleep')) {
+        applyEffect('sleep');
+        logEvent('交互', '你让她进入睡觉形态');
+        doSleep(1e9);
+      }
+      return;
     }
-    return;
-  }
-  if (id === 'form-normal' || id === 'form-chibi' || id === 'form-flute') {
-    const target = id === 'form-chibi' ? 'chibi' : id === 'form-flute' ? 'flute' : 'normal';
-    if (target !== form) {
+    const target = id.slice(5); // normal / chibi / flute / back
+    const label = { normal: '姐姐', chibi: 'Q版', flute: '法宝', back: '背对' }[target];
+    if (label && target !== form) {
       applyEffect('morph');
-      logEvent('交互', `你让她切到${target === 'chibi' ? 'Q版' : target === 'flute' ? '法宝' : '姐姐'}形态`);
+      logEvent('交互', `你让她切到${label}形态`);
       doMorphTo(target);
     }
     return;
@@ -1838,6 +1862,30 @@ function frame(now) {
       const k = stateT / stateDur;
       rot = 9 * Math.sin(stateT * 10) * (1 - k * 0.3);
       ty = -3 * Math.abs(Math.sin(stateT * 5));
+      if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(2, 5); }
+      break;
+    }
+    case 'peekout': { // 偷偷回头：翻牌转到侧面
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, SIDE_SRC);
+      if (stateT >= stateDur) enter('peekhold', rand(0.5, 0.9));
+      break;
+    }
+    case 'peekhold': { // 瞟一眼：微微倾身
+      rot = -4 + 1.5 * Math.sin(t * 3);
+      if (stateT >= stateDur) enter('peekin', 0.35);
+      break;
+    }
+    case 'peekin': { // 翻回去继续背对
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, FORMS[form].front);
+      if (stateT >= stateDur) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
+      break;
+    }
+    case 'brock': { // 赌气晃晃：背对着小幅快晃
+      const k = stateT / stateDur;
+      rot = 6 * Math.sin(stateT * 8) * (1 - k * 0.4);
+      ty = -2 * Math.abs(Math.sin(stateT * 4));
       if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(2, 5); }
       break;
     }

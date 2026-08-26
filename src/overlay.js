@@ -566,6 +566,7 @@ const MENU_TREE = [
     { id: 'form-chibi', icon: '🐣', label: 'Q版形态' },
     { id: 'form-flute', icon: '🪈', label: '法宝形态' },
     { id: 'form-sleep', icon: '😴', label: '睡觉形态' },
+    { id: 'form-back', icon: '🙉', label: '背对形态' },
   ] },
   { id: 'play', icon: '🎈', label: '玩耍', children: [
     { id: 'goledge', icon: '🪟', label: '去窗台玩' },
