@@ -98,6 +98,11 @@ function overSprite(cx, cy) {
     const br = bubble.getBoundingClientRect();
     if (cx >= br.left && cx <= br.right && cy >= br.top && cy <= br.bottom) return true;
   }
+  // 小输入框打开期间，框体区域也要接管鼠标
+  if (miniChatOpen) {
+    const ir = miniChat.getBoundingClientRect();
+    if (cx >= ir.left && cx <= ir.right && cy >= ir.top && cy <= ir.bottom) return true;
+  }
   return false;
 }
 
@@ -152,6 +157,7 @@ function enter(next, dur = 0) {
   if (next !== 'walk' && next !== 'gohome') hideFloatFx();
   if (next !== 'fly') boardHide();
   if (next !== 'flutefly' && next !== 'fluteback' && next !== 'fluteturn' && next !== 'working') fluteHide();
+  if (next !== 'legshow') legImg.style.opacity = 0; // 看腿图只在展示期间存在
   // 离开睡觉时撤场景、立绘恢复
   if (!String(next).startsWith('sleep')) {
     sleepImg.style.opacity = 0;
@@ -507,6 +513,41 @@ function sleepPoseFile() { return sleepBase.src.split('/').pop(); }
 function cycleSleepPose() {
   const i = SLEEP_POSES.findIndex(s => s.endsWith(sleepPoseFile()));
   swapSleepPose(SLEEP_POSES[(i + 1) % SLEEP_POSES.length]);
+}
+
+// ---------- 特殊任务：看腿 ----------
+// 只能由「长按输入框」里的暗号触发——不进菜单、不进自主池、不进大模型工具列表
+const LEG1_SRC = '../assets/leg1.png'; // 侧踩桌子指你
+const LEG2_SRC = '../assets/leg2.png'; // 正面对你踩过来
+new Image().src = LEG1_SRC;
+new Image().src = LEG2_SRC;
+const LEG_LINES = ['看你个鬼！', '滚！', '不给看！', '你要黑腿还是白腿？', '看你个腿。', '我Tui～', '变态！就一眼哦', '哼，便宜你了'];
+
+const legImg = document.createElement('img');
+legImg.id = 'legImg';
+stage.insertBefore(legImg, fx); // 压在 fx 层下，气泡/特效不被挡
+
+// 暗号识别：提到腿/袜/脚且带「看/给/想」类意图就算
+function matchLegAsk(text) {
+  return /腿|袜|jio|脚|足|黑丝|白丝/i.test(text) && /看|瞧|瞅|欣赏|show|给|想|要/i.test(text);
+}
+
+// 看腿表演：俏皮话 + 随机一张踩桌图，淡入带回弹弹出 + 星光，5 秒后撤场
+function doLegShow(line) {
+  enter('legshow', 5);
+  legImg.src = Math.random() < 0.5 ? LEG1_SRC : LEG2_SRC;
+  legImg.style.transition = 'opacity .5s ease, transform .38s cubic-bezier(.2,1.4,.4,1)';
+  legImg.style.transform = 'translateX(-50%) scale(0.92)';
+  void legImg.offsetWidth; // 强制 reflow，让回弹生效
+  legImg.style.opacity = 1;
+  legImg.style.transform = 'translateX(-50%) scale(1)';
+  setSpriteVeiled(true);
+  fxStar(120, 300, 0.9);
+  fxStar(220, 320, 0.9);
+  fxStar(170, 200, 1.2);
+  say(line, 2600);
+  addStat('shen', -2);
+  addStat('mood', 2);
 }
 
 let pendingSleepDur = null;
@@ -1522,6 +1563,72 @@ window.pet.getStats().then((s) => {
   if (s) { Object.assign(stats, s); applyTouming(); }
 });
 
+// ---------- 长按小输入框：直接对她说话 ----------
+// 长按身体 0.6s 弹出输入框；回车后先进暗号匹配（看腿等特殊任务），没命中就走大模型，
+// 回答流式刷到她的气泡上。无论哪条路，问答都会进聊天历史（小本子可见）。
+const miniChat = document.getElementById('miniChat');
+let miniChatOpen = false;
+let chatPressTimer = null;  // 长按计时器
+let pendingChatId = null;   // 等待大模型回答的流式 id
+let miniReply = '';         // 流式累积的回答
+
+function openMiniChat() {
+  miniChatOpen = true;
+  miniChat.value = '';
+  miniChat.style.display = 'block';
+  requestAnimationFrame(() => miniChat.classList.add('show'));
+  miniChat.focus();
+  updateMouseIgnore(true); // 输入期间窗口接管事件，别穿透
+}
+
+function closeMiniChat() {
+  if (!miniChatOpen) return;
+  miniChatOpen = false;
+  miniChat.classList.remove('show');
+  miniChat.style.display = 'none';
+  miniChat.blur();
+  updateMouseIgnore(lastOver); // 恢复按命中检测穿透
+}
+
+async function submitMiniChat() {
+  const text = miniChat.value.trim();
+  closeMiniChat();
+  if (!text) return;
+  lastInteract = performance.now() / 1000;
+  addStat('touming', -100);
+  // 特殊任务：看腿。本地一问一答写进历史，不问大模型
+  if (matchLegAsk(text)) {
+    const line = pick(LEG_LINES);
+    logEvent('交互', `特殊任务「看腿」：${text.slice(0, 30)}`);
+    window.pet.chatInject(text, line);
+    doLegShow(line);
+    return;
+  }
+  // 没触发特殊任务：大模型回答，气泡流式显示
+  logEvent('交互', `你对她说：${text.slice(0, 40)}`);
+  pendingChatId = 'mc' + Date.now();
+  miniReply = '';
+  say('嗯…', 60000); // 等待占位，流式来了就刷掉
+  const r = await window.pet.chatSend(text, pendingChatId);
+  pendingChatId = null;
+  const finalText = (r && r.text) || '呜，我现在没接上脑子…去小本子配置页看看 key 配了没';
+  say(finalText, Math.min(8000, 2000 + finalText.length * 130));
+}
+
+// 大模型 token 流式进气泡（只收自己这次提问的 id）
+window.pet.onChatToken(({ id, delta }) => {
+  if (id !== pendingChatId || !delta) return;
+  miniReply += delta;
+  say(miniReply, 60000);
+});
+
+miniChat.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') submitMiniChat();
+  else if (e.key === 'Escape') closeMiniChat();
+});
+miniChat.addEventListener('blur', () => closeMiniChat());
+
 // ---------- 鼠标交互 ----------
 let pressing = false;
 let dragging = false;
@@ -1557,6 +1664,8 @@ const HEAD_REGION = { x1: 95, y1: 95, x2: 250, y2: 270 };
 
 stage.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
+  if (e.target === miniChat) return; // 点在输入框上：正常编辑，不当成点她
+  if (miniChatOpen) closeMiniChat(); // 点她 = 收起输入框
   lastInteract = performance.now() / 1000;
   addStat('touming', -100); // 被注意到了，立刻恢复存在感
   // 腰间小本子区域：先记账（可能点开笔记本），但如果直接拖走就取消
@@ -1583,8 +1692,9 @@ stage.addEventListener('mousedown', (e) => {
   // 隐藏彩蛋：长按头发超过 5 秒
   longPressFired = false;
   clearTimeout(pressTimer);
-  if (form === 'normal' && e.clientX >= HEAD_REGION.x1 && e.clientX <= HEAD_REGION.x2 &&
-      e.clientY >= HEAD_REGION.y1 && e.clientY <= HEAD_REGION.y2) {
+  const inHead = form === 'normal' && e.clientX >= HEAD_REGION.x1 && e.clientX <= HEAD_REGION.x2 &&
+    e.clientY >= HEAD_REGION.y1 && e.clientY <= HEAD_REGION.y2;
+  if (inHead) {
     pressTimer = setTimeout(() => {
       if (pressing && !dragging) {
         longPressFired = true;
@@ -1593,6 +1703,19 @@ stage.addEventListener('mousedown', (e) => {
         addStat('shen', -3);
       }
     }, 5000);
+  }
+  // 长按身体（非头非腰、非睡觉、非法宝）0.6s：弹出小输入框对她说话
+  clearTimeout(chatPressTimer);
+  if (!inHead && !waistPress && !state.startsWith('sleep') && form !== 'flute') {
+    chatPressTimer = setTimeout(() => {
+      if (pressing && !dragging) {
+        longPressFired = true; // 标记过，松开时不会再触发戳一戳
+        pressing = false;
+        window.pet.dragEnd();
+        logEvent('交互', '长按叫出了小输入框');
+        openMiniChat();
+      }
+    }, 600);
   }
   // 她走远的时候点她 = 叫她回来
   if (state === 'away' || state === 'gone') doBack();
@@ -1604,6 +1727,7 @@ window.addEventListener('mousemove', (e) => {
   if (!dragging && Math.hypot(e.screenX - downX, e.screenY - downY) > 5) {
     dragging = true;
     waistPress = false; // 拖走了，不开笔记本
+    clearTimeout(chatPressTimer); // 拖走了，不弹输入框
     stage.classList.add('dragging');
     addStat('shen', -10); // 被拎着走很没耐心
     addStat('mood', -2);
@@ -1642,6 +1766,7 @@ window.addEventListener('mouseup', () => {
   if (!pressing) return;
   pressing = false;
   clearTimeout(pressTimer);
+  clearTimeout(chatPressTimer);
   window.pet.dragEnd();
   if (dragging) {
     dragging = false;
@@ -1960,6 +2085,15 @@ function frame(now) {
       rot = 6 * Math.sin(stateT * 8) * (1 - k * 0.4);
       ty = -2 * Math.abs(Math.sin(stateT * 4));
       if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(2, 5); }
+      break;
+    }
+    case 'legshow': { // 看腿展示中：到点撤图、立绘回来
+      if (stateT >= stateDur) {
+        legImg.style.opacity = 0;
+        setSpriteVeiled(false);
+        enter('idle');
+        idleWait = nextIdleWait(3, 6);
+      }
       break;
     }
     case 'fluteturn': { // 转过身去

@@ -616,11 +616,21 @@ app.whenReady().then(() => {
     try {
       const reply = await kimiChat(text, (delta) => {
         if (notebookWin) notebookWin.webContents.send('chat-token', { id, delta });
+        if (win) win.webContents.send('chat-token', { id, delta }); // 桌宠长按小输入框也要流式
       });
       return { ok: true, text: reply };
     } catch (err) {
       return { ok: false, text: `呜，连不上脑子了…（${err.message}）` };
     }
+  });
+  // 特殊任务（看腿等）：不走大模型，本地一问一答直接写进聊天历史
+  ipcMain.handle('chat-inject', (_e, userText, replyText) => {
+    const userMsg = { t: Date.now(), role: 'user', content: String(userText).slice(0, 500) };
+    const assistantMsg = { t: Date.now(), role: 'assistant', content: String(replyText).slice(0, 500) };
+    chatHistory.push(userMsg, assistantMsg);
+    if (chatHistory.length > 100) chatHistory = chatHistory.slice(-100);
+    persistExchange(userMsg, assistantMsg);
+    return { ok: true };
   });
   ipcMain.handle('chat-history', () => chatHistory.slice(-30));
 

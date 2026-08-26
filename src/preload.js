@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('pet', {
   nbResizeMove: () => ipcRenderer.send('nb-resize-move'),
   nbResizeEnd: () => ipcRenderer.send('nb-resize-end'),
   chatSend: (text, id) => ipcRenderer.invoke('chat-send', text, id),
+  chatInject: (userText, replyText) => ipcRenderer.invoke('chat-inject', userText, replyText),
   // 流式 token 订阅，返回取消订阅函数
   onChatToken: (fn) => {
     const h = (_e, data) => fn(data);
