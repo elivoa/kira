@@ -93,6 +93,11 @@ function overSprite(cx, cy) {
     const cr = cardImg.getBoundingClientRect();
     if (cx >= cr.left && cx <= cr.right && cy >= cr.top && cy <= cr.bottom) return true;
   }
+  // 主动搭话的粘性气泡显示期间也可点（要点击才能关闭）
+  if (stickyActive) {
+    const br = bubble.getBoundingClientRect();
+    if (cx >= br.left && cx <= br.right && cy >= br.top && cy <= br.bottom) return true;
+  }
   return false;
 }
 
@@ -155,11 +160,37 @@ function enter(next, dur = 0) {
 }
 
 function say(text, ms = 1800) {
+  if (stickyActive) return; // 粘性气泡没被点掉前，自言自语气泡不抢屏
+  bubble.style.width = ''; // 清掉粘性气泡的自适应宽度
   bubble.textContent = text;
   bubble.classList.add('show');
   clearTimeout(bubbleTimer);
   bubbleTimer = setTimeout(() => bubble.classList.remove('show'), ms);
 }
+
+// 主动搭话的粘性气泡：不自动消失，点一下才关；样式与自言自语气泡区分
+let stickyActive = false;
+function saySticky(text) {
+  stickyActive = true;
+  // 文字多的框宽一点：按字数自适应（160~300px，含 36px 内边距后总宽不超出窗口留边）
+  bubble.style.width = `${Math.min(WIN_W - 52, Math.max(160, Math.min(300, 40 + text.length * 9)))}px`;
+  bubble.textContent = text;
+  const hint = document.createElement('span');
+  hint.className = 'sticky-hint';
+  hint.textContent = '✦ 点我消失';
+  bubble.appendChild(hint);
+  bubble.classList.add('show', 'sticky');
+  clearTimeout(bubbleTimer); // 防止被普通 say 留下的计时器收走
+}
+// 气泡在 stage 内部：粘性状态下点气泡不能误触 stage 的戳一戳/拖拽
+bubble.addEventListener('mousedown', (e) => { if (stickyActive) e.stopPropagation(); });
+bubble.addEventListener('click', (e) => {
+  if (!stickyActive) return;
+  e.stopPropagation();
+  stickyActive = false;
+  bubble.classList.remove('show', 'sticky');
+  logEvent('交互', '点掉了 Kira 的主动搭话');
+});
 
 // ---------- 数值面板 ----------
 const statsPanel = document.getElementById('statsPanel');
@@ -420,6 +451,12 @@ const SLEEP_HEAD = {
   'sleep2.png': { x: 105, y: 195 },
   'sleep3.png': { x: 85, y: 240 },
 };
+// 各睡姿的人物区域（柔边椭圆遮罩）：呼吸起伏只作用于被罩住的人物层，桌子保持不动
+const SLEEP_MASK = {
+  'sleep1.png': 'radial-gradient(ellipse 30% 52% at 48% 50%, #000 60%, transparent 80%)',
+  'sleep2.png': 'radial-gradient(ellipse 36% 51% at 47% 50%, #000 60%, transparent 80%)',
+  'sleep3.png': 'radial-gradient(ellipse 40% 50% at 46% 50%, #000 60%, transparent 80%)',
+};
 new Image().src = SLEEP1_SRC;
 new Image().src = SLEEP2_SRC;
 new Image().src = SLEEP3_SRC;
@@ -429,11 +466,26 @@ let zzzT = 0;
 let flipT = 0; // 翻身计时
 let spriteVeiled = false; // 睡觉场景盖住立绘时，applyTouming 不准把她恢复可见
 
-const sleepImg = document.createElement('img');
+const sleepImg = document.createElement('div');
 sleepImg.id = 'sleepImg';
-sleepImg.src = SLEEP2_SRC;
+const sleepBase = document.createElement('img'); // 完整场景（桌子在这层，不动）
+const sleepTop = document.createElement('img');  // 人物层（遮罩+呼吸）
+sleepBase.className = 'base';
+sleepTop.className = 'top';
+sleepImg.appendChild(sleepBase);
+sleepImg.appendChild(sleepTop);
 // 插在 fx 层下面，Zzz/气泡才不会被场景图挡住
 stage.insertBefore(sleepImg, fx);
+
+// 设置睡觉场景图：两层用同一张图，top 层按姿势上人物遮罩
+function setSleepScene(src) {
+  sleepBase.src = src;
+  sleepTop.src = src;
+  const m = SLEEP_MASK[src.split('/').pop()];
+  sleepTop.style.maskImage = m;
+  sleepTop.style.webkitMaskImage = m;
+}
+setSleepScene(SLEEP2_SRC);
 
 function setSpriteVeiled(v) {
   spriteVeiled = v;
@@ -444,12 +496,12 @@ function setSpriteVeiled(v) {
 function swapSleepPose(src) {
   sleepImg.style.opacity = 0;
   setTimeout(() => {
-    sleepImg.src = src;
+    setSleepScene(src);
     sleepImg.style.opacity = 1;
   }, 380);
 }
 
-function sleepPoseFile() { return sleepImg.src.split('/').pop(); }
+function sleepPoseFile() { return sleepBase.src.split('/').pop(); }
 
 // 换到下一张睡姿（三张三张轮换）
 function cycleSleepPose() {
@@ -462,7 +514,7 @@ let pendingSleepDur = null;
 function doSleep(dur = null) {
   if (form !== 'normal') { pendingSleep = true; pendingSleepDur = dur; doMorphTo('normal'); return; }
   pendingSleepDur = dur;
-  sleepImg.src = SLEEP1_SRC;
+  setSleepScene(SLEEP1_SRC);
   sleepImg.style.opacity = 1;
   setSpriteVeiled(true);
   flipT = rand(6, 9);
@@ -471,6 +523,7 @@ function doSleep(dur = null) {
 }
 
 function doWake() {
+  sleepTop.style.transform = ''; // 停掉呼吸再伸懒腰
   swapSleepPose(SLEEP3_SRC);
   enter('sleepout', 0.9);
   say('嗯…早上了？', 1500);
@@ -1361,6 +1414,21 @@ async function idleRandomOnce() {
 
 // 数值缓慢变化：恢复精/气/神，冷落涨透明值和降心情
 let lastChatter = performance.now() / 1000;
+// 主动搭话：用户闲置 4 分钟后才可能触发，两次至少隔 8 分钟
+const PROACTIVE_AFTER = 240;
+const PROACTIVE_COOLDOWN = 480;
+let lastProactive = 0;
+
+// 有 key 才调大模型；拿到的话用粘性气泡说（需点击关闭，区别于自言自语）
+async function maybeProactiveChat() {
+  try {
+    const cfg = await window.pet.getChatConfig();
+    if (!cfg || !cfg.hasKey) return;
+    const r = await window.pet.chatProactive();
+    if (r && r.ok && r.text) saySticky(r.text);
+  } catch {}
+}
+
 setInterval(() => {
   if (screenAsleep) return; // 熄屏/休眠中：一切暂停，安静等主人回来
   const idleFor = performance.now() / 1000 - lastInteract;
@@ -1379,6 +1447,11 @@ setInterval(() => {
   if (state === 'idle' && nowSec - lastChatter > 25 && Math.random() < 0.08) {
     lastChatter = nowSec;
     say(pickPhrase(), 2800);
+  }
+  // 有 key 且闲置久了：主动调大模型找主人搭话（粘性气泡，需点击关闭）
+  if (state === 'idle' && !stickyActive && idleFor > PROACTIVE_AFTER && nowSec - lastProactive > PROACTIVE_COOLDOWN) {
+    lastProactive = nowSec;
+    maybeProactiveChat();
   }
 }, 1000);
 
@@ -1817,8 +1890,8 @@ function frame(now) {
       break;
     }
     case 'sleeping': {
-      // 趴睡中：呼吸缩放 + Zzz 飘字 + 梦话 + 偶尔翻身（埋臂趴睡 ↔ 侧头趴睡）
-      sleepImg.style.transform = `translateX(-50%) scale(${1 + 0.012 * Math.sin(t * 1.6)})`;
+      // 趴睡中：呼吸缩放（只动人物层，桌子不动）+ Zzz 飘字 + 梦话 + 偶尔翻身换姿势
+      sleepTop.style.transform = `scale(${1 + 0.012 * Math.sin(t * 1.6)})`;
       zzzT -= dt;
       if (zzzT <= 0) {
         // 一串 Z 从头上飘走，越飘越大；头部位置按当前睡姿查表
@@ -2347,9 +2420,19 @@ function frame(now) {
   const spriteH = state.startsWith('desk') || state.startsWith('work') ? 700 : FORMS[form].height;
   // 睡觉场景中她的头在场景图上部，气泡贴那里
   const headY = state.startsWith('sleep') ? 280 : WIN_H + ty - spriteH * sy * curSize;
-  bubble.style.left = `calc(50% + ${tx}px)`;
-  bubble.style.top = `${headY - bubble.offsetHeight - 6}px`;
-  bubble.style.transform = `translateX(-50%) scale(${state.startsWith('sleep') ? 1 : curSize})`;
+  const bScale = state.startsWith('sleep') ? 1 : curSize;
+  // 可视区域 = 当前窗口：气泡无论缩放/多宽/多高都不出界（四边各留 8px）
+  const bw = bubble.offsetWidth * bScale;
+  const bh = bubble.offsetHeight * bScale;
+  // 气泡比窗口还宽/还高时退化为居中/贴顶，钳制边界反转时不能再用
+  const minCx = 8 + bw / 2;
+  const maxCx = WIN_W - 8 - bw / 2;
+  const cx = minCx > maxCx ? WIN_W / 2 : Math.min(Math.max(WIN_W / 2 + tx, minCx), maxCx);
+  const maxTop = WIN_H - 8 - bh;
+  const top = maxTop < 8 ? 8 : Math.min(Math.max(headY - bh - 6, 8), maxTop);
+  bubble.style.left = `${cx}px`;
+  bubble.style.top = `${top}px`;
+  bubble.style.transform = `translateX(-50%) scale(${bScale})`;
 
   requestAnimationFrame(frame);
 }

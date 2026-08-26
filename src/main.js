@@ -105,6 +105,75 @@ const KIRA_SYSTEM = `你是 Kira，一只住在用户 Mac 桌面上的桌宠女�
 性格：元气、爱撒娇、偶尔肉麻，会玩中文互联网梗（awsl、绝绝子、哈基米之类），对主人有点小占有欲。
 说话方式：中文口语，一两句话说完，简短可爱，可以用 emoji 和「~」。不要长篇大论，不要使用列表。`;
 
+// ---------- 长期记忆 & 聊天工具（function calling） ----------
+const MEMORY_FILE = path.join(CONFIG_DIR, 'memory.json');
+
+function loadMemory() {
+  try { return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8')); } catch { return []; }
+}
+
+// system 提示词 = 人设 + 长期记忆（remember_fact 工具写入，最近 30 条）
+function systemPrompt() {
+  const mem = loadMemory();
+  if (!mem.length) return KIRA_SYSTEM;
+  return KIRA_SYSTEM + '\n关于主人的长期记忆：\n' + mem.slice(-30).map((m) => `- ${m.fact}`).join('\n');
+}
+
+// 聊天可用工具：schema 尽量精简（每轮请求都占 token）
+const CHAT_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'do_action',
+      description: '立刻做一个动作表演给主人看。主人要求表演/互动，或你想展示时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['hop', 'spin', 'sway', 'walk', 'fly', 'sword', 'morph', 'desk', 'drive', 'goledge'],
+            description: 'hop跳一下 spin转个圈 sway撒娇 walk走一走 fly御剑飞行 sword化身成剑 morph变个身 desk来张桌子 drive去兜风 goledge去窗台玩',
+          },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remember_fact',
+      description: '把关于主人的重要信息（喜好、生日、习惯、嘱咐等）记进长期记忆，以后的对话都会带上',
+      parameters: {
+        type: 'object',
+        properties: { fact: { type: 'string', description: '要记住的一句话事实' } },
+        required: ['fact'],
+      },
+    },
+  },
+];
+
+// 执行一个工具调用，结果以字符串喂回模型；失败也走结果通道让模型自我恢复
+async function runChatTool(tc) {
+  let args = {};
+  try { args = JSON.parse(tc.function.arguments || '{}'); } catch { return '参数不是合法 JSON'; }
+  if (tc.function.name === 'do_action') {
+    if (win) win.webContents.send('menu-action', args.action);
+    mainLog('大模型', `调用工具 do_action(${args.action})`);
+    return `动作 ${args.action} 已开始表演`;
+  }
+  if (tc.function.name === 'remember_fact') {
+    const fact = String(args.fact || '').trim();
+    if (!fact) return 'fact 为空，没记住';
+    const mem = loadMemory();
+    mem.push({ t: Date.now(), fact });
+    try { fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem.slice(-50), null, 2)); } catch {}
+    mainLog('大模型', `调用工具 remember_fact：${fact.slice(0, 20)}`);
+    return '记住啦，以后都会记得';
+  }
+  return `未知工具 ${tc.function.name}`;
+}
+
 // 流式请求 Kimi：SSE 逐行解析，每个增量经 onToken 推给渲染层；返回全文
 // 注意：必须用 Node https 而不是全局 fetch —— Electron 主进程的全局 fetch 走
 // Chromium network service，它在 SSE 长连接上会崩（流直接空读），https 是纯 Node 网络栈。
@@ -112,21 +181,34 @@ async function kimiChat(userText, onToken) {
   if (!config.kimiKey) return null; // 没配 key 时回退本地规则
   const userMsg = { t: Date.now(), role: 'user', content: userText };
   chatHistory.push(userMsg);
-  const messages = [{ role: 'system', content: KIRA_SYSTEM }, ...chatHistory.slice(-40)];
+  const messages = [{ role: 'system', content: systemPrompt() }, ...chatHistory.slice(-40)];
   try {
     // thinking 关掉：思考过程走 reasoning_content 通道，不进 content，会把 max_tokens
-    // 烧光导致正文一个字都没有（曾因此整段回复空白）；max_tokens 800 防长回复被截断
-    const { content, reasoning } = await postSSE(
-      'https://api.kimi.com/coding/v1/chat/completions',
-      { Authorization: `Bearer ${config.kimiKey}` },
-      { model: 'kimi-k2-0905-preview', messages, max_tokens: 800, stream: true, thinking: { type: 'disabled' } },
-      (delta) => { if (onToken) onToken(delta); }
-    );
+    // 烧光导致正文一个字都没有（曾因此整段回复空白）；max_tokens 800 防长回复被截断。
+    // 工具循环：模型发 tool_calls 就本地执行并把结果喂回去，最多 4 轮
+    let content = '';
+    let reasoning = '';
+    for (let round = 0; round < 4; round++) {
+      const r = await postSSE(
+        'https://api.kimi.com/coding/v1/chat/completions',
+        { Authorization: `Bearer ${config.kimiKey}` },
+        { model: 'kimi-k2-0905-preview', messages, max_tokens: 800, stream: true, thinking: { type: 'disabled' }, tools: CHAT_TOOLS, tool_choice: 'auto' },
+        (delta) => { if (onToken) onToken(delta); }
+      );
+      content += r.content;
+      reasoning += r.reasoning;
+      if (!r.toolCalls.length) break;
+      messages.push({ role: 'assistant', content: r.content || null, tool_calls: r.toolCalls });
+      for (const tc of r.toolCalls) {
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: await runChatTool(tc) });
+      }
+    }
     const finalReply = content || reasoning || '（大脑空白了一下）';
     const assistantMsg = { t: Date.now(), role: 'assistant', content: finalReply };
     chatHistory.push(assistantMsg);
     if (chatHistory.length > 100) chatHistory = chatHistory.slice(-100);
     persistExchange(userMsg, assistantMsg);
+    mainLog('大模型', `回答主人：${userText.slice(0, 30)}`);
     return finalReply;
   } catch (err) {
     chatHistory.pop(); // 没聊成不计入历史
@@ -134,8 +216,26 @@ async function kimiChat(userText, onToken) {
   }
 }
 
-// POST JSON 并逐行消费 SSE 响应，把每个 content 增量交给 onDelta；
-// 返回 { content, reasoning }：正文和（关闭失败时的）思考内容，调用方兜底用
+// 主动搭话：以最近 10 条对话为上下文，让她主动开口说一两句；不写历史
+async function kimiProactive() {
+  if (!config.kimiKey) return null;
+  const messages = [
+    { role: 'system', content: systemPrompt() },
+    ...chatHistory.slice(-10),
+    { role: 'user', content: '（主人有一阵子没理你了，主动开口说一两句话：可以撒娇、卖萌、玩梗、分享心情或提醒主人休息。要有新鲜感，别和最近说过的话重复。）' },
+  ];
+  const { content, reasoning } = await postSSE(
+    'https://api.kimi.com/coding/v1/chat/completions',
+    { Authorization: `Bearer ${config.kimiKey}` },
+    { model: 'kimi-k2-0905-preview', messages, max_tokens: 200, stream: true, thinking: { type: 'disabled' } },
+    () => {}
+  );
+  return content || reasoning || null;
+}
+
+// POST JSON 并逐行消费 SSE 响应：content 增量经 onDelta 逐字推出；
+// 同时按 OpenAI 规范重组流式 tool_calls（id/name 一次给全，arguments 分片拼接，按 index 归组）。
+// 返回 { content, reasoning, toolCalls, finishReason }：正文/思考/工具调用/结束原因
 function postSSE(url, headers, payload, onDelta) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
@@ -157,18 +257,31 @@ function postSSE(url, headers, payload, onDelta) {
       let buf = '';
       let content = '';
       let reasoning = '';
+      let finishReason = '';
+      const toolCalls = {};
       const onLine = (raw) => {
         const line = raw.trim();
         if (!line.startsWith('data:')) return;
         const data = line.slice(5).trim();
         if (data === '[DONE]') return;
         try {
-          const delta = JSON.parse(data).choices?.[0]?.delta;
+          const choice = JSON.parse(data).choices?.[0];
+          const delta = choice?.delta;
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
           if (delta?.content) {
             content += delta.content;
             onDelta(delta.content);
           }
           if (delta?.reasoning_content) reasoning += delta.reasoning_content;
+          if (delta?.tool_calls) {
+            for (const c of delta.tool_calls) {
+              const k = c.index ?? 0;
+              if (!toolCalls[k]) toolCalls[k] = { id: '', type: 'function', function: { name: '', arguments: '' } };
+              if (c.id) toolCalls[k].id += c.id;
+              if (c.function?.name) toolCalls[k].function.name += c.function.name;
+              if (c.function?.arguments) toolCalls[k].function.arguments += c.function.arguments;
+            }
+          }
         } catch {}
       };
       res.on('data', (chunk) => {
@@ -181,7 +294,7 @@ function postSSE(url, headers, payload, onDelta) {
       });
       res.on('end', () => {
         if (buf.trim()) onLine(buf);
-        resolve({ content, reasoning });
+        resolve({ content, reasoning, toolCalls: Object.values(toolCalls), finishReason });
       });
     });
     req.on('error', reject);
@@ -511,11 +624,23 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('chat-history', () => chatHistory.slice(-30));
 
+  // 主动搭话：闲置时她主动开口。带最近对话当上下文但绝不写入历史（区别于正常聊天）
+  ipcMain.handle('chat-proactive', async () => {
+    try {
+      const text = await kimiProactive();
+      if (text) mainLog('大模型', '主动开口找主人搭话');
+      return { ok: true, text };
+    } catch (err) {
+      return { ok: false, text: '' };
+    }
+  });
+
   // 智能行动决策：待机时渲染层报上下文，模型挑动作+配台词；没配 key/失败都回 !ok，渲染层回退随机
   ipcMain.handle('decide-action', async (_e, ctx) => {
     if (!config.kimiKey || !ctx || !Array.isArray(ctx.actions) || !ctx.actions.length) return { ok: false };
     try {
       const d = await decideAction(ctx);
+      mainLog('大模型', `决策动作「${d.action}」${d.say ? '：' + String(d.say).slice(0, 20) : ''}`);
       return { ok: true, action: d.action, say: d.say };
     } catch {
       return { ok: false };

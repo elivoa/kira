@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('pet', {
     return () => ipcRenderer.removeListener('chat-token', h);
   },
   chatHistory: () => ipcRenderer.invoke('chat-history'),
+  chatProactive: () => ipcRenderer.invoke('chat-proactive'),
   getHistoryDays: () => ipcRenderer.invoke('history-days'),
   getHistoryDay: (key) => ipcRenderer.invoke('history-day', key),
   getChatConfig: () => ipcRenderer.invoke('get-chat-config'),
