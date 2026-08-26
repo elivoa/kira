@@ -403,11 +403,19 @@ function doHop() {
 }
 
 // ---------- 睡觉模式（真睡姿场景图版） ----------
-// 趴桌场景三张：埋臂趴睡 / 侧头趴睡 / 横躺伸手（睡醒）
-// 过渡：睡觉场景图淡入盖过立绘 → 睡觉中偶尔翻身换图 → 伸手图伸个懒腰 → 淡出回立绘
+// 趴桌场景三张：埋臂趴睡 / 侧头趴睡 / 横躺伸手，睡觉中三张轮换（点一下也换一张）
+// 过渡：睡觉场景图淡入盖过立绘 → 睡觉中翻身换图 → 伸手图伸个懒腰 → 淡出回立绘
 const SLEEP1_SRC = '../assets/sleep1.png';
 const SLEEP2_SRC = '../assets/sleep2.png';
 const SLEEP3_SRC = '../assets/sleep3.png';
+// 睡姿轮换顺序（sleep3 伸手图既是轮换姿势，也是睡醒伸懒腰图）
+const SLEEP_POSES = [SLEEP1_SRC, SLEEP2_SRC, SLEEP3_SRC];
+// 各睡姿头部位置（Zzz 出生点），按窗口坐标标定
+const SLEEP_HEAD = {
+  'sleep1.png': { x: 150, y: 255 },
+  'sleep2.png': { x: 105, y: 195 },
+  'sleep3.png': { x: 85, y: 240 },
+};
 new Image().src = SLEEP1_SRC;
 new Image().src = SLEEP2_SRC;
 new Image().src = SLEEP3_SRC;
@@ -420,7 +428,8 @@ let spriteVeiled = false; // 睡觉场景盖住立绘时，applyTouming 不准�
 const sleepImg = document.createElement('img');
 sleepImg.id = 'sleepImg';
 sleepImg.src = SLEEP2_SRC;
-stage.appendChild(sleepImg);
+// 插在 fx 层下面，Zzz/气泡才不会被场景图挡住
+stage.insertBefore(sleepImg, fx);
 
 function setSpriteVeiled(v) {
   spriteVeiled = v;
@@ -434,6 +443,14 @@ function swapSleepPose(src) {
     sleepImg.src = src;
     sleepImg.style.opacity = 1;
   }, 380);
+}
+
+function sleepPoseFile() { return sleepImg.src.split('/').pop(); }
+
+// 换到下一张睡姿（三张三张轮换）
+function cycleSleepPose() {
+  const i = SLEEP_POSES.findIndex(s => s.endsWith(sleepPoseFile()));
+  swapSleepPose(SLEEP_POSES[(i + 1) % SLEEP_POSES.length]);
 }
 
 let pendingSleepDur = null;
@@ -1547,7 +1564,7 @@ window.addEventListener('mouseup', () => {
     }
     return;
   }
-  // 睡觉中连点：超过 8 次才醒，偶尔嘟囔梦话
+  // 睡觉中连点：点一下换个睡姿，超过 8 次才醒，偶尔嘟囔梦话
   if (state && state.startsWith('sleep')) {
     const now = performance.now();
     sleepClicks = now - lastSleepClick < 3000 ? sleepClicks + 1 : 1;
@@ -1557,8 +1574,9 @@ window.addEventListener('mouseup', () => {
       logEvent('交互', '被连点 8 下吵醒了');
       doWake();
       say('别点了别点了！醒啦！', 1800);
-    } else if (Math.random() < 0.3) {
-      say(pick(SLEEP_MUMBLE), 1500);
+    } else {
+      if (state === 'sleeping') cycleSleepPose();
+      if (Math.random() < 0.3) say(pick(SLEEP_MUMBLE), 1500);
     }
     return;
   }
@@ -1779,9 +1797,10 @@ function frame(now) {
       sleepImg.style.transform = `translateX(-50%) scale(${1 + 0.012 * Math.sin(t * 1.6)})`;
       zzzT -= dt;
       if (zzzT <= 0) {
-        // 一串 Z 从头上飘走，越飘越大
+        // 一串 Z 从头上飘走，越飘越大；头部位置按当前睡姿查表
+        const head = SLEEP_HEAD[sleepPoseFile()] || SLEEP_HEAD['sleep1.png'];
         fxEl('text', {
-          x: 170 + rand(-30, 30), y: 280 + rand(-15, 15),
+          x: head.x + rand(-25, 25), y: head.y + rand(-10, 10),
           'font-family': '"PingFang SC", sans-serif', 'font-weight': 900, 'font-style': 'italic',
           'font-size': rand(16, 30), fill: '#7d6fd0', stroke: '#fff', 'stroke-width': 5, 'paint-order': 'stroke',
         }, 'fx-pop').textContent = 'Z';
@@ -1791,7 +1810,7 @@ function frame(now) {
       flipT -= dt;
       if (flipT <= 0) {
         flipT = rand(6, 9);
-        if (Math.random() < 0.5) swapSleepPose(sleepImg.src.endsWith('sleep1.png') ? SLEEP2_SRC : SLEEP1_SRC);
+        if (Math.random() < 0.5) cycleSleepPose();
       }
       if (stateT >= stateDur) doWake();
       break;
