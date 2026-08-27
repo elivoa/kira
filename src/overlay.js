@@ -230,24 +230,31 @@ function flySword(homeX, homeY) {
 window.pet.onSword(({ x, y }) => flySword(x, y));
 
 // ---------- 兜风 ----------
-// 保时捷敞篷（真车侧面图）三层精细合成：
-// 底层整车 → 中层大头（在座椅前面，脸不被座椅挡，头顶超出车顶）
-// 前层用同一车身抠出车窗洞口：前挡风边框、A柱、前车盖都压在她边缘，其余部分在她身后
+// GT3 RS 四帧序列（Kira 已在车里，素材由 tools/cutout_drive.js 抠图并对齐到统一画布）：
+// drive_4 = 她探身指路的兴奋帧（进场/接人/互动时用），drive_1/3/2 = 巡航循环帧
+const DRIVE_FRAMES = ['drive_1', 'drive_2', 'drive_3', 'drive_4'];
+const TALK_F = 3;             // drive_4 的索引
+const CRUISE_SEQ = [0, 2, 1]; // 巡航循环：drive_1 → drive_3 → drive_2
+
 function makeCar() {
   const g = el('g', {});
-  const CAR_W = 440, CAR_H = CAR_W * 974 / 2054;
-  const HEAD_W = 115, HEAD_H = HEAD_W * 222 / 240;
-  // 底层：完整车身（车头朝左；组原点在车轮着地点）
-  el('image', { href: '../assets/car.png', x: -CAR_W / 2, y: -CAR_H, width: CAR_W, height: CAR_H }, g);
-  // 中层：大头（抬高超出车顶，下巴以下被前车盖盖住）
-  el('image', { href: '../assets/head.png', x: -11, y: -222, width: HEAD_W, height: HEAD_H }, g);
-  // 前层：同一车身抠出车窗洞口：上沿挡风边框、下沿前车盖、左右 A/B 柱都压她边缘
-  const cp = el('clipPath', { id: 'carFrontClip', clipPathUnits: 'userSpaceOnUse' }, g);
-  el('path', {
-    d: `M${-CAR_W / 2},${-CAR_H} h${CAR_W} v${CAR_H} h${-CAR_W} Z M8,-192 L85,-192 L87,-136 L2,-136 Z`,
-    'clip-rule': 'evenodd',
-  }, cp);
-  el('image', { href: '../assets/car.png', x: -CAR_W / 2, y: -CAR_H, width: CAR_W, height: CAR_H, 'clip-path': 'url(#carFrontClip)' }, g);
+  const CAR_W = 460, CAR_H = CAR_W * 900 / 1560; // 素材画布 1560x900
+  const GROUND = 850 / 900; // 车轮地线在画布中的纵向比例（组原点在车轮着地点）
+  const imgs = DRIVE_FRAMES.map((name, i) => {
+    const im = el('image', {
+      href: `../assets/${name}.png`,
+      x: -CAR_W / 2, y: -CAR_H * GROUND, width: CAR_W, height: CAR_H,
+    }, g);
+    if (i > 0) im.setAttribute('visibility', 'hidden');
+    return im;
+  });
+  let cur = 0;
+  g.show = (i) => { // 切帧：只留一帧可见
+    if (i === cur) return;
+    imgs[cur].setAttribute('visibility', 'hidden');
+    imgs[i].setAttribute('visibility', 'visible');
+    cur = i;
+  };
   return g;
 }
 
@@ -266,8 +273,10 @@ function driveCar(homeX) {
   let sub = 'enter';
   let laps = 0;
   let honkT = 2;
+  let animT = 0, animIdx = 0; // 巡航帧循环
   const t0 = performance.now();
   let last = t0;
+  car.show(TALK_F); // 进场：她探身指路
   // 进场立刻按一声喇叭，预告车来了
   honk(fromLeft ? 140 : innerWidth - 140, roadY - 190);
 
@@ -296,7 +305,14 @@ function driveCar(homeX) {
       if (x < 260) { dir = 1; laps++; }
       honkT -= dt;
       if (honkT <= 0) { if (Math.random() < 0.4) honk(x, roadY - 190); honkT = 2 + Math.random() * 2.5; }
-      if (laps >= 4 || ms > 9000) sub = 'pickup';
+      // 巡航帧循环：她换着姿势开车
+      animT += dt;
+      if (animT >= 0.22) {
+        animT = 0;
+        animIdx = (animIdx + 1) % CRUISE_SEQ.length;
+        car.show(CRUISE_SEQ[animIdx]);
+      }
+      if (laps >= 4 || ms > 9000) { sub = 'pickup'; car.show(TALK_F); }
     } else if (sub === 'pickup') {
       // 开回出发点接她
       const dist = homeX - x;
@@ -304,6 +320,7 @@ function driveCar(homeX) {
       v = Math.min(Math.max(Math.abs(dist) * 4, 140, 800), 800);
       if (Math.abs(dist) < 30) {
         sub = 'exit';
+        car.show(0); // 放下她：切回正常驾驶帧
         window.pet.driveDone();
       } else {
         x += dir * v * dt;
@@ -324,6 +341,66 @@ function driveCar(homeX) {
 }
 
 window.pet.onDrive(({ x }) => driveCar(x));
+
+// ---------- 暗中观察 ----------
+// 半张超级大的脸从屏幕侧边探出来：带回弹滑入 → 悬停轻轻起伏 + 气泡台词 → 滑走
+const PEEK_LINES = ['盯——', '让我看看你在干嘛', '偷看一眼…', '嘿嘿，发现你了', '在忙吗？', '我无所不在~'];
+const peekStyle = document.createElement('style');
+peekStyle.textContent = '@keyframes peekbob{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}';
+document.head.appendChild(peekStyle);
+let peeking = false;
+
+window.pet.onPeek(({ side, y }) => {
+  if (peeking) { window.pet.peekDone(); return; } // 防叠罗汉
+  peeking = true;
+  peekFace(side === 'left' ? 'left' : 'right', y);
+});
+
+function peekFace(side, y) {
+  const H = Math.round(innerHeight * 0.55);
+  const img = new Image();
+  img.src = '../assets/head_big.png';
+  img.onload = () => {
+    const W = Math.round(H * img.naturalWidth / img.naturalHeight);
+    const top = Math.min(Math.max(Math.round(y - H / 2), 10), innerHeight - H - 10);
+    const fromX = side === 'left' ? -60 : 60;
+    const box = document.createElement('div');
+    box.style.cssText = `position:fixed;top:${top}px;${side}:${-Math.round(W / 2)}px;width:${W}px;height:${H}px;` +
+      `pointer-events:none;opacity:0;transform:translateX(${fromX}px);` +
+      'transition:opacity .45s ease,transform .55s cubic-bezier(.2,1.25,.4,1);' +
+      'filter:drop-shadow(0 10px 30px rgba(20,20,50,.45));';
+    // 镜像层：从右侧来时脸转向屏幕中央；img 层做悬浮起伏
+    const flip = document.createElement('div');
+    flip.style.cssText = 'width:100%;height:100%;' + (side === 'right' ? 'transform:scaleX(-1);' : '');
+    img.style.cssText = 'width:100%;height:100%;animation:peekbob 2.6s ease-in-out infinite;';
+    flip.appendChild(img);
+    box.appendChild(flip);
+    // 气泡台词：贴在探进来的半张脸旁边
+    const bub = document.createElement('div');
+    bub.textContent = PEEK_LINES[Math.floor(Math.random() * PEEK_LINES.length)];
+    bub.style.cssText = `position:fixed;top:${top + Math.round(H * 0.12)}px;${side}:${Math.round(W / 2) + 14}px;` +
+      'pointer-events:none;background:rgba(255,255,255,.95);color:#5b5680;font:600 17px "PingFang SC",sans-serif;' +
+      'padding:9px 16px;border-radius:16px;box-shadow:0 4px 14px rgba(80,60,160,.25);opacity:0;transition:opacity .3s ease;';
+    document.body.appendChild(box);
+    document.body.appendChild(bub);
+    void box.offsetWidth; // reflow 让滑入过渡生效
+    box.style.opacity = '1';
+    box.style.transform = 'translateX(0)';
+    setTimeout(() => { bub.style.opacity = '1'; }, 650);
+    setTimeout(() => {
+      bub.style.opacity = '0';
+      box.style.opacity = '0';
+      box.style.transform = `translateX(${fromX}px)`;
+    }, 3100);
+    setTimeout(() => {
+      box.remove();
+      bub.remove();
+      peeking = false;
+      window.pet.peekDone();
+    }, 3600);
+  };
+  img.onerror = () => { peeking = false; window.pet.peekDone(); };
+}
 
 // ---------- 捣乱 ----------
 // 小本子直接盖住鼠标指针（哪里都点不穿），人物用绳子挂在鼠标下面按单摆物理甩动
@@ -348,24 +425,10 @@ function smoothPath(pts) {
 
 function mischief(startX, startY) {
   const layer = el('g', {});
-  // 精细笔记本：B5 竖版（1:1.42）紫壳封面 + 螺旋装订 + 横线内页 + 红丝带（以鼠标为中心）
+  // 星月夜笔记本真图（assets/note.png，1023x1468≈1:1.44）压住鼠标，代替手绘版
   const bookG = el('g', {}, layer);
-  const nbDefs = el('defs', {}, bookG);
-  const nbCover = el('linearGradient', { id: 'nbCover', x1: 0, y1: 0, x2: 0, y2: 1 }, nbDefs);
-  el('stop', { offset: '0%', 'stop-color': '#8f83d8' }, nbCover);
-  el('stop', { offset: '100%', 'stop-color': '#6b5dc4' }, nbCover);
-  el('rect', { x: -46, y: -66, width: 96, height: 136, rx: 8, fill: 'rgba(20,20,60,.28)' }, bookG); // 投影
-  el('rect', { x: -50, y: -72, width: 96, height: 136, rx: 8, fill: 'url(#nbCover)', stroke: '#5a4db0', 'stroke-width': 1.5 }, bookG); // 封面
-  el('rect', { x: 42, y: -64, width: 5, height: 120, rx: 2, fill: '#f0edf8', stroke: '#d9d5ec', 'stroke-width': 1 }, bookG); // 书页侧边
-  el('rect', { x: -41, y: -63, width: 80, height: 120, rx: 3, fill: '#fbfaf5', stroke: '#d9d5ec', 'stroke-width': 1.5 }, bookG); // 内页
-  el('line', { x1: -28, y1: -63, x2: -28, y2: 57, stroke: 'rgba(224,106,138,.5)', 'stroke-width': 2 }, bookG); // 红边线
-  for (let i = 0; i < 7; i++) { // 横线
-    el('line', { x1: -41, y1: -48 + i * 15, x2: 39, y2: -48 + i * 15, stroke: '#dfe4f0', 'stroke-width': 1.5 }, bookG);
-  }
-  for (let i = 0; i < 7; i++) { // 螺旋装订环
-    el('circle', { cx: -46, cy: -56 + i * 16, r: 4.2, fill: 'none', stroke: '#c8c4dc', 'stroke-width': 2.2 }, bookG);
-  }
-  el('path', { d: 'M20,64 L28,64 L28,84 L24,78 L20,84 Z', fill: '#e04536', stroke: '#a02618', 'stroke-width': 1 }, bookG); // 红丝带
+  el('rect', { x: -44, y: -66, width: 96, height: 138, rx: 8, fill: 'rgba(20,20,60,.28)' }, bookG); // 投影
+  el('image', { href: '../assets/note.png', x: -50, y: -74, width: 98, height: 98 * 1468 / 1023 }, bookG);
   // 软绳（verlet 链条）+ 挂在下面的人物
   const rope = el('path', { fill: 'none', stroke: '#6b5a3a', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, layer);
   const charG = el('g', {}, layer);
@@ -558,23 +621,28 @@ const MENU_TREE = [
     { id: 'hop', icon: '🐇', label: '跳一下' },
     { id: 'spin', icon: '🌀', label: '转个圈' },
     { id: 'sway', icon: '💗', label: '撒个娇' },
+    { id: 'point', icon: '👉', label: '指人发火' },
     { id: 'leave', icon: '👋', label: '走了走了' },
   ] },
   { id: 'form', icon: '✨', label: '变身', children: [
     { id: 'morph', icon: '🎭', label: '变个身' },
     { id: 'form-normal', icon: '👩', label: '姐姐形态' },
     { id: 'form-chibi', icon: '🐣', label: 'Q版形态' },
-    { id: 'form-flute', icon: '🪈', label: '法宝形态' },
+    { id: 'form-flute', icon: '🪈', label: '笛子形态' },
+    { id: 'form-note', icon: '📓', label: '笔记本形态' },
     { id: 'form-sleep', icon: '😴', label: '睡觉形态' },
     { id: 'form-back', icon: '🙉', label: '背对形态' },
   ] },
   { id: 'play', icon: '🎈', label: '玩耍', children: [
     { id: 'goledge', icon: '🪟', label: '去窗台玩' },
+    { id: 'climb', icon: '🧗', label: '爬墙上去' },
     { id: 'dash', icon: '💨', label: '暴走模式' },
     { id: 'fly', icon: '🕊️', label: '御剑飞行' },
     { id: 'sword', icon: '⚔️', label: '化身成剑' },
     { id: 'drive', icon: '🚗', label: '去兜风' },
     { id: 'flutefly', icon: '🪈', label: '笛子乱飞' },
+    { id: 'peekbig', icon: '👀', label: '暗中观察' },
+    { id: 'knock', icon: '🚪', label: '敲门求关注' },
     { id: 'sleep', icon: '😴', label: '睡觉' },
     { id: 'mischief', icon: '😈', label: '捣乱' },
     { id: 'wallbang', icon: '🧱', label: '撞墙' },

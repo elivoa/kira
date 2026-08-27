@@ -39,13 +39,15 @@ const BACK_SRC = '../assets/pet_back.png';
 const CHIBI_SRC = '../assets/chibi.png';
 const SIDE_SRC = '../assets/pet_side.png'; // 侧面图（朝左，镜像即朝右），姐姐形态走路/侧面暴走用
 const FLUTE_SRC = '../assets/flute.png';   // 法宝形态（银笛）
+const NOTE_SRC = '../assets/note.png';     // 法宝形态（星月夜笔记本）
 
 // 四种形态：姐姐 / Q版 / 法宝 / 背对
 // 背对形态 front=背面图、back=正面图，转身类动作（笛子乱飞/走了走了）自然变成「转过来又转回去」
 const FORMS = {
   normal: { front: FRONT_SRC, back: BACK_SRC, height: 512 },
   chibi: { front: CHIBI_SRC, back: CHIBI_SRC, height: 330 },
-  flute: { front: FLUTE_SRC, back: FLUTE_SRC, height: 300 },
+  flute: { front: FLUTE_SRC, back: FLUTE_SRC, height: 460 },
+  note: { front: NOTE_SRC, back: NOTE_SRC, height: 430 },
   back: { front: BACK_SRC, back: FRONT_SRC, height: 512 },
 };
 let form = 'normal';
@@ -53,6 +55,26 @@ new Image().src = BACK_SRC;  // 预加载，转身/变身时不闪
 new Image().src = CHIBI_SRC;
 new Image().src = SIDE_SRC;
 new Image().src = FLUTE_SRC;
+new Image().src = NOTE_SRC;
+
+// 敲门求关注真图序列：备敲（蓄力）和叩上去（咚！！爆星）。帧图朝右 = 敲左边沿；敲右边沿用 facing=dir 镜像
+const KNOCK_READY_SRC = '../assets/knock/ready.png';
+const KNOCK_HIT_SRC = '../assets/knock/hit.png';
+new Image().src = KNOCK_READY_SRC;
+new Image().src = KNOCK_HIT_SRC;
+
+// 指人发火：叉腰指你骂骂咧咧（正面图）
+const POINT_SRC = '../assets/point.png';
+new Image().src = POINT_SRC;
+
+// 攀爬序列帧：32 帧侧脸爬墙循环（tools/cutout_climb.js 抠出，同一画布已对齐）
+// 帧图朝右 = 贴窗口左沿爬；贴右沿时用 facing=-1 镜像
+const CLIMB_SRC = [];
+for (let i = 1; i <= 32; i++) {
+  const s = `../assets/climb/f${String(i).padStart(2, '0')}.png`;
+  CLIMB_SRC.push(s);
+  new Image().src = s; // 预加载，爬升切帧不闪
+}
 
 // ---------- 点击穿透 ----------
 // 默认鼠标事件穿透到下层窗口；光标落在角色不透明像素（或法宝卡牌）上时才接管交互
@@ -147,6 +169,9 @@ const LINES = {
   scared: ['呜哇！撞死我了！', '鬼呀👻！别过来！', '救命！什么东西撞我！', '呜啊啊别碰我！', '撞、撞死我了……快跑！', '鬼呀👻👻！'],
   peek: ['才、才没有偷看你！', '别误会…我只是看看你在干嘛', '哼，就瞄一眼', '没在看你，看风景呢'],
   brock: ['哼', '就不回头', '你自己玩吧', '不想理你了', '哄不好了'],
+  knock: ['你理理我嘛', '在吗在吗？开门！', '开门开门！是我！', '理我一下嘛~', '喂——我在这儿！'],
+  climb: ['爬上去看看！', '嘿咻嘿咻…', '上面的风景应该不错~'],
+  yell: ['你！就是你！', '戳戳戳，就知道戳！', '别碰我！！', '我数到三！一！！', '大坏蛋！', '哼！气死我了！', '再戳我真生气了！', '出来挨打！（叉腰）', '骂骂咧咧骂骂咧咧', '你礼貌吗！！'],
 };
 
 function enter(next, dur = 0) {
@@ -422,6 +447,12 @@ function doPoke() {
     say(pick(LINES.angry), 2200);
     return;
   }
+  // 有点烦但还没到扔屎的程度（连戳 3+ 且耐心低于 30）：叉腰指人骂骂咧咧，20s CD
+  if (pokeTimes.length >= 3 && stats.shen < 30 && now / 1000 - lastPoint > 20) {
+    pokeTimes = [];
+    doPoint();
+    return;
+  }
   // 耐心耗尽或连戳太多次：生气扔屎
   if (pokeTimes.length >= 5 || stats.shen < 15) {
     pokeTimes = [];
@@ -441,6 +472,23 @@ function doHop() {
   hopY = 0;
   enter('hop');
   say(pick(LINES.hop), 1200);
+}
+
+// ---------- 指人发火 ----------
+// 被戳得有点烦（耐心低于 30，还没到扔屎的程度）：叉腰指着你不放，骂骂咧咧一串
+let lastPoint = 0;      // 20s CD
+let pendingPoint = false;
+let pointState = null;  // { said, lineT }
+
+function doPoint() {
+  if (form !== 'normal') { pendingPoint = true; doMorphTo('normal'); return; }
+  lastPoint = performance.now() / 1000;
+  logEvent('交互', '被点烦了，叉腰指着你骂骂咧咧');
+  applyEffect('point');
+  say(pick(LINES.yell), 1800);
+  swapSprite(POINT_SRC);
+  pointState = { said: 1, lineT: 0 };
+  enter('point');
 }
 
 // ---------- 睡觉模式（真睡姿场景图版） ----------
@@ -550,6 +598,23 @@ function doLegShow(line) {
   addStat('mood', 2);
 }
 
+// 暗中观察：她先隐身溜到屏幕边，半张超级大的脸从侧边探出来偷看，看完自己回来
+function doPeekBig() {
+  enter('peekbig', 9); // 兜底时长，正常由 peek-end 提前结束
+  setSpriteVeiled(true);
+  window.pet.peekStart();
+}
+
+function endPeekBig() {
+  if (state !== 'peekbig') return;
+  setSpriteVeiled(false);
+  enter('idle');
+  idleWait = nextIdleWait(3, 6);
+  if (Math.random() < 0.5) say(pick(['嘿嘿，看到你了', '盯——', '吓到了？']), 1500);
+}
+
+window.pet.onPeekEnd(endPeekBig);
+
 let pendingSleepDur = null;
 
 function doSleep(dur = null) {
@@ -612,7 +677,7 @@ function fluteHide() { fluteImg.style.display = 'none'; }
 
 function doFluteFly() {
   if (form === 'chibi') { pendingFlute = true; doMorph(); return; }
-  if (form === 'flute') { pendingFlute = true; doMorphTo('normal'); return; }
+  if (form === 'flute' || form === 'note') { pendingFlute = true; doMorphTo('normal'); return; }
   enter('fluteturn', 0.5);
   say(pick(['看我的！', '笛子，去！', '给你表演一个~']), 1500);
 }
@@ -742,6 +807,101 @@ async function doWallBang() {
   if (form === 'normal') { facing = -dir; enter('wallgoin', 0.3); }
   else { facing = dir; enter('wallgo'); }
   say(pick(['烦死了！', '让我撞一撞！', '啊啊啊——']), 1500);
+}
+
+// ---------- 敲门求关注 ----------
+// 跑到活跃窗口的侧边，侧身对着边沿「棒！棒！棒！」敲门，喊你理理我嘛
+// 侧身图 493x1298，显示高 512 → 显示半宽约 97px；身体在 340 窗口内居中，左右沿 = 170∓97
+const SIDE_HALF_W = 97;
+let knock = null;
+let pendingKnock = false;
+
+async function doKnock() {
+  const st = await window.pet.getStage();
+  const [px, py] = await window.pet.getPos();
+  const aw = await window.pet.activeWindow();
+  let tx, dir;
+  if (aw) {
+    // 贴的是「身体边缘」不是窗口框：侧身图显示半宽约 97px，居中在 340 窗口里，
+    // 身体左沿 = 170-97，右沿 = 170+97；让贴墙一侧的身体边和窗口边重合（再多吃 4px 像真贴上）
+    const leftTx = aw.x - (170 + SIDE_HALF_W) + 4;          // 敲窗口左沿：她站左边，身体右边贴上
+    const rightTx = aw.x + aw.w - (170 - SIDE_HALF_W) - 4;  // 敲窗口右沿：她站右边，身体左边贴上
+    const leftOk = leftTx >= st.minX, rightOk = rightTx <= st.maxX;
+    const dLeft = Math.abs(px - leftTx), dRight = Math.abs(px - rightTx);
+    if (leftOk && (!rightOk || dLeft <= dRight)) { tx = leftTx; dir = 1; }
+    else if (rightOk) { tx = rightTx; dir = -1; }
+    else {
+      // 两侧都贴不下，拿屏幕边凑数
+      const sl = Math.abs(px - st.minX), sr = Math.abs(px - st.maxX);
+      tx = sl <= sr ? st.minX : st.maxX;
+      dir = sl <= sr ? 1 : -1;
+    }
+  } else {
+    const dLeft = Math.abs(px - st.minX), dRight = Math.abs(px - st.maxX);
+    tx = dLeft <= dRight ? st.minX : st.maxX;
+    dir = dLeft <= dRight ? 1 : -1;
+  }
+  tx = Math.min(Math.max(tx, st.minX), st.maxX);
+  // 垂直对齐窗口中部，够不着地板就浮着敲
+  const midY = aw ? aw.y + aw.h / 2 - WIN_H / 2 : st.floorY;
+  knock = {
+    tx, ty: Math.min(Math.max(midY, st.minY), st.floorY),
+    dir, px, py,
+    count: 0, maxCount: 3, // 固定三声：棒！棒！棒！
+    phase: 'aim', phaseT: 0,
+  };
+  logEvent('自主', aw ? `去敲「${aw.owner}」的边儿求关注` : '去敲屏幕边求关注');
+  // 侧身图只有姐姐形态有，其他形态先变回来再敲
+  if (form !== 'normal') { pendingKnock = true; doMorphTo('normal'); return; }
+  facing = -dir;
+  enter('knockin', 0.3);
+  say(pick(LINES.knock), 1800);
+}
+
+// ---------- 攀爬 ----------
+// 走到活跃窗口最近的一侧边沿，顺着墙爬上去（32 帧循环）。
+// 爬到顶沿后：上方够高（≥420px，站得下她）就上去踱步待会儿（复用 onledge/jumpdown），
+// 不够高就直接跳下来。攀爬帧只有姐姐形态素材，其它形态先变身再爬。
+let climb = null;
+let pendingClimb = false;
+
+async function doClimb() {
+  const st = await window.pet.getStage();
+  const [px, py] = await window.pet.getPos();
+  const aw = await window.pet.activeWindow();
+  if (!aw) { idleWait = nextIdleWait(2, 4); return; }
+  // 窗顶贴住屏幕顶（全屏类）爬不到沿上，放弃
+  if (aw.y < st.minY + 170) { idleWait = nextIdleWait(2, 4); return; }
+  // 站位与 doKnock 同源：贴墙一侧的身体边和窗沿重合
+  const leftTx = aw.x - (170 + SIDE_HALF_W) + 4;
+  const rightTx = aw.x + aw.w - (170 - SIDE_HALF_W) - 4;
+  const leftOk = leftTx >= st.minX, rightOk = rightTx <= st.maxX;
+  const dLeft = Math.abs(px - leftTx), dRight = Math.abs(px - rightTx);
+  let tx, useLeft;
+  if (leftOk && (!rightOk || dLeft <= dRight)) { tx = leftTx; useLeft = true; }
+  else if (rightOk) { tx = rightTx; useLeft = false; }
+  else { idleWait = nextIdleWait(2, 4); return; }
+  climb = {
+    tx, ty: st.floorY, useLeft,
+    px, py,
+    topPy: aw.y - WIN_H,                    // 爬到顶沿时的窗口 y（脚底贴沿）
+    minX: Math.round(Math.max(aw.x + 20, st.minX)),
+    maxX: Math.round(Math.min(aw.x + aw.w - WIN_W - 20, st.maxX)),
+    floorY: st.floorY,
+    lieOk: aw.y - st.minY >= 420,           // 顶沿上方空间够不够她站/躺
+    fi: 0, fT: 0,
+  };
+  logEvent('自主', `顺着「${aw.owner}」的边沿往上爬`);
+  applyEffect('climb');
+  // 攀爬帧只有姐姐形态素材
+  if (form !== 'normal') { pendingClimb = true; doMorphTo('normal'); return; }
+  say(pick(LINES.climb), 1600);
+  enter('climbgo');
+}
+
+// 换立绘（爬完要切回当前形态正面图）
+function swapSprite(src) {
+  if (sprite.dataset.cur !== src) { sprite.dataset.cur = src; sprite.src = src; }
 }
 
 // ---------- 暴走模式 ----------
@@ -1305,6 +1465,10 @@ const EFFECTS = {
   mischief: { jing: -3, mood: 4 },
   peek: { jing: -2, mood: 2 },
   brock: { mood: 3 },
+  peekbig: { mood: 2 },
+  knock: { jing: -3, mood: 2, shen: 2 },
+  climb: { jing: -8, mood: 3 },
+  point: { shen: 8, mood: -1 }, // 骂骂咧咧一顿，消气
 };
 
 // 体力和法力不够的动作做不来
@@ -1323,7 +1487,7 @@ const DISPATCH = {
   qbounce: doQBounce, qsway: doQSway, morph: doMorph,
   desk: doDesk, seal: doSeal, goledge: doGoLedge,
   dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive, mischief: doMischief, flutefly: doFluteFly, sleep: doSleep, wallbang: doWallBang, work: doWork,
-  peek: doPeek, brock: doBrock,
+  peek: doPeek, brock: doBrock, peekbig: doPeekBig, knock: doKnock, climb: doClimb, point: doPoint,
 };
 
 // 心情好更爱玩开心动作，心情差不想玩
@@ -1706,7 +1870,7 @@ stage.addEventListener('mousedown', (e) => {
   }
   // 长按身体（非头非腰、非睡觉、非法宝）0.6s：弹出小输入框对她说话
   clearTimeout(chatPressTimer);
-  if (!inHead && !waistPress && !state.startsWith('sleep') && form !== 'flute') {
+  if (!inHead && !waistPress && !state.startsWith('sleep') && form !== 'flute' && form !== 'note') {
     chatPressTimer = setTimeout(() => {
       if (pressing && !dragging) {
         longPressFired = true; // 标记过，松开时不会再触发戳一戳
@@ -1852,8 +2016,8 @@ window.pet.onMenuAction((id) => {
       }
       return;
     }
-    const target = id.slice(5); // normal / chibi / flute / back
-    const label = { normal: '姐姐', chibi: 'Q版', flute: '法宝', back: '背对' }[target];
+    const target = id.slice(5); // normal / chibi / flute / note / back
+    const label = { normal: '姐姐', chibi: 'Q版', flute: '笛子', note: '笔记本', back: '背对' }[target];
     if (label && target !== form) {
       applyEffect('morph');
       logEvent('交互', `你让她切到${label}形态`);
@@ -1890,7 +2054,7 @@ function frame(now) {
 
   switch (state) {
     case 'idle': {
-      if (form === 'flute') {
+      if (form === 'flute' || form === 'note') {
         // 法宝待机：悬浮 + 慢摆 + 偶尔闪星光
         ty = -30 + 6 * Math.sin(t * 1.8);
         rot = 8 * Math.sin(t * 0.9);
@@ -2096,6 +2260,10 @@ function frame(now) {
       }
       break;
     }
+    case 'peekbig': { // 大屏窥视中：等覆盖层演完（peek-end），超时兜底
+      if (stateT >= stateDur) endPeekBig();
+      break;
+    }
     case 'fluteturn': { // 转过身去
       const k = Math.min(stateT / stateDur, 1);
       rotY = turnFrame(k, FORMS[form].back);
@@ -2204,6 +2372,9 @@ function frame(now) {
         else if (pendingFlute) { pendingFlute = false; doFluteFly(); }
         else if (pendingSleep) { pendingSleep = false; doSleep(); }
         else if (pendingWall) { pendingWall = false; doWallBang(); }
+        else if (pendingKnock) { pendingKnock = false; doKnock(); }
+        else if (pendingClimb) { pendingClimb = false; doClimb(); }
+        else if (pendingPoint) { pendingPoint = false; doPoint(); }
         else if (pendingWork) { pendingWork = false; doWork(); }
         else { enter('idle'); idleWait = nextIdleWait(3, 6); }
       }
@@ -2272,6 +2443,65 @@ function frame(now) {
       sy = 1 + stretch;
       sx = 1 - stretch * 0.6;
       if (ledge.py >= ledge.floorY) enter('land', 0.16);
+      break;
+    }
+    case 'climbgo': {
+      // 走到墙边（斜线移动），走路颠簸
+      const dx = climb.tx - climb.px, dy = climb.ty - climb.py;
+      const dist = Math.hypot(dx, dy);
+      const step = 300 * dt;
+      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+      rot = Math.sin(stateT * 9) * 2.5;
+      if (dx < -1) facing = -1; else if (dx > 1) facing = 1;
+      if (dist <= step + 2) {
+        window.pet.moveBy(dx, dy);
+        climb.px = climb.tx; climb.py = climb.ty;
+        // 到位：换上攀爬第一帧，朝墙（左沿帧图朝右，右沿镜像）
+        facing = climb.useLeft ? 1 : -1;
+        swapSprite(CLIMB_SRC[0]);
+        enter('climbup');
+      } else {
+        const mx = dx / dist * step, my = dy / dist * step;
+        window.pet.moveBy(mx, my);
+        climb.px += mx; climb.py += my;
+      }
+      if (stateT > 15) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); } // 走不到就算了
+      break;
+    }
+    case 'climbup': {
+      // 32 帧循环爬升：12fps 切帧 + 匀速上移
+      climb.fT += dt;
+      if (climb.fT >= 1 / 12) {
+        climb.fT = 0;
+        climb.fi = (climb.fi + 1) % CLIMB_SRC.length;
+        swapSprite(CLIMB_SRC[climb.fi]);
+      }
+      const step = 200 * dt;
+      window.pet.moveBy(0, -step);
+      climb.py -= step;
+      ty = Math.sin(stateT * 5) * 2; // 轻微身体起伏
+      if (climb.py <= climb.topPy) {
+        // 到顶沿：上方够高就上去踱步待会儿，不够就直接跳下来
+        swapSprite(FORMS[form].front);
+        if (climb.lieOk && climb.maxX > climb.minX) {
+          window.pet.moveBy(0, climb.topPy - climb.py);
+          ledge = {
+            tx: climb.px, ty: climb.topPy,
+            minX: climb.minX, maxX: climb.maxX,
+            floorY: climb.floorY,
+            dir: Math.random() < 0.5 ? -1 : 1,
+            px: climb.px, py: climb.topPy, vy: 0,
+          };
+          facing = 1;
+          say(pick(['爬上来了！', '站高高~', '歇会儿~']), 1500);
+          enter('onledge', rand(6, 12));
+        } else {
+          ledge = { px: climb.px, py: climb.py, vy: 0, floorY: climb.floorY };
+          facing = 1;
+          say('上面太窄了，下去咯', 1200);
+          enter('jumpdown');
+        }
+      }
       break;
     }
     case 'wallgoin': { // 翻牌转侧面，准备去撞墙
@@ -2353,6 +2583,88 @@ function frame(now) {
       sy = 1 + 0.02 * Math.sin(t * 3);
       if (Math.random() < 0.1) fxStar(170 + rand(-50, 50), 130 + rand(-15, 15), rand(0.5, 0.9));
       if (stateT >= stateDur) { doGoHome(); }
+      break;
+    }
+    case 'knockin': { // 翻牌转侧面，准备去敲门
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, SIDE_SRC);
+      if (stateT >= stateDur) enter('knockgo');
+      break;
+    }
+    case 'knockgo': {
+      // 侧身朝窗口边沿飘过去（斜线移动）
+      const dx = knock.tx - knock.px, dy = knock.ty - knock.py;
+      const dist = Math.hypot(dx, dy);
+      const step = 280 * dt;
+      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+      rot = Math.sin(stateT * 9) * 2.5;
+      if (dist <= step + 2) {
+        window.pet.moveBy(dx, dy);
+        knock.px = knock.tx; knock.py = knock.ty;
+        knock.phase = 'aim'; knock.phaseT = 0;
+        // 到位：换上备敲真图（朝右 = 敲左边沿；右边沿镜像），朝向 = 敲的方向
+        swapSprite(KNOCK_READY_SRC);
+        facing = knock.dir;
+        enter('knock');
+      } else {
+        const mx = dx / dist * step, my = dy / dist * step;
+        window.pet.moveBy(mx, my);
+        knock.px += mx; knock.py += my;
+      }
+      if (stateT > 12) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); }
+      break;
+    }
+    case 'knock': {
+      // 敲门循环：抬手后仰 → 叩上去（棒！+ 星光 + 小幅震）→ 收回，三声收工
+      knock.phaseT += dt;
+      const d = knock.dir; // 朝窗口的方向
+      if (knock.phase === 'aim') {
+        // 抬手蓄力：微微后仰抬手
+        rot = -d * 10 * Math.min(knock.phaseT / 0.22, 1);
+        if (knock.phaseT >= 0.22) { knock.phase = 'rap'; knock.phaseT = 0; }
+      } else if (knock.phase === 'rap') {
+        // 叩上去：换「咚！！」真图，前倾 + 轻轻顶一下，像真磕在边上
+        rot = d * 12;
+        swapSprite(KNOCK_HIT_SRC);
+        if (knock.phaseT >= 0.16) {
+          knock.phase = 'recoil'; knock.phaseT = 0;
+          knock.count++;
+          window.pet.moveBy(d * 3, 0);
+          if (knock.count === 2) say(pick(LINES.knock), 1500);
+        }
+      } else if (knock.phase === 'recoil') {
+        // 收回来（切回备敲图），缓一下敲下一声
+        rot = d * 4 * (1 - knock.phaseT / 0.34);
+        swapSprite(KNOCK_READY_SRC);
+        if (knock.phaseT >= 0.34) {
+          knock.phase = 'aim'; knock.phaseT = 0;
+          if (knock.count >= knock.maxCount) enter('knockdone', 1.4);
+        }
+      }
+      break;
+    }
+    case 'knockdone': {
+      // 敲完了贴着边等一秒，没人理就悻悻回家
+      rot = knock.dir * 3;
+      if (stateT >= stateDur) doGoHome();
+      break;
+    }
+    case 'point': {
+      // 叉腰指人骂骂咧咧：快速小幅点戳抖动，~1.1s 换一句，四句骂完收工
+      rot = Math.sin(stateT * 16) * 1.6;
+      ty = -Math.abs(Math.sin(stateT * 8)) * 2;
+      pointState.lineT += dt;
+      if (pointState.lineT > 1.15 && pointState.said < 4) {
+        pointState.lineT = 0;
+        pointState.said++;
+        say(pick(LINES.yell), 1100);
+        if (Math.random() < 0.6) fxText('💢', 220 + rand(-30, 30), 300 + rand(-20, 20), 24);
+      }
+      if (stateT >= 4.6) {
+        swapSprite(FORMS[form].front);
+        enter('idle');
+        idleWait = nextIdleWait(2, 5);
+      }
       break;
     }
     case 'dash': {

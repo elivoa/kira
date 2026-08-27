@@ -499,11 +499,13 @@ function openNotebook(tab) {
 }
 
 // 把窗口位置限制在主屏工作区内
+// 垂直方向允许高出屏幕顶 WIN_H-160：攀爬动作要沿高窗爬到顶沿，窗口大部可以出屏，
+// 保留 160px 可见（立绘脚部），拖拽/走路也不会把她弄丢
 function clampToScreen(x, y) {
   const area = screen.getPrimaryDisplay().workArea;
   return {
     x: Math.min(Math.max(x, area.x), area.x + area.width - WIN_W),
-    y: Math.min(Math.max(y, area.y), area.y + area.height - WIN_H),
+    y: Math.min(Math.max(y, area.y - (WIN_H - 160)), area.y + area.height - WIN_H),
   };
 }
 
@@ -601,6 +603,20 @@ app.whenReady().then(() => {
   });
   ipcMain.on('sword-done', () => {
     if (win) win.webContents.send('sword-end');
+  });
+
+  // 暗中观察：巨大的半张脸从屏幕侧边探出；高度对齐她的脸，演完通知桌宠回来
+  ipcMain.on('peek-start', () => {
+    if (!win || !overlay) return;
+    const b = win.getBounds();
+    const area = screen.getPrimaryDisplay().workArea;
+    overlay.webContents.send('fx-peek', {
+      side: Math.random() < 0.5 ? 'left' : 'right',
+      y: b.y + b.height * 0.35 - area.y,
+    });
+  });
+  ipcMain.on('peek-done', () => {
+    if (win) win.webContents.send('peek-end');
   });
 
   // 笔记本：打开 + 给桌宠带话
