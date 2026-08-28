@@ -2,6 +2,11 @@
 const ov = document.getElementById('ov');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+// 桌宠整体缩放系数（settings._size）：覆盖层里的人物/道具图也要跟着变大变小
+let ovlK = 1;
+window.pet.getSettings().then((s) => { ovlK = (s && s._size) || 1; });
+window.pet.onSettings((s) => { ovlK = (s && s._size) || 1; });
+
 function resize() {
   ov.setAttribute('viewBox', `0 0 ${innerWidth} ${innerHeight}`);
   ov.setAttribute('width', innerWidth);
@@ -152,7 +157,9 @@ function flySword(homeX, homeY) {
   // 剑光拖尾
   const trail = el('path', { fill: 'none', stroke: '#b9a8ff', 'stroke-width': 10, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.35 }, layer);
   const sword = makeSword();
-  layer.appendChild(sword);
+  const swordWrap = el('g', { transform: `scale(${ovlK})` }, layer); // 剑随整体缩放
+  swordWrap.appendChild(sword);
+
 
   const SPEED = 1700;
   const FLY_MS = 8000;
@@ -238,7 +245,7 @@ const CRUISE_SEQ = [0, 2, 1]; // 巡航循环：drive_1 → drive_3 → drive_2
 
 function makeCar() {
   const g = el('g', {});
-  const CAR_W = 460, CAR_H = CAR_W * 900 / 1560; // 素材画布 1560x900
+  const CAR_W = 460 * ovlK, CAR_H = CAR_W * 900 / 1560; // 素材画布 1560x900，车随整体缩放
   const GROUND = 850 / 900; // 车轮地线在画布中的纵向比例（组原点在车轮着地点）
   const imgs = DRIVE_FRAMES.map((name, i) => {
     const im = el('image', {
@@ -357,7 +364,8 @@ window.pet.onPeek(({ side, y }) => {
 });
 
 function peekFace(side, y) {
-  const H = Math.round(innerHeight * 0.55);
+  // 大脸高度随整体缩放（不超过屏高 90%）
+  const H = Math.min(Math.round(innerHeight * 0.55 * ovlK), Math.round(innerHeight * 0.9));
   const img = new Image();
   img.src = '../assets/head_big.png';
   img.onload = () => {
@@ -425,14 +433,14 @@ function smoothPath(pts) {
 
 function mischief(startX, startY) {
   const layer = el('g', {});
-  // 星月夜笔记本真图（assets/note.png，1023x1468≈1:1.44）压住鼠标，代替手绘版
+  // 星月夜笔记本真图（assets/note.png，1023x1468≈1:1.44）压住鼠标，代替手绘版；随整体缩放
   const bookG = el('g', {}, layer);
-  el('rect', { x: -44, y: -66, width: 96, height: 138, rx: 8, fill: 'rgba(20,20,60,.28)' }, bookG); // 投影
-  el('image', { href: '../assets/note.png', x: -50, y: -74, width: 98, height: 98 * 1468 / 1023 }, bookG);
+  el('rect', { x: -44 * ovlK, y: -66 * ovlK, width: 96 * ovlK, height: 138 * ovlK, rx: 8 * ovlK, fill: 'rgba(20,20,60,.28)' }, bookG); // 投影
+  el('image', { href: '../assets/note.png', x: -50 * ovlK, y: -74 * ovlK, width: 98 * ovlK, height: 98 * ovlK * 1468 / 1023 }, bookG);
   // 软绳（verlet 链条）+ 挂在下面的人物
   const rope = el('path', { fill: 'none', stroke: '#6b5a3a', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, layer);
   const charG = el('g', {}, layer);
-  el('image', { href: '../assets/chibi.png', x: -52, y: 0, width: 104, height: 104 * 1125 / 1012 }, charG);
+  el('image', { href: '../assets/chibi.png', x: -52 * ovlK, y: 0, width: 104 * ovlK, height: 104 * ovlK * 1125 / 1012 }, charG);
 
   function textPop(str, x, y, size = 30) {
     el('text', {
@@ -780,7 +788,7 @@ function setMenuFocus(sel) {
     sel.el.classList.add('focus');
     const h = st.sectorHalf;
     // conic-gradient 0deg 在正上方、顺时针为正，换算菜单角度（0°=右、y 向下）
-    st.sector.style.background = `conic-gradient(from ${sel.angle + 90 - h}deg, rgba(185, 168, 255, 0.2) 0deg ${h * 2}deg, transparent ${h * 2}deg 360deg)`;
+    st.sector.style.background = `conic-gradient(from ${sel.angle + 90 - h}deg, rgba(185, 168, 255, 0.13) 0deg ${h * 2}deg, transparent ${h * 2}deg 360deg)`;
     st.sector.style.opacity = '1';
   } else {
     st.sector.style.opacity = '0';
@@ -863,31 +871,38 @@ function activate(item) {
   }
 }
 
-// 纵向胶囊列表（大分组用）：一行一个，居中向两边扩展；首行是返回
+// 大分组多列网格（替代单列长列表）：每列最多 7 行，整体居中展开；首格是返回
 function renderListLevel(items, level) {
   const st = menuState;
-  st.hub.style.display = 'none'; // 返回做成首行胶囊，枢纽藏掉
-  const ROW_H = 40, ROW_GAP = 8;
-  const rows = [{ id: '_back', icon: '↩', label: '返回' }, ...items];
-  const totalH = rows.length * ROW_H + (rows.length - 1) * ROW_GAP;
-  const startY = Math.min(Math.max(st.cy - totalH / 2, 16), innerHeight - totalH - 16);
-  // 装饰环/扇区在列表模式下没有意义，藏掉
+  st.hub.style.display = 'none'; // 返回做成首格，枢纽藏掉
+  const CELL_W = 168, CELL_H = 38, GAP_X = 12, GAP_Y = 8, PER_COL = 7;
+  const cells = [{ id: '_back', icon: '↩', label: '返回' }, ...items];
+  const nCols = Math.ceil(cells.length / PER_COL);
+  const nRows = Math.ceil(cells.length / nCols);
+  const gridW = nCols * CELL_W + (nCols - 1) * GAP_X;
+  const gridH = nRows * CELL_H + (nRows - 1) * GAP_Y;
+  const gx = Math.min(Math.max(st.cx, gridW / 2 + 20), innerWidth - gridW / 2 - 20);
+  const startY = Math.min(Math.max(st.cy - gridH / 2, 16), Math.max(16, innerHeight - gridH - 16));
+  // 装饰环/扇区在网格模式下没有意义，藏掉
   st.ring1.style.width = st.ring1.style.height = '0px';
   st.ring2.style.width = st.ring2.style.height = '0px';
   st.sector.style.width = st.sector.style.height = '0px';
   st.farR = 0;
 
-  rows.forEach((item, i) => {
-    const rowCy = startY + i * (ROW_H + ROW_GAP) + ROW_H / 2;
+  cells.forEach((item, i) => {
+    const col = (i / nRows) | 0;
+    const row = i % nRows;
+    const left = gx - gridW / 2 + col * (CELL_W + GAP_X);
+    const top = startY + row * (CELL_H + GAP_Y);
+    const ccx = left + CELL_W / 2, ccy = top + CELL_H / 2;
     const it = document.createElement('div');
     it.className = 'rm-item pill' + (i === 0 ? ' backrow' : '');
-    it.style.left = `${st.cx - 88}px`;
-    it.style.top = `${rowCy - ROW_H / 2}px`;
+    it.style.left = `${left}px`;
+    it.style.top = `${top}px`;
     it.style.opacity = '0';
-    const dy = rowCy - st.cy; // 收回时缩向圆心
-    it.style.transform = `translate(0px, ${-dy}px) scale(0)`;
-    it.dataset.dx = 0;
-    it.dataset.dy = dy;
+    it.style.transform = `translate(${st.cx - ccx}px, ${st.cy - ccy}px) scale(0)`;
+    it.dataset.dx = ccx - st.cx; // 收回时缩向圆心
+    it.dataset.dy = ccy - st.cy;
     it.innerHTML = `<button class="rm-pill"><span class="rm-icon">${item.icon}</span><span class="rm-label">${item.label}</span></button>`;
     it.querySelector('button').addEventListener('click', () => activate(item));
     it.addEventListener('mouseenter', () => {
@@ -898,7 +913,7 @@ function renderListLevel(items, level) {
     st.root.appendChild(it);
     // 错峰从圆心飞出
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      it.style.transitionDelay = `${i * 30}ms`;
+      it.style.transitionDelay = `${i * 22}ms`;
       it.style.opacity = '1';
       it.style.transform = 'translate(0px, 0px) scale(1)';
     }));

@@ -73,4 +73,12 @@ contextBridge.exposeInMainWorld('pet', {
   onMenuOpen: (fn) => ipcRenderer.on('menu-open', (_e, data) => fn(data)),
   menuSelect: (id) => ipcRenderer.send('menu-select', id),
   menuClosed: () => ipcRenderer.send('menu-closed'),
+  // 气泡独立窗口：桌宠侧发台词/锚点/收关闭回执，气泡侧收台词/缩放、报穿透与关闭
+  bubbleSay: (data) => ipcRenderer.send('bubble-say', data),
+  bubbleAnchor: (a) => ipcRenderer.send('bubble-anchor', a),
+  onBubbleSay: (fn) => ipcRenderer.on('bubble-say', (_e, d) => fn(d)),
+  onBubbleScale: (fn) => ipcRenderer.on('bubble-scale', (_e, s) => fn(s)),
+  bubbleIgnore: (flag) => ipcRenderer.send('bubble-ignore', flag),
+  bubbleDismiss: () => ipcRenderer.send('bubble-dismissed'),
+  onBubbleDismissed: (fn) => ipcRenderer.on('bubble-dismissed', () => fn()),
 });

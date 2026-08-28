@@ -17,12 +17,12 @@
   .rm-backdrop { position: absolute; inset: 0; pointer-events: auto; }
   .rm-ring {
     position: absolute;
-    border: 1.5px dashed rgba(125, 111, 208, 0.45);
+    border: 1px dashed rgba(168, 158, 226, 0.26);
     border-radius: 50%;
     pointer-events: none;
     transform: translate(-50%, -50%);
   }
-  .rm-ring.r2 { border-color: rgba(185, 168, 255, 0.35); }
+  .rm-ring.r2 { border-color: rgba(190, 178, 255, 0.2); }
   /* 扇区高亮光楔：随聚焦项指向旋转，淡淡一层 */
   .rm-sector {
     position: absolute;
@@ -43,95 +43,82 @@
     pointer-events: auto;
     transition: transform 0.3s cubic-bezier(0.18, 1.35, 0.36, 1), opacity 0.22s ease;
   }
+  /* 玻璃面：深色半透明 + 1px 细边 + 顶部内高光，取代粗边渐变紫 */
+  .rm-btn, .rm-pill, .rm-hub {
+    background: rgba(20, 18, 40, 0.62);
+    backdrop-filter: blur(16px) saturate(1.25);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    color: #e9ebf6;
+    font-family: "PingFang SC", sans-serif;
+    cursor: pointer;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+  }
+  .rm-btn:hover, .rm-pill:hover,
+  .rm-item.focus .rm-btn, .rm-item.pill.focus .rm-pill {
+    background: rgba(52, 44, 100, 0.72);
+    border-color: rgba(182, 168, 255, 0.55);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 16px rgba(150, 128, 255, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    transform: scale(1.07);
+  }
   .rm-btn {
     width: 100%;
     height: 100%;
     border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.38);
-    background: linear-gradient(155deg, rgba(157, 146, 226, 0.92) 0%, rgba(125, 111, 208, 0.9) 55%, rgba(99, 85, 190, 0.92) 100%);
-    backdrop-filter: blur(8px);
-    color: #fff;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
     padding: 0;
-    font-family: "PingFang SC", sans-serif;
-    box-shadow: 0 6px 18px rgba(60, 48, 140, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45);
-    transition: transform 0.16s ease, box-shadow 0.16s ease;
   }
-  .rm-btn:hover {
-    transform: scale(1.16);
-    box-shadow: 0 8px 24px rgba(109, 93, 196, 0.55), 0 0 16px rgba(185, 168, 255, 0.7),
-      inset 0 1px 1px rgba(255, 255, 255, 0.55);
-  }
-  /* 扇区聚焦的淡淡高亮（与 hover 同放大倍率，光圈更柔） */
-  .rm-item.focus .rm-btn {
-    transform: scale(1.16);
-    box-shadow: 0 8px 24px rgba(109, 93, 196, 0.5), 0 0 20px rgba(185, 168, 255, 0.85),
-      inset 0 1px 1px rgba(255, 255, 255, 0.55);
-  }
-  @keyframes rmBob { from { transform: translateY(-1.5px); } to { transform: translateY(2.5px); } }
-  .rm-icon { font-size: 23px; line-height: 1; animation: rmBob 2.2s ease-in-out infinite alternate; }
-  .rm-label { font-size: 13px; font-weight: 500; letter-spacing: 1px; margin-top: 3px; text-shadow: 0 1px 2px rgba(50, 40, 120, 0.55); }
-  /* 大分组的纵向胶囊列表（内容太多不摆圆盘）：一行一个，居中向两边展开的横向胶囊 */
+  @keyframes rmBob { from { transform: translateY(-1px); } to { transform: translateY(1.5px); } }
+  .rm-icon { font-size: 21px; line-height: 1; animation: rmBob 2.4s ease-in-out infinite alternate; }
+  .rm-label { font-size: 12px; font-weight: 500; letter-spacing: 1px; margin-top: 4px; color: #cfd3e8; }
+  /* 大分组的多列网格（替代单列长胶囊）：最多 7 行一列，居中展开 */
   .rm-item.pill {
-    width: 176px;
-    height: 40px;
+    width: 168px;
+    height: 38px;
   }
   .rm-pill {
     width: 100%;
     height: 100%;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 0 18px;
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.38);
-    background: linear-gradient(155deg, rgba(157, 146, 226, 0.92) 0%, rgba(125, 111, 208, 0.9) 55%, rgba(99, 85, 190, 0.92) 100%);
-    backdrop-filter: blur(8px);
-    color: #fff;
-    cursor: pointer;
-    font-family: "PingFang SC", sans-serif;
-    box-shadow: 0 5px 16px rgba(60, 48, 140, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45);
-    transition: transform 0.16s ease, box-shadow 0.16s ease;
+    gap: 11px;
+    padding: 0 16px;
+    border-radius: 11px;
   }
-  .rm-pill .rm-icon { font-size: 20px; line-height: 1; animation: none; flex: none; }
-  .rm-pill .rm-label { font-size: 15px; font-weight: 500; letter-spacing: 1px; margin: 0; text-shadow: 0 1px 2px rgba(50, 40, 120, 0.55); }
-  .rm-item.pill:hover .rm-pill, .rm-item.pill.focus .rm-pill {
-    transform: scale(1.06);
-    box-shadow: 0 7px 22px rgba(109, 93, 196, 0.5), 0 0 16px rgba(185, 168, 255, 0.7),
-      inset 0 1px 1px rgba(255, 255, 255, 0.55);
-  }
-  /* 列表层的返回行：更素一档 */
+  .rm-pill .rm-icon { font-size: 18px; line-height: 1; animation: none; flex: none; }
+  .rm-pill .rm-label { font-size: 13.5px; font-weight: 500; letter-spacing: 0.5px; margin: 0; color: #dde1f0; }
+  /* 网格首格的返回：更素一档 */
   .rm-item.pill.backrow .rm-pill {
-    background: linear-gradient(155deg, rgba(90, 84, 140, 0.85), rgba(70, 64, 120, 0.85));
+    background: rgba(30, 28, 54, 0.55);
+    color: #a9adc6;
   }
   .rm-hub {
     position: absolute;
-    width: 44px;
-    height: 44px;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
-    border: 1.5px solid rgba(230, 224, 255, 0.9);
-    background: radial-gradient(circle at 35% 30%, #b9a8ff, #7d6fd0 70%);
-    color: #fff;
-    font-size: 19px;
-    cursor: pointer;
-    pointer-events: auto;
+    font-size: 17px;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     transform: translate(-50%, -50%);
-    box-shadow: 0 0 18px rgba(185, 168, 255, 0.7), inset 0 1px 2px rgba(255, 255, 255, 0.4);
-    animation: rmPulse 2s ease-in-out infinite alternate;
-    transition: transform 0.16s ease;
+    pointer-events: auto;
+    animation: rmPulse 2.4s ease-in-out infinite alternate;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
   }
-  .rm-hub:hover { transform: translate(-50%, -50%) scale(1.12); }
+  .rm-hub:hover {
+    background: rgba(52, 44, 100, 0.72);
+    border-color: rgba(182, 168, 255, 0.55);
+    transform: translate(-50%, -50%) scale(1.07);
+  }
   @keyframes rmPulse {
-    from { box-shadow: 0 0 10px rgba(185, 168, 255, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4); }
-    to { box-shadow: 0 0 22px rgba(185, 168, 255, 0.9), inset 0 1px 2px rgba(255, 255, 255, 0.4); }
+    from { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), 0 0 8px rgba(150, 128, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    to { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), 0 0 18px rgba(150, 128, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
   }
   /* 啪叽拟声词 */
   .fx-pop {

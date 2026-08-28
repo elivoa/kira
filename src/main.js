@@ -21,6 +21,9 @@ const KEYS_BIN = path.join(__dirname, '..', 'tools', 'keys');
 
 let win = null;
 let overlay = null; // 全屏特效覆盖层（点击穿透）
+let bubbleWin = null; // 气泡独立窗口：可以比人物窗口宽很多，字号有下限
+let bubbleAnchor = null; // 人物窗口内局部坐标 {x, y, scale}，桌宠每帧上报
+let lastBubbleScale = 1;
 // 拖拽时窗口与鼠标的偏移
 let dragOffset = null;
 
@@ -438,6 +441,46 @@ function createOverlay() {
   overlay.loadFile(path.join(__dirname, 'overlay.html'));
 }
 
+// 气泡独立窗口：宽度不受人物窗口限制，底边中点锚定人物头顶
+const BUBBLE_W = 560;
+const BUBBLE_H = 220;
+
+function createBubble() {
+  bubbleWin = new BrowserWindow({
+    width: BUBBLE_W,
+    height: BUBBLE_H,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  bubbleWin.setAlwaysOnTop(true, 'screen-saver');
+  bubbleWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  bubbleWin.setIgnoreMouseEvents(true, { forward: true });
+  bubbleWin.loadFile(path.join(__dirname, 'bubble.html'));
+}
+
+// 按桌宠上报的头顶锚点（窗口局部坐标）换算屏幕位置，夹在当前显示器工作区内
+function placeBubble() {
+  if (!bubbleWin || !win || !bubbleAnchor) return;
+  const b = win.getBounds();
+  const a = petDisplay().workArea;
+  const cx = b.x + bubbleAnchor.x;
+  const top = b.y + bubbleAnchor.y - 6;
+  const x = Math.round(Math.min(Math.max(cx - BUBBLE_W / 2, a.x), Math.max(a.x, a.x + a.width - BUBBLE_W)));
+  const y = Math.round(Math.min(Math.max(top - BUBBLE_H, a.y), Math.max(a.y, a.y + a.height - BUBBLE_H)));
+  const cur = bubbleWin.getBounds();
+  if (cur.x !== x || cur.y !== y) bubbleWin.setBounds({ x, y, width: BUBBLE_W, height: BUBBLE_H });
+}
+
 // 笔记本窗口（普通窗口，单例）；位置和大小持久化到 settings.notebookBounds
 let notebookWin = null;
 
@@ -542,6 +585,8 @@ function applyWindowSize() {
 app.whenReady().then(() => {
   createWindow();
   createOverlay();
+  createBubble();
+  win.on('move', placeBubble); // 拖拽/自主走动时气泡窗口跟着走
 
   // 显示器增删/ Metrics 变化：覆盖层重对屏，桌宠夹回可见区
   const onDisplaysChanged = () => {
@@ -609,6 +654,26 @@ app.whenReady().then(() => {
   // 点击穿透：渲染层根据光标是否在角色上来回切换
   ipcMain.on('mouse-ignore', (_e, flag) => {
     if (win) win.setIgnoreMouseEvents(flag, { forward: true });
+  });
+
+  // 气泡窗口：台词转发、每帧锚点定位、粘性气泡的点击穿透与关闭回执
+  ipcMain.on('bubble-say', (_e, data) => {
+    if (bubbleWin) bubbleWin.webContents.send('bubble-say', data);
+  });
+  ipcMain.on('bubble-anchor', (_e, a) => {
+    bubbleAnchor = a;
+    placeBubble();
+    const s = a.scale || 1;
+    if (bubbleWin && Math.abs(s - lastBubbleScale) > 0.005) {
+      lastBubbleScale = s;
+      bubbleWin.webContents.send('bubble-scale', s);
+    }
+  });
+  ipcMain.on('bubble-ignore', (_e, flag) => {
+    if (bubbleWin) bubbleWin.setIgnoreMouseEvents(flag, { forward: true });
+  });
+  ipcMain.on('bubble-dismissed', () => {
+    if (win) win.webContents.send('bubble-dismissed');
   });
 
   // 桌宠当前窗口位置（渲染层自主移动时的基准）

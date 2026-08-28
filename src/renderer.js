@@ -1,7 +1,6 @@
 // 桌宠渲染层：动画状态机 + 鼠标交互
 const sprite = document.getElementById('sprite');
 const stage = document.getElementById('stage');
-const bubble = document.getElementById('bubble');
 
 // ---------- 状态机 ----------
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -16,7 +15,6 @@ let idleWait = 3;
 let facing = 1;          // 朝向：1 正向，-1 镜像（走路时用）
 let walkDir = 1;
 let hopVy = 0, hopY = 0;
-let bubbleTimer = null;
 let curSize = 1;         // 走远时的缩放（1 = 正常大小）
 let sizeFrom = 1;        // 走回来时的起始缩放
 let goneStarT = 2;       // 消失期间星光闪烁的间隔计时
@@ -51,6 +49,14 @@ function applySpriteHeight() {
   if (board) board.style.width = 140 * sizeK + 'px';
   const flute = document.getElementById('fluteImg');
   if (flute) flute.style.width = 60 * sizeK + 'px';
+  // 场景图（睡觉/看腿）：DOM 图不随窗口尺寸走，手动乘缩放
+  const sleepImg = document.getElementById('sleepImg');
+  if (sleepImg) {
+    sleepImg.style.width = 340 * sizeK + 'px';
+    for (const im of sleepImg.querySelectorAll('img')) im.style.width = 340 * sizeK + 'px';
+  }
+  const legImg = document.getElementById('legImg');
+  if (legImg) legImg.style.width = 340 * sizeK + 'px';
 }
 
 const FRONT_SRC = '../assets/pet.png';
@@ -93,11 +99,9 @@ new Image().src = UMBRELLA_SRC;
 // 攀爬序列帧：53 帧侧脸爬墙循环（tools/video_climb_frames3.js 从暗背景爬墙视频逐帧截取，
 // 视频自带近乎完美的周期（f8~f60 姿势差仅 6.2），全帧使用不抽帧，24fps 原速播放；
 // 帧图朝右 = 贴窗口左沿爬，贴右沿镜像）
-// CLIMB_DY[i] = 切到帧 i 时窗口上移的屏幕像素（由视频逐帧脚趾位移生成，并按蹬踏段均匀化）：
-// 只在脚趾向下蹬伸时上移窗口（窗口上移量=脚趾下伸量）——蹬踏相脚趾在屏幕/被爬窗体上
-// 钉死不动，身体随腿伸展上升；换腿相窗口停住（支撑脚也不动）。窗口永不下移。
-// 每个蹬踏段内取段均值逐帧匀速，防逐帧位移量化造成的抖动（位置差一点没关系，稳字当头）
-const CLIMB_DY = [0, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 0, 0, 0, 0, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 0, 12, 0, 0, 1.2, 0, 0, 0, 2.33, 2.33, 2.33, 2.33];
+// 运动模型只保留两档速度：蹬腿相匀速向上，换腿相停住；位移按渲染帧 dt 连续结算，窗口永不下移
+const CLIMB_PUSH_SPEED = 204; // px/s（蹬腿相全程匀速向上，均值与原位移表一致）
+const CLIMB_PUSH = [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1]; // 53 帧哪些是蹬腿相
 const CLIMB_SRC = [];
 for (let i = 1; i <= 53; i++) {
   const s = `../assets/climb/f${String(i).padStart(2, '0')}.png`;
@@ -143,11 +147,6 @@ function overSprite(cx, cy) {
   if (cardImg.style.display === 'block') {
     const cr = cardImg.getBoundingClientRect();
     if (cx >= cr.left && cx <= cr.right && cy >= cr.top && cy <= cr.bottom) return true;
-  }
-  // 主动搭话的粘性气泡显示期间也可点（要点击才能关闭）
-  if (stickyActive) {
-    const br = bubble.getBoundingClientRect();
-    if (cx >= br.left && cx <= br.right && cy >= br.top && cy <= br.bottom) return true;
   }
   // 小输入框打开期间，框体区域也要接管鼠标
   if (miniChatOpen) {
@@ -221,34 +220,18 @@ function enter(next, dur = 0) {
 
 function say(text, ms = 1800) {
   if (stickyActive) return; // 粘性气泡没被点掉前，自言自语气泡不抢屏
-  bubble.style.width = ''; // 清掉粘性气泡的自适应宽度
-  bubble.textContent = text;
-  bubble.classList.add('show');
-  clearTimeout(bubbleTimer);
-  bubbleTimer = setTimeout(() => bubble.classList.remove('show'), ms);
+  window.pet.bubbleSay({ text, ms, sticky: false });
 }
 
 // 主动搭话的粘性气泡：不自动消失，点一下才关；样式与自言自语气泡区分
 let stickyActive = false;
 function saySticky(text) {
   stickyActive = true;
-  // 文字多的框宽一点：按字数自适应（160~300px，含 36px 内边距后总宽不超出窗口留边）
-  bubble.style.width = `${Math.min(winW() - 52, Math.max(160, Math.min(300, 40 + text.length * 9)))}px`;
-  bubble.textContent = text;
-  const hint = document.createElement('span');
-  hint.className = 'sticky-hint';
-  hint.textContent = '✦ 点我消失';
-  bubble.appendChild(hint);
-  bubble.classList.add('show', 'sticky');
-  clearTimeout(bubbleTimer); // 防止被普通 say 留下的计时器收走
+  window.pet.bubbleSay({ text, sticky: true });
 }
-// 气泡在 stage 内部：粘性状态下点气泡不能误触 stage 的戳一戳/拖拽
-bubble.addEventListener('mousedown', (e) => { if (stickyActive) e.stopPropagation(); });
-bubble.addEventListener('click', (e) => {
-  if (!stickyActive) return;
-  e.stopPropagation();
+// 气泡在独立窗口里，点掉后由主进程回执解除 sticky 状态
+window.pet.onBubbleDismissed(() => {
   stickyActive = false;
-  bubble.classList.remove('show', 'sticky');
   logEvent('交互', '点掉了 Kira 的主动搭话');
 });
 
@@ -899,11 +882,17 @@ async function doClimb() {
   const [px, py] = await window.pet.getPos();
   const aw = await window.pet.activeWindow();
   if (!aw) { idleWait = nextIdleWait(2, 4); return; }
-  // 窗顶贴住屏幕顶（全屏类）爬不到沿上，放弃
-  if (aw.y < st.minY + 170) { idleWait = nextIdleWait(2, 4); return; }
-  // 站位与 doKnock 同源：贴墙一侧的身体边和窗沿重合
-  const leftTx = aw.x - (170 * sizeK + SIDE_HALF_W * sizeK) + 4;
-  const rightTx = aw.x + aw.w - (170 * sizeK - SIDE_HALF_W * sizeK) - 4;
+  // 只拦「太矮的窗」：贴屏幕顶的高窗照样爬，位置到顶（clamp）后由停滞检测收尾跳下
+  if (aw.h < 260) {
+    say('这个太矮了，爬不了', 1400);
+    idleWait = nextIdleWait(2, 4);
+    return;
+  }
+  // 站位：攀爬帧的拳头/脚趾触点（实测基准窗口 x≈252）对准窗沿，再压 2px，手紧握、脚蹬紧。
+  // 注意别用袖口/小臂最右点（frame-x 410）对齐——那会让拳头恒差 12px；袖口探过窗沿是合理的
+  const GRIP_X = 252 * sizeK;
+  const leftTx = aw.x - GRIP_X + 2;
+  const rightTx = aw.x + aw.w - (winW() - GRIP_X) - 2;
   const leftOk = leftTx >= st.minX, rightOk = rightTx <= st.maxX;
   // 选边：以她的中心到两侧窗沿的距离，永远走最近的一边
   const cx = px + 170 * sizeK;
@@ -2512,6 +2501,8 @@ function frame(now) {
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
         climb.px = climb.tx; climb.py = climb.ty;
+        // 冲刺的取整漂移在这里校准一次：窗口 x 精确落回站位（手和脚的贴沿全靠它）
+        window.pet.getPos().then(([ax]) => { if (climb) window.pet.moveBy(Math.round(climb.tx - ax), 0); });
         // 到位：换上攀爬第一帧，朝墙（左沿帧图朝右，右沿镜像）
         facing = climb.useLeft ? 1 : -1;
         swapSprite(CLIMB_SRC[0]);
@@ -2532,19 +2523,21 @@ function frame(now) {
       break;
     }
     case 'climbup': {
-      // 53 帧循环爬升：24fps 切帧；上移只跟随脚趾蹬伸（CLIMB_DY），窗口永不下移
+      // 53 帧循环爬升：36fps 切帧；两档速度（蹬腿匀速向上 / 换腿停住），窗口永不下移
       climb.fT += dt;
       if (climb.fT >= 1 / 36) { // 1.5 倍速播放（帧数不变，只加速）
         climb.fT = 0;
         climb.fi = (climb.fi + 1) % CLIMB_SRC.length;
         swapSprite(CLIMB_SRC[climb.fi]);
-        const dy = CLIMB_DY[climb.fi] || 0;
-        if (dy > 0) {
-          window.pet.moveBy(0, -dy);
-          climb.py -= dy;
-        }
       }
-      ty = Math.sin(stateT * 5) * 2; // 轻微身体起伏
+      // 位移按渲染帧 dt 连续结算：蹬腿相匀速，换腿相 0，不再按切帧脉冲（停顿不卡）
+      if (CLIMB_PUSH[climb.fi]) {
+        const s = CLIMB_PUSH_SPEED * sizeK * dt;
+        window.pet.moveBy(0, -s);
+        climb.py -= s;
+      }
+      rot = 0; // 上爬不摇摆，手/脚贴沿不晃
+      ty = Math.sin(stateT * 5) * 1.5; // 只留一点点上下呼吸感
       // 到顶沿收尾（复用同一段逻辑）
       const topOut = (stuck) => {
         swapSprite(FORMS[form].front);
@@ -2939,26 +2932,26 @@ function frame(now) {
   sprite.style.transform =
     `translateX(-50%) translate(${tx}px, ${ty}px) rotate(${rot}deg) skewX(${skew}deg) perspective(700px) rotateY(${rotY}deg) scale(${sx * facing * curSize}, ${sy * curSize})`;
 
-  // 气泡每帧跟着立绘头顶走：位置 = 头顶上方
-  // 缩放 = 远近缩放 × 整体缩放（人物变小，气泡和字也要跟着小）
+  // 气泡在独立窗口：每帧把头顶锚点（窗口局部坐标）报给主进程定位
+  // 缩放 = 远近缩放 × 整体缩放，但有下限 0.8——人物变再小，字也得能看清
   const spriteH = (state.startsWith('desk') || state.startsWith('work') ? 700 : FORMS[form].height) * sizeK;
   // 睡觉场景中她的头在场景图上部，气泡贴那里
   const headY = state.startsWith('sleep') ? 280 * sizeK : winH() + ty - spriteH * sy * curSize;
-  const bScale = (state.startsWith('sleep') ? 1 : curSize) * sizeK;
-  // 可视区域 = 当前窗口：气泡无论缩放/多宽/多高都不出界（四边各留 8px）
-  const bw = bubble.offsetWidth * bScale;
-  const bh = bubble.offsetHeight * bScale;
-  // 气泡比窗口还宽/还高时退化为居中/贴顶，钳制边界反转时不能再用
-  const minCx = 8 + bw / 2;
-  const maxCx = winW() - 8 - bw / 2;
-  const cx = minCx > maxCx ? winW() / 2 : Math.min(Math.max(winW() / 2 + tx, minCx), maxCx);
-  const maxTop = winH() - 8 - bh;
-  const top = maxTop < 8 ? 8 : Math.min(Math.max(headY - bh - 6, 8), maxTop);
-  bubble.style.left = `${cx}px`;
-  bubble.style.top = `${top}px`;
-  bubble.style.transform = `translateX(-50%) scale(${bScale})`;
+  const bScale = Math.max((state.startsWith('sleep') ? 1 : curSize) * sizeK, 0.8);
+  sendBubbleAnchor(winW() / 2 + tx, headY, bScale);
 
   requestAnimationFrame(frame);
+}
+
+// 锚点变化才上报，避免每帧空发 IPC
+let lastAnchor = { x: NaN, y: NaN, scale: NaN };
+function sendBubbleAnchor(x, y, scale) {
+  x = Math.round(x);
+  y = Math.round(y);
+  scale = Math.round(scale * 100) / 100;
+  if (x === lastAnchor.x && y === lastAnchor.y && scale === lastAnchor.scale) return;
+  lastAnchor = { x, y, scale };
+  window.pet.bubbleAnchor(lastAnchor);
 }
 
 // idleRandom 里可能选择继续待机，此时保持 idle 状态
