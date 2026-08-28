@@ -700,7 +700,14 @@ function openMenu(x, y) {
 
   const backdrop = document.createElement('div');
   backdrop.className = 'rm-backdrop';
-  backdrop.addEventListener('mousedown', () => closeMenu());
+  // 点击扇区环带 = 直接激活该项（不必精确点球）；点在菜单外才关
+  backdrop.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const st = menuState;
+    const sel = st && sectorAt(e.clientX - st.cx, e.clientY - st.cy);
+    if (sel) activate(sel.item);
+    else closeMenu();
+  });
   // 菜单展开时在空白处再点右键：换位置重新展开
   backdrop.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -738,16 +745,12 @@ function openMenu(x, y) {
   renderLevel(MENU_TREE, 0);
 }
 
-// 扇区悬停：按最近角度判定鼠标落在哪项的扇区，聚焦并淡淡高亮；
-// 只有鼠标离得足够远（超出菜单圈外一截）或回到枢纽上才取消高亮
-function onMenuHover(e) {
+// 扇区判定：给定相对圆心坐标，返回命中的扇区（在环带内且角度最近）；不在环带返回 null
+function sectorAt(dx, dy) {
   const st = menuState;
-  if (!st || !st.sectors.length) return;
-  armMenuIdle(); // 在扇区里移动也算有人碰
-  const dx = e.clientX - st.cx;
-  const dy = e.clientY - st.cy;
+  if (!st || !st.sectors.length) return null;
   const d = Math.hypot(dx, dy);
-  if (d > st.farR || d < 26) return setMenuFocus(null);
+  if (d > st.farR || d < 26) return null;
   const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
   let best = null;
   let bestDiff = Infinity;
@@ -756,7 +759,16 @@ function onMenuHover(e) {
     if (diff > 180) diff = 360 - diff;
     if (diff < bestDiff) { bestDiff = diff; best = s; }
   }
-  setMenuFocus(best);
+  return best;
+}
+
+// 扇区悬停：按最近角度判定鼠标落在哪项的扇区，聚焦并淡淡高亮；
+// 只有鼠标离得足够远（超出菜单圈外一截）或回到枢纽上才取消高亮
+function onMenuHover(e) {
+  const st = menuState;
+  if (!st || !st.sectors.length) return;
+  armMenuIdle(); // 在扇区里移动也算有人碰
+  setMenuFocus(sectorAt(e.clientX - st.cx, e.clientY - st.cy));
 }
 
 function setMenuFocus(sel) {
@@ -789,10 +801,15 @@ function renderLevel(items, level) {
     it.style.transform = `translate(${-parseFloat(it.dataset.dx)}px, ${-parseFloat(it.dataset.dy)}px) scale(0)`;
     setTimeout(() => it.remove(), 240);
   }
+  armMenuIdle(); // 每次切换层级也重置闲置计时
+
+  // 大分组（>8 项）摆圆盘太挤：改纵向胶囊列表，一行一个，向两边扩展
+  if (items.length > 8) return renderListLevel(items, level);
+
+  st.hub.style.display = '';
   st.hub.textContent = level === 0 ? '✦' : '↩';
   st.hub.onclick = () => { if (level === 0) closeMenu(); else renderLevel(MENU_TREE, 0); };
   st.hub.onmouseenter = armMenuIdle;
-  armMenuIdle(); // 每次切换层级也重置闲置计时
 
   const r = items.length <= 4 ? 98 : items.length <= 6 ? 116 : 132;
   st.farR = r + 90; // 超出这个距离才取消扇区高亮
@@ -820,20 +837,68 @@ function renderLevel(items, level) {
     it.dataset.dx = dx;
     it.dataset.dy = dy;
     it.innerHTML = `<button class="rm-btn"><span class="rm-icon" style="animation-delay:${i * 0.18}s">${item.icon}</span><span class="rm-label">${item.label}</span></button>`;
-    it.querySelector('button').addEventListener('click', () => {
-      if (item.id === '_close') closeMenu();
-      else if (item.children) renderLevel(item.children, level + 1);
-      else {
-        window.pet.menuSelect(item.id);
-        closeMenu();
-      }
-    });
+    it.querySelector('button').addEventListener('click', () => activate(item));
     it.addEventListener('mouseenter', armMenuIdle); // 碰到就算有人碰
     st.root.appendChild(it);
-    st.sectors.push({ el: it, angle: aDeg });
+    st.sectors.push({ el: it, angle: aDeg, item });
     // 错峰从圆心飞出
     requestAnimationFrame(() => requestAnimationFrame(() => {
       it.style.transitionDelay = `${i * 40}ms`;
+      it.style.opacity = '1';
+      it.style.transform = 'translate(0px, 0px) scale(1)';
+    }));
+  });
+}
+
+// 激活一个菜单项（球体点击和扇区点击共用）
+function activate(item) {
+  const st = menuState;
+  if (!st) return;
+  if (item.id === '_close') closeMenu();
+  else if (item.id === '_back') renderLevel(MENU_TREE, 0);
+  else if (item.children) renderLevel(item.children, st.level + 1);
+  else {
+    window.pet.menuSelect(item.id);
+    closeMenu();
+  }
+}
+
+// 纵向胶囊列表（大分组用）：一行一个，居中向两边扩展；首行是返回
+function renderListLevel(items, level) {
+  const st = menuState;
+  st.hub.style.display = 'none'; // 返回做成首行胶囊，枢纽藏掉
+  const ROW_H = 40, ROW_GAP = 8;
+  const rows = [{ id: '_back', icon: '↩', label: '返回' }, ...items];
+  const totalH = rows.length * ROW_H + (rows.length - 1) * ROW_GAP;
+  const startY = Math.min(Math.max(st.cy - totalH / 2, 16), innerHeight - totalH - 16);
+  // 装饰环/扇区在列表模式下没有意义，藏掉
+  st.ring1.style.width = st.ring1.style.height = '0px';
+  st.ring2.style.width = st.ring2.style.height = '0px';
+  st.sector.style.width = st.sector.style.height = '0px';
+  st.farR = 0;
+
+  rows.forEach((item, i) => {
+    const rowCy = startY + i * (ROW_H + ROW_GAP) + ROW_H / 2;
+    const it = document.createElement('div');
+    it.className = 'rm-item pill' + (i === 0 ? ' backrow' : '');
+    it.style.left = `${st.cx - 88}px`;
+    it.style.top = `${rowCy - ROW_H / 2}px`;
+    it.style.opacity = '0';
+    const dy = rowCy - st.cy; // 收回时缩向圆心
+    it.style.transform = `translate(0px, ${-dy}px) scale(0)`;
+    it.dataset.dx = 0;
+    it.dataset.dy = dy;
+    it.innerHTML = `<button class="rm-pill"><span class="rm-icon">${item.icon}</span><span class="rm-label">${item.label}</span></button>`;
+    it.querySelector('button').addEventListener('click', () => activate(item));
+    it.addEventListener('mouseenter', () => {
+      armMenuIdle();
+      st.root.querySelectorAll('.rm-item.pill.focus').forEach((e2) => e2.classList.remove('focus'));
+      it.classList.add('focus');
+    });
+    st.root.appendChild(it);
+    // 错峰从圆心飞出
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      it.style.transitionDelay = `${i * 30}ms`;
       it.style.opacity = '1';
       it.style.transform = 'translate(0px, 0px) scale(1)';
     }));

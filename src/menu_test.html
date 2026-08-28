@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!-- 菜单样式测试页：stub window.pet，加载真实 overlay.js，用 spec 驱动菜单展开截图 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #3a3f4a; /* 测试时给个桌面底色，透明菜单才看得见 */
+  }
+  #ov { position: absolute; inset: 0; }
+  /* ---------- 星盘右键菜单 ---------- */
+  #menuLayer { position: absolute; inset: 0; pointer-events: none; }
+  .rm-root { position: absolute; inset: 0; }
+  .rm-backdrop { position: absolute; inset: 0; pointer-events: auto; }
+  .rm-ring {
+    position: absolute;
+    border: 1.5px dashed rgba(125, 111, 208, 0.45);
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+  .rm-ring.r2 { border-color: rgba(185, 168, 255, 0.35); }
+  .rm-sector {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  @keyframes rmSpin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+  @keyframes rmSpinR { to { transform: translate(-50%, -50%) rotate(-360deg); } }
+  .rm-ring.r1 { animation: rmSpin 26s linear infinite; }
+  .rm-ring.r2 { animation: rmSpinR 34s linear infinite; }
+  .rm-item {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    pointer-events: auto;
+    transition: transform 0.3s cubic-bezier(0.18, 1.35, 0.36, 1), opacity 0.22s ease;
+  }
+  .rm-btn {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    background: linear-gradient(155deg, rgba(157, 146, 226, 0.92) 0%, rgba(125, 111, 208, 0.9) 55%, rgba(99, 85, 190, 0.92) 100%);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-family: "PingFang SC", sans-serif;
+    box-shadow: 0 6px 18px rgba(60, 48, 140, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45);
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+  }
+  .rm-btn:hover {
+    transform: scale(1.16);
+    box-shadow: 0 8px 24px rgba(109, 93, 196, 0.55), 0 0 16px rgba(185, 168, 255, 0.7),
+      inset 0 1px 1px rgba(255, 255, 255, 0.55);
+  }
+  .rm-item.focus .rm-btn {
+    transform: scale(1.16);
+    box-shadow: 0 8px 24px rgba(109, 93, 196, 0.5), 0 0 20px rgba(185, 168, 255, 0.85),
+      inset 0 1px 1px rgba(255, 255, 255, 0.55);
+  }
+  @keyframes rmBob { from { transform: translateY(-1.5px); } to { transform: translateY(2.5px); } }
+  .rm-icon { font-size: 23px; line-height: 1; animation: rmBob 2.2s ease-in-out infinite alternate; }
+  .rm-label { font-size: 13px; font-weight: 500; letter-spacing: 1px; margin-top: 3px; text-shadow: 0 1px 2px rgba(50, 40, 120, 0.55); }
+  .rm-item.pill {
+    width: 176px;
+    height: 40px;
+  }
+  .rm-pill {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 18px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    background: linear-gradient(155deg, rgba(157, 146, 226, 0.92) 0%, rgba(125, 111, 208, 0.9) 55%, rgba(99, 85, 190, 0.92) 100%);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    cursor: pointer;
+    font-family: "PingFang SC", sans-serif;
+    box-shadow: 0 5px 16px rgba(60, 48, 140, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45);
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+  }
+  .rm-pill .rm-icon { font-size: 20px; line-height: 1; animation: none; flex: none; }
+  .rm-pill .rm-label { font-size: 15px; font-weight: 500; letter-spacing: 1px; margin: 0; text-shadow: 0 1px 2px rgba(50, 40, 120, 0.55); }
+  .rm-item.pill:hover .rm-pill, .rm-item.pill.focus .rm-pill {
+    transform: scale(1.06);
+    box-shadow: 0 7px 22px rgba(109, 93, 196, 0.5), 0 0 16px rgba(185, 168, 255, 0.7),
+      inset 0 1px 1px rgba(255, 255, 255, 0.55);
+  }
+  .rm-item.pill.backrow .rm-pill {
+    background: linear-gradient(155deg, rgba(90, 84, 140, 0.85), rgba(70, 64, 120, 0.85));
+  }
+  .rm-hub {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(230, 224, 255, 0.9);
+    background: radial-gradient(circle at 35% 30%, #b9a8ff, #7d6fd0 70%);
+    color: #fff;
+    font-size: 19px;
+    cursor: pointer;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 18px rgba(185, 168, 255, 0.7), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+    animation: rmPulse 2s ease-in-out infinite alternate;
+    transition: transform 0.16s ease;
+  }
+  .rm-hub:hover { transform: translate(-50%, -50%) scale(1.12); }
+  @keyframes rmPulse {
+    from { box-shadow: 0 0 10px rgba(185, 168, 255, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4); }
+    to { box-shadow: 0 0 22px rgba(185, 168, 255, 0.9), inset 0 1px 2px rgba(255, 255, 255, 0.4); }
+  }
+</style>
+</head>
+<body>
+<svg id="ov"></svg>
+<div id="menuLayer"></div>
+<script>
+// stub：overlay.js 只注册监听，菜单由 onMenuOpen 触发
+window.pet = {
+  onPoop() {}, onSword() {}, onDrive() {}, onMischief() {}, onPeek() {},
+  onMenuOpen(fn) { window.__openMenu = fn; },
+  menuSelect(id) { document.title = 'SELECT:' + id; },
+  menuClosed() {}, ovIgnore() {},
+};
+</script>
+<script src="overlay.js"></script>
+<script>
+  document.title = 'READY';
+</script>
+</body>
+</html>

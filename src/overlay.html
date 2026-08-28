@@ -47,8 +47,9 @@
     width: 100%;
     height: 100%;
     border-radius: 50%;
-    border: 1.5px solid rgba(230, 224, 255, 0.85);
-    background: radial-gradient(circle at 32% 28%, #9d92e2, #7d6fd0 62%, #6b5dc4);
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    background: linear-gradient(155deg, rgba(157, 146, 226, 0.92) 0%, rgba(125, 111, 208, 0.9) 55%, rgba(99, 85, 190, 0.92) 100%);
+    backdrop-filter: blur(8px);
     color: #fff;
     display: flex;
     flex-direction: column;
@@ -57,23 +58,56 @@
     cursor: pointer;
     padding: 0;
     font-family: "PingFang SC", sans-serif;
-    box-shadow: 0 4px 16px rgba(80, 66, 170, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.35);
+    box-shadow: 0 6px 18px rgba(60, 48, 140, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45);
     transition: transform 0.16s ease, box-shadow 0.16s ease;
   }
   .rm-btn:hover {
     transform: scale(1.16);
-    box-shadow: 0 6px 22px rgba(109, 93, 196, 0.65), 0 0 14px rgba(185, 168, 255, 0.8),
-      inset 0 1px 2px rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 24px rgba(109, 93, 196, 0.55), 0 0 16px rgba(185, 168, 255, 0.7),
+      inset 0 1px 1px rgba(255, 255, 255, 0.55);
   }
   /* 扇区聚焦的淡淡高亮（与 hover 同放大倍率，光圈更柔） */
   .rm-item.focus .rm-btn {
     transform: scale(1.16);
-    box-shadow: 0 6px 22px rgba(109, 93, 196, 0.6), 0 0 18px rgba(185, 168, 255, 0.9),
-      inset 0 1px 2px rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 24px rgba(109, 93, 196, 0.5), 0 0 20px rgba(185, 168, 255, 0.85),
+      inset 0 1px 1px rgba(255, 255, 255, 0.55);
   }
   @keyframes rmBob { from { transform: translateY(-1.5px); } to { transform: translateY(2.5px); } }
-  .rm-icon { font-size: 24px; line-height: 1; animation: rmBob 2.2s ease-in-out infinite alternate; }
-  .rm-label { font-size: 14px; font-weight: 600; margin-top: 4px; text-shadow: 0 1px 3px rgba(60, 48, 140, 0.6); }
+  .rm-icon { font-size: 23px; line-height: 1; animation: rmBob 2.2s ease-in-out infinite alternate; }
+  .rm-label { font-size: 13px; font-weight: 500; letter-spacing: 1px; margin-top: 3px; text-shadow: 0 1px 2px rgba(50, 40, 120, 0.55); }
+  /* 大分组的纵向胶囊列表（内容太多不摆圆盘）：一行一个，居中向两边展开的横向胶囊 */
+  .rm-item.pill {
+    width: 176px;
+    height: 40px;
+  }
+  .rm-pill {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 18px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    background: linear-gradient(155deg, rgba(157, 146, 226, 0.92) 0%, rgba(125, 111, 208, 0.9) 55%, rgba(99, 85, 190, 0.92) 100%);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    cursor: pointer;
+    font-family: "PingFang SC", sans-serif;
+    box-shadow: 0 5px 16px rgba(60, 48, 140, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45);
+    transition: transform 0.16s ease, box-shadow 0.16s ease;
+  }
+  .rm-pill .rm-icon { font-size: 20px; line-height: 1; animation: none; flex: none; }
+  .rm-pill .rm-label { font-size: 15px; font-weight: 500; letter-spacing: 1px; margin: 0; text-shadow: 0 1px 2px rgba(50, 40, 120, 0.55); }
+  .rm-item.pill:hover .rm-pill, .rm-item.pill.focus .rm-pill {
+    transform: scale(1.06);
+    box-shadow: 0 7px 22px rgba(109, 93, 196, 0.5), 0 0 16px rgba(185, 168, 255, 0.7),
+      inset 0 1px 1px rgba(255, 255, 255, 0.55);
+  }
+  /* 列表层的返回行：更素一档 */
+  .rm-item.pill.backrow .rm-pill {
+    background: linear-gradient(155deg, rgba(90, 84, 140, 0.85), rgba(70, 64, 120, 0.85));
+  }
   .rm-hub {
     position: absolute;
     width: 44px;

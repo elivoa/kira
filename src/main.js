@@ -6,9 +6,13 @@ const https = require('https');
 const os = require('os');
 const path = require('path');
 
-// 窗口尺寸：给跳跃/摇摆留出顶部和两侧余量，立绘锚定在底部
-const WIN_W = 340;
-const WIN_H = 620;
+// 窗口基础尺寸：给跳跃/摇摆留出顶部和两侧余量，立绘锚定在底部
+// settings._size 是整体缩放系数（配置页滑块），实际窗口尺寸 = 基础尺寸 × 系数
+const BASE_W = 340;
+const BASE_H = 620;
+function sizeK() { return settings._size || 1; }
+function winW() { return Math.round(BASE_W * sizeK()); }
+function winH() { return Math.round(BASE_H * sizeK()); }
 
 // 枚举屏幕可见窗口的工具（CGWindowList，tools/windows.swift 编译而来）
 const WINDOWS_BIN = path.join(__dirname, '..', 'tools', 'windows');
@@ -384,10 +388,10 @@ function startKeyMonitor() {
 function createWindow() {
   const area = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
-    width: WIN_W,
-    height: WIN_H,
-    x: Math.round(area.width - WIN_W - 100),
-    y: Math.round(area.height - WIN_H),
+    width: winW(),
+    height: winH(),
+    x: Math.round(area.width - winW() - 100),
+    y: Math.round(area.height - winH()),
     frame: false,
     transparent: true,
     resizable: false,
@@ -498,20 +502,59 @@ function openNotebook(tab) {
   notebookWin.on('closed', () => { notebookWin = null; });
 }
 
-// 把窗口位置限制在主屏工作区内
-// 垂直方向允许高出屏幕顶 WIN_H-160：攀爬动作要沿高窗爬到顶沿，窗口大部可以出屏，
+// 桌宠当前所在的显示器：所有屏幕相关计算（夹取/活动范围/窗台/特效坐标）都以它为准，支持多显示器
+function petDisplay() {
+  if (!win) return screen.getPrimaryDisplay();
+  return screen.getDisplayMatching(win.getBounds());
+}
+function petArea() { return petDisplay().workArea; }
+
+// 覆盖层跟随桌宠（或指定显示器）所在屏：特效/菜单只存在于一块屏上
+function syncOverlay(dpy) {
+  if (!overlay) return;
+  const a = (dpy || petDisplay()).workArea;
+  const b = overlay.getBounds();
+  if (b.x === a.x && b.y === a.y && b.width === a.width && b.height === a.height) return;
+  overlay.setBounds({ x: a.x, y: a.y, width: a.width, height: a.height });
+}
+
+// 把窗口位置限制在当前显示器工作区内
+// 垂直方向允许高出屏幕顶 winH()-160：攀爬动作要沿高窗爬到顶沿，窗口大部可以出屏，
 // 保留 160px 可见（立绘脚部），拖拽/走路也不会把她弄丢
 function clampToScreen(x, y) {
-  const area = screen.getPrimaryDisplay().workArea;
+  const area = petArea();
   return {
-    x: Math.min(Math.max(x, area.x), area.x + area.width - WIN_W),
-    y: Math.min(Math.max(y, area.y - (WIN_H - 160)), area.y + area.height - WIN_H),
+    x: Math.min(Math.max(x, area.x), area.x + area.width - winW()),
+    y: Math.min(Math.max(y, area.y - (winH() - 160)), area.y + area.height - winH()),
   };
+}
+
+// 整体缩放变化时重设窗口尺寸，保持右下角锚定并夹回屏幕
+function applyWindowSize() {
+  if (!win) return;
+  const b = win.getBounds();
+  const w = winW(), h = winH();
+  win.setBounds({ x: Math.round(b.x + b.width - w), y: Math.round(b.y + b.height - h), width: w, height: h });
+  const p = clampToScreen(win.getPosition()[0], win.getPosition()[1]);
+  win.setPosition(p.x, p.y);
 }
 
 app.whenReady().then(() => {
   createWindow();
   createOverlay();
+
+  // 显示器增删/ Metrics 变化：覆盖层重对屏，桌宠夹回可见区
+  const onDisplaysChanged = () => {
+    syncOverlay();
+    if (win) {
+      const [x, y] = win.getPosition();
+      const p = clampToScreen(x, y);
+      win.setPosition(p.x, p.y);
+    }
+  };
+  screen.on('display-added', onDisplaysChanged);
+  screen.on('display-removed', onDisplaysChanged);
+  screen.on('display-metrics-changed', onDisplaysChanged);
   startKeyMonitor();
 
   // 菜单栏托盘图标：快速打开 Kira Note / 聊天，或退出
@@ -558,7 +601,10 @@ app.whenReady().then(() => {
     win.setPosition(p.x, p.y);
   });
 
-  ipcMain.on('drag-end', () => { dragOffset = null; });
+  ipcMain.on('drag-end', () => {
+    dragOffset = null;
+    syncOverlay(); // 被拎到别的显示器了，覆盖层跟过去
+  });
 
   // 点击穿透：渲染层根据光标是否在角色上来回切换
   ipcMain.on('mouse-ignore', (_e, flag) => {
@@ -571,20 +617,21 @@ app.whenReady().then(() => {
   // 全局光标位置（惊吓检测轮询用，macOS 读光标不需要权限）
   ipcMain.handle('get-cursor', () => screen.getCursorScreenPoint());
 
-  // 屏幕可活动范围（暴走/御剑飞行用）
+  // 屏幕可活动范围（暴走/御剑飞行用）：桌宠当前所在显示器
   ipcMain.handle('get-stage', () => {
-    const area = screen.getPrimaryDisplay().workArea;
+    const area = petArea();
     return {
-      minX: area.x, maxX: area.x + area.width - WIN_W,
-      minY: area.y, floorY: area.y + area.height - WIN_H,
+      minX: area.x, maxX: area.x + area.width - winW(),
+      minY: area.y, floorY: area.y + area.height - winH(),
     };
   });
 
   // 扔屎：把桌宠位置换算成覆盖层坐标发过去
   ipcMain.on('poop', () => {
     if (!win || !overlay) return;
+    syncOverlay();
     const b = win.getBounds();
-    const area = screen.getPrimaryDisplay().workArea;
+    const area = petArea();
     overlay.webContents.send('fx-poop', {
       fromX: b.x + b.width / 2 - area.x,
       fromY: b.y + b.height * 0.55 - area.y,
@@ -594,8 +641,9 @@ app.whenReady().then(() => {
   // 化身成剑：转发给覆盖层；剑飞回来再通知桌宠
   ipcMain.on('sword-start', () => {
     if (!win || !overlay) return;
+    syncOverlay();
     const b = win.getBounds();
-    const area = screen.getPrimaryDisplay().workArea;
+    const area = petArea();
     overlay.webContents.send('fx-sword', {
       x: b.x + b.width / 2 - area.x,
       y: b.y + b.height / 2 - area.y,
@@ -608,8 +656,9 @@ app.whenReady().then(() => {
   // 暗中观察：巨大的半张脸从屏幕侧边探出；高度对齐她的脸，演完通知桌宠回来
   ipcMain.on('peek-start', () => {
     if (!win || !overlay) return;
+    syncOverlay();
     const b = win.getBounds();
-    const area = screen.getPrimaryDisplay().workArea;
+    const area = petArea();
     overlay.webContents.send('fx-peek', {
       side: Math.random() < 0.5 ? 'left' : 'right',
       y: b.y + b.height * 0.35 - area.y,
@@ -689,10 +738,10 @@ app.whenReady().then(() => {
     return readDayFile(key);
   });
 
-  // 聊天配置：小本子「配置」页签读写 Kimi key；完整 key 不出主进程，渲染层只拿到掩码
+  // 聊天配置：小本子「配置」页签读写 Kimi key；key 完整返回给配置页显示
   ipcMain.handle('get-chat-config', () => {
     const k = config.kimiKey || '';
-    return { hasKey: !!k, masked: k ? `${k.slice(0, 6)}…${k.slice(-4)}` : '' };
+    return { hasKey: !!k, key: k, masked: k ? `${k.slice(0, 6)}…${k.slice(-4)}` : '' };
   });
   ipcMain.on('set-chat-config', (_e, patch) => {
     if (!patch || typeof patch.kimiKey !== 'string') return;
@@ -721,19 +770,22 @@ app.whenReady().then(() => {
   // 兜风：转发给覆盖层；车回来接她时再通知桌宠
   ipcMain.on('drive-start', () => {
     if (!win || !overlay) return;
+    syncOverlay();
     const b = win.getBounds();
-    const area = screen.getPrimaryDisplay().workArea;
+    const area = petArea();
     overlay.webContents.send('fx-drive', { x: b.x + b.width / 2 - area.x });
   });
   ipcMain.on('drive-done', () => {
     if (win) win.webContents.send('drive-end');
   });
 
-  // 捣乱：转发给覆盖层（直接落在鼠标当前位置）；被晃掉或到时间后再通知桌宠归位
+  // 捣乱：转发给覆盖层（直接落在鼠标当前位置，覆盖层跟到光标所在屏）；被晃掉或到时间后再通知桌宠归位
   ipcMain.on('mischief-start', () => {
     if (!win || !overlay) return;
-    const area = screen.getPrimaryDisplay().workArea;
     const c = screen.getCursorScreenPoint();
+    const d = screen.getDisplayNearestPoint(c);
+    syncOverlay(d);
+    const area = d.workArea;
     overlay.webContents.send('fx-mischief', {
       x: c.x - area.x,
       y: c.y - area.y,
@@ -752,6 +804,7 @@ app.whenReady().then(() => {
   ipcMain.on('set-actions', (_e, patch) => {
     Object.assign(settings, patch);
     saveConfig();
+    if (patch && patch._size) applyWindowSize(); // 整体缩放变了，窗口跟着变
     if (win) win.webContents.send('settings-changed', settings);
   });
 
@@ -776,27 +829,30 @@ app.whenReady().then(() => {
     saveLogs();
   });
 
-  // 找一块可以站上去的窗台：最前台的普通窗口的上沿
+  // 找一块可以站上去的窗台：桌宠当前显示器上最前台的普通窗口的上沿
   ipcMain.handle('find-ledge', async () => {    const wins = await listWindows();
-    const area = screen.getPrimaryDisplay().workArea;
+    const area = petArea();
     const w = wins.find((w) =>
       w.pid !== process.pid &&       // 排除桌宠自己的窗口
       w.w >= 500 && w.h >= 300 &&
-      w.y - WIN_H >= area.y &&       // 窗台上沿上方放得下桌宠
+      w.y - winH() >= area.y &&      // 窗台上沿上方放得下桌宠
       w.y < area.y + area.height - 100 &&
-      w.x + w.w > area.x + WIN_W && w.x < area.x + area.width - WIN_W);
+      w.x + w.w > area.x + winW() && w.x < area.x + area.width - winW());
     if (!w) return null;
-    // 可走动范围，同时夹在窗口边缘和主屏工作区内
+    // 可走动范围，同时夹在窗口边缘和当前屏工作区内
     const minX = Math.round(Math.max(w.x + 20, area.x));
-    const maxX = Math.round(Math.min(w.x + w.w - WIN_W - 20, area.x + area.width - WIN_W));
+    const maxX = Math.round(Math.min(w.x + w.w - winW() - 20, area.x + area.width - winW()));
     if (maxX <= minX) return null;
-    return { minX, maxX, y: Math.round(w.y), floorY: area.y + area.height - WIN_H };
+    return { minX, maxX, y: Math.round(w.y), floorY: area.y + area.height - winH() };
   });
 
-  // 当前活跃窗口（最前台的普通窗口）：撞墙模式拿它的左右边沿当墙
+  // 当前活跃窗口（最前台的普通窗口）：撞墙模式拿它的左右边沿当墙；限桌宠当前屏
   ipcMain.handle('active-window', async () => {
     const wins = await listWindows();
-    const w = wins.find((w) => w.pid !== process.pid && w.w >= 300 && w.h >= 200);
+    const area = petArea();
+    const w = wins.find((w) =>
+      w.pid !== process.pid && w.w >= 300 && w.h >= 200 &&
+      w.x < area.x + area.width && w.x + w.w > area.x && w.y < area.y + area.height && w.y + w.h > area.y);
     if (!w) return null;
     return { x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h), owner: w.owner };
   });
@@ -854,6 +910,8 @@ app.whenReady().then(() => {
 
   ipcMain.on('context-menu', () => {    if (!overlay) return;
     const cursor = screen.getCursorScreenPoint();
+    // 菜单开在光标所在屏：先把覆盖层挪过去，再换算菜单锚点
+    syncOverlay(screen.getDisplayNearestPoint(cursor));
     const b = overlay.getBounds();
     overlay.setIgnoreMouseEvents(false); // 菜单期间覆盖层接管鼠标，点击绝不穿透，关闭后恢复
     // 菜单永远压过人物：同一 screen-saver 级内 relativeLevel+1（比换级别可靠，

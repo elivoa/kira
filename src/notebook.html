@@ -232,6 +232,11 @@
     border-radius: 8px;
     cursor: pointer;
   }
+  #clearLog.confirm {
+    background: #8a3038;
+    color: #ffd9dc;
+    font-weight: 600;
+  }
   .entry {
     display: flex;
     align-items: baseline;
@@ -465,7 +470,7 @@
             <div class="cfg-sec">
               <div class="cfg-title">Kimi API Key</div>
               <div class="cfg-tip">配上 key 之后 Kira 才会用 Kimi 大模型回答。所有配置都存本机 ~/.config/kira/config.json，不进仓库、不上传别处。</div>
-              <input id="kimiKey" type="password" placeholder="sk-…" autocomplete="off">
+              <input id="kimiKey" type="text" placeholder="sk-…" autocomplete="off">
               <div class="cfg-btns">
                 <button id="saveKey" class="cfg-btn">保存</button>
                 <button id="clearKey" class="cfg-btn ghost">清除</button>

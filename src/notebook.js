@@ -256,7 +256,23 @@ function loadLogs() {
 
 window.pet.onLog(() => loadLogs()); // 有合并/筛选时局部插一行容易错位，直接重拉
 
-document.getElementById('clearLog').addEventListener('click', () => {
+// 清空日志二次确认：第一次点变成红色「确认清空？」，3 秒内再点才执行
+const clearLogBtn = document.getElementById('clearLog');
+let clearLogTimer = null;
+function resetClearLogBtn() {
+  clearLogBtn.classList.remove('confirm');
+  clearLogBtn.textContent = '清空日志';
+  clearTimeout(clearLogTimer);
+  clearLogTimer = null;
+}
+clearLogBtn.addEventListener('click', () => {
+  if (!clearLogTimer) {
+    clearLogBtn.classList.add('confirm');
+    clearLogBtn.textContent = '确认清空？';
+    clearLogTimer = setTimeout(resetClearLogBtn, 3000);
+    return;
+  }
+  resetClearLogBtn();
   window.pet.clearLogs();
   renderLogs([]);
 });
@@ -377,9 +393,11 @@ async function renderHistory() {
 const kimiKeyInput = document.getElementById('kimiKey');
 const keyStatus = document.getElementById('keyStatus');
 
-function showKeyStatus({ hasKey, masked }) {
+function showKeyStatus({ hasKey, masked, key }) {
   keyStatus.classList.toggle('ok', hasKey);
-  keyStatus.textContent = hasKey ? `已配置（${masked}），Kira 会用 Kimi 回答你` : '未配置 key，聊天走本地卖萌规则';
+  keyStatus.textContent = hasKey ? `已配置，Kira 会用 Kimi 回答你` : '未配置 key，聊天走本地卖萌规则';
+  // 已保存的 key 直接显示在输入框里，改完点保存即替换
+  if (document.activeElement !== kimiKeyInput) kimiKeyInput.value = key || '';
 }
 
 function loadChatConfig() {
@@ -390,7 +408,6 @@ document.getElementById('saveKey').addEventListener('click', () => {
   const k = kimiKeyInput.value.trim();
   if (!k) { keyStatus.classList.remove('ok'); keyStatus.textContent = '先粘贴 key 再保存'; return; }
   window.pet.setChatConfig({ kimiKey: k });
-  kimiKeyInput.value = '';
   loadChatConfig();
   window.pet.notebookSay('key 记好啦');
   window.pet.logAppend({ t: Date.now(), type: '系统', text: '在小本子配置了 Kimi key' });
@@ -485,6 +502,48 @@ function renderFreq() {
   return sec;
 }
 
+// 人物大小档位：窗口与立绘等比缩放
+const SIZE_STOPS = [
+  { v: 0.6, label: '迷你' },
+  { v: 0.8, label: '偏小' },
+  { v: 1, label: '标准' },
+  { v: 1.25, label: '偏大' },
+  { v: 1.5, label: '巨大' },
+];
+
+function sizeIndex() {
+  const v = actionSettings._size || 1;
+  let best = 0;
+  SIZE_STOPS.forEach((s, i) => { if (Math.abs(s.v - v) < Math.abs(SIZE_STOPS[best].v - v)) best = i; });
+  return best;
+}
+
+function renderSize() {
+  const sec = cfgSec('人物大小');
+  const idx = sizeIndex();
+  const label = document.createElement('span');
+  label.textContent = SIZE_STOPS[idx].label;
+  sec.querySelector('.cfg-title').append(' · ', label);
+  const tip = document.createElement('div');
+  tip.className = 'cfg-tip';
+  tip.textContent = '整个她（窗口和立绘）一起变大变小，立等可见。';
+  const range = document.createElement('input');
+  range.type = 'range';
+  range.min = 0;
+  range.max = SIZE_STOPS.length - 1;
+  range.step = 1;
+  range.value = idx;
+  range.addEventListener('input', () => {
+    const s = SIZE_STOPS[+range.value];
+    label.textContent = s.label;
+    // 拖动中不整页重渲染，只更新值并同步（窗口缩放走主进程）
+    actionSettings._size = s.v;
+    window.pet.setActions({ _size: s.v });
+  });
+  sec.append(tip, range);
+  return sec;
+}
+
 // 渲染一个子分组（普通 / 打扰性），返回元素；无动作时返回 null
 function renderSubgroup(ids, title, warn) {
   if (!ids.length) return null;
@@ -526,6 +585,7 @@ function renderActions() {
   const list = document.getElementById('cfgActions');
   list.innerHTML = '';
   list.appendChild(renderFreq());
+  list.appendChild(renderSize());
   // 通用开关
   const misc = cfgSec('通用设置');
   const ctRow = document.createElement('div');

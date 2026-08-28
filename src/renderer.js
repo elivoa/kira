@@ -30,9 +30,28 @@ window.pet.getPowerState().then((v) => { screenAsleep = !!v; });
 
 const IGNORE_AFTER = 40; // 秒，超过这么久没互动就「走了走了」
 const FAR_Y = -50;       // 走远后向上飘的距离（px）
-// 与 main.js 的窗口尺寸保持一致
+// 与 main.js 的窗口基础尺寸保持一致
+// settings._size 是整体缩放系数：窗口会跟着 resize，这里所有窗口坐标也要乘系数
 const WIN_W = 340;
 const WIN_H = 620;
+let sizeK = 1;
+const winW = () => Math.round(WIN_W * sizeK);
+const winH = () => Math.round(WIN_H * sizeK);
+const sk = (v) => v * sizeK; // 窗口坐标/尺寸换算
+
+// 立绘高度与特效层尺寸随整体缩放更新
+function applySpriteHeight() {
+  sprite.style.height = FORMS[form].height * sizeK + 'px';
+  const fx = document.getElementById('fx');
+  fx.setAttribute('width', winW());
+  fx.setAttribute('height', winH());
+  const card = document.getElementById('cardImg');
+  if (card) card.style.width = 64 * sizeK + 'px';
+  const board = document.getElementById('boardImg');
+  if (board) board.style.width = 140 * sizeK + 'px';
+  const flute = document.getElementById('fluteImg');
+  if (flute) flute.style.width = 60 * sizeK + 'px';
+}
 
 const FRONT_SRC = '../assets/pet.png';
 const BACK_SRC = '../assets/pet_back.png';
@@ -67,10 +86,20 @@ new Image().src = KNOCK_HIT_SRC;
 const POINT_SRC = '../assets/point.png';
 new Image().src = POINT_SRC;
 
-// 攀爬序列帧：32 帧侧脸爬墙循环（tools/cutout_climb.js 抠出，同一画布已对齐）
-// 帧图朝右 = 贴窗口左沿爬；贴右沿时用 facing=-1 镜像
+// 撑伞飘落：（窗台/窗顶跳下时换这张）
+const UMBRELLA_SRC = '../assets/umbrella.png';
+new Image().src = UMBRELLA_SRC;
+
+// 攀爬序列帧：53 帧侧脸爬墙循环（tools/video_climb_frames3.js 从暗背景爬墙视频逐帧截取，
+// 视频自带近乎完美的周期（f8~f60 姿势差仅 6.2），全帧使用不抽帧，24fps 原速播放；
+// 帧图朝右 = 贴窗口左沿爬，贴右沿镜像）
+// CLIMB_DY[i] = 切到帧 i 时窗口上移的屏幕像素（由视频逐帧脚趾位移生成，并按蹬踏段均匀化）：
+// 只在脚趾向下蹬伸时上移窗口（窗口上移量=脚趾下伸量）——蹬踏相脚趾在屏幕/被爬窗体上
+// 钉死不动，身体随腿伸展上升；换腿相窗口停住（支撑脚也不动）。窗口永不下移。
+// 每个蹬踏段内取段均值逐帧匀速，防逐帧位移量化造成的抖动（位置差一点没关系，稳字当头）
+const CLIMB_DY = [0, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 6.95, 0, 0, 0, 0, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 5.85, 0, 12, 0, 0, 1.2, 0, 0, 0, 2.33, 2.33, 2.33, 2.33];
 const CLIMB_SRC = [];
-for (let i = 1; i <= 32; i++) {
+for (let i = 1; i <= 53; i++) {
   const s = `../assets/climb/f${String(i).padStart(2, '0')}.png`;
   CLIMB_SRC.push(s);
   new Image().src = s; // 预加载，爬升切帧不闪
@@ -204,7 +233,7 @@ let stickyActive = false;
 function saySticky(text) {
   stickyActive = true;
   // 文字多的框宽一点：按字数自适应（160~300px，含 36px 内边距后总宽不超出窗口留边）
-  bubble.style.width = `${Math.min(WIN_W - 52, Math.max(160, Math.min(300, 40 + text.length * 9)))}px`;
+  bubble.style.width = `${Math.min(winW() - 52, Math.max(160, Math.min(300, 40 + text.length * 9)))}px`;
   bubble.textContent = text;
   const hint = document.createElement('span');
   hint.className = 'sticky-hint';
@@ -379,7 +408,7 @@ function fxText(str, x, y, size = 34) {
 
 // ---------- 桌子场景 ----------
 // SVG 画一张木桌（带茶杯），立绘放大上移，胸部以上露出桌面，下半身藏桌后
-const DESK_TY = 339; // 立绘就位后的下移量（让胸部正好在桌面上沿）
+const DESK_TY = 339; // 立绘就位后的下移量（让胸部正好在桌面上沿）；窗口坐标，使用时乘 sizeK
 let pendingDesk = false; // Q版触发上桌时，先变回姐姐再上桌
 
 function showDesk() {
@@ -422,7 +451,7 @@ function hideDesk() {
 function resetDesk() {
   const g = document.getElementById('desk');
   if (g) g.remove();
-  sprite.style.height = FORMS[form].height + 'px';
+  applySpriteHeight();
 }
 
 // ---------- 动作 ----------
@@ -670,7 +699,7 @@ function fluteShow(x, y, rot, behind) {
   fluteImg.style.display = 'block';
   fluteImg.style.zIndex = behind ? 1 : 3;
   fluteImg.style.opacity = behind ? 0.55 : 1; // 身后时压暗模拟遮挡
-  fluteImg.style.transform = `translate(${x - 30}px, ${y - 64}px) rotate(${rot}deg)`;
+  fluteImg.style.transform = `translate(${sk(x) - 30}px, ${sk(y) - 64}px) rotate(${rot}deg)`;
 }
 
 function fluteHide() { fluteImg.style.display = 'none'; }
@@ -761,7 +790,7 @@ async function doGoLedge() {
   const [px, py] = await window.pet.getPos();
   ledge = {
     tx: Math.min(Math.max(px, l.minX), l.maxX),
-    ty: l.y - WIN_H,
+    ty: l.y - winH(),
     minX: l.minX,
     maxX: l.maxX,
     floorY: l.floorY,
@@ -785,9 +814,9 @@ async function doWallBang() {
   const aw = await window.pet.activeWindow();
   if (aw) {
     // 选近的一侧：贴左墙外沿或右墙外沿
-    const dLeft = Math.abs(px - (aw.x - WIN_W));
+    const dLeft = Math.abs(px - (aw.x - winW()));
     const dRight = Math.abs(px - (aw.x + aw.w));
-    wallX = dLeft <= dRight ? aw.x - WIN_W : aw.x + aw.w;
+    wallX = dLeft <= dRight ? aw.x - winW() : aw.x + aw.w;
     dir = dLeft <= dRight ? 1 : -1; // 撞的方向（朝墙）
   } else {
     // 读不到活跃窗口就拿屏幕边撞
@@ -824,8 +853,8 @@ async function doKnock() {
   if (aw) {
     // 贴的是「身体边缘」不是窗口框：侧身图显示半宽约 97px，居中在 340 窗口里，
     // 身体左沿 = 170-97，右沿 = 170+97；让贴墙一侧的身体边和窗口边重合（再多吃 4px 像真贴上）
-    const leftTx = aw.x - (170 + SIDE_HALF_W) + 4;          // 敲窗口左沿：她站左边，身体右边贴上
-    const rightTx = aw.x + aw.w - (170 - SIDE_HALF_W) - 4;  // 敲窗口右沿：她站右边，身体左边贴上
+    const leftTx = aw.x - (170 * sizeK + SIDE_HALF_W * sizeK) + 4;          // 敲窗口左沿：她站左边，身体右边贴上
+    const rightTx = aw.x + aw.w - (170 * sizeK - SIDE_HALF_W * sizeK) - 4;  // 敲窗口右沿：她站右边，身体左边贴上
     const leftOk = leftTx >= st.minX, rightOk = rightTx <= st.maxX;
     const dLeft = Math.abs(px - leftTx), dRight = Math.abs(px - rightTx);
     if (leftOk && (!rightOk || dLeft <= dRight)) { tx = leftTx; dir = 1; }
@@ -843,7 +872,7 @@ async function doKnock() {
   }
   tx = Math.min(Math.max(tx, st.minX), st.maxX);
   // 垂直对齐窗口中部，够不着地板就浮着敲
-  const midY = aw ? aw.y + aw.h / 2 - WIN_H / 2 : st.floorY;
+  const midY = aw ? aw.y + aw.h / 2 - winH() / 2 : st.floorY;
   knock = {
     tx, ty: Math.min(Math.max(midY, st.minY), st.floorY),
     dir, px, py,
@@ -873,10 +902,12 @@ async function doClimb() {
   // 窗顶贴住屏幕顶（全屏类）爬不到沿上，放弃
   if (aw.y < st.minY + 170) { idleWait = nextIdleWait(2, 4); return; }
   // 站位与 doKnock 同源：贴墙一侧的身体边和窗沿重合
-  const leftTx = aw.x - (170 + SIDE_HALF_W) + 4;
-  const rightTx = aw.x + aw.w - (170 - SIDE_HALF_W) - 4;
+  const leftTx = aw.x - (170 * sizeK + SIDE_HALF_W * sizeK) + 4;
+  const rightTx = aw.x + aw.w - (170 * sizeK - SIDE_HALF_W * sizeK) - 4;
   const leftOk = leftTx >= st.minX, rightOk = rightTx <= st.maxX;
-  const dLeft = Math.abs(px - leftTx), dRight = Math.abs(px - rightTx);
+  // 选边：以她的中心到两侧窗沿的距离，永远走最近的一边
+  const cx = px + 170 * sizeK;
+  const dLeft = Math.abs(cx - aw.x), dRight = Math.abs(cx - (aw.x + aw.w));
   let tx, useLeft;
   if (leftOk && (!rightOk || dLeft <= dRight)) { tx = leftTx; useLeft = true; }
   else if (rightOk) { tx = rightTx; useLeft = false; }
@@ -884,12 +915,14 @@ async function doClimb() {
   climb = {
     tx, ty: st.floorY, useLeft,
     px, py,
-    topPy: aw.y - WIN_H,                    // 爬到顶沿时的窗口 y（脚底贴沿）
+    topPy: aw.y - winH(),                    // 爬到顶沿时的窗口 y（脚底贴沿）
     minX: Math.round(Math.max(aw.x + 20, st.minX)),
-    maxX: Math.round(Math.min(aw.x + aw.w - WIN_W - 20, st.maxX)),
+    maxX: Math.round(Math.min(aw.x + aw.w - winW() - 20, st.maxX)),
     floorY: st.floorY,
     lieOk: aw.y - st.minY >= 420,           // 顶沿上方空间够不够她站/躺
     fi: 0, fT: 0,
+    yT: 0, lastY: null, stillN: 0,          // 上爬停滞采样（位置不变了就停）
+    progT: 0, lastDist: null, progN: 0,     // 走近墙边时无进展判定
   };
   logEvent('自主', `顺着「${aw.owner}」的边沿往上爬`);
   applyEffect('climb');
@@ -1049,7 +1082,7 @@ function dashFrame(dt) {
   }
   // 侧面奔跑/急刹时按倾斜角反向补偿位移，避免立绘被窗口边缘裁掉
   if (d.side && (d.sub === 'run' || d.sub === 'skid' || d.sub === 'stop')) {
-    tx = -FORMS[form].height * Math.sin(rot * Math.PI / 180) * 0.55;
+    tx = -FORMS[form].height * sizeK * Math.sin(rot * Math.PI / 180) * 0.55;
   }
   return { tx, ty, rot, rotY, sx, sy, skew };
 }
@@ -1157,7 +1190,7 @@ function flyFrame(dt) {
   } else {
     curSize = 0.85;
   }
-  tx = -FORMS[form].height * curSize * Math.sin(rot * Math.PI / 180) * 0.55;
+  tx = -FORMS[form].height * sizeK * curSize * Math.sin(rot * Math.PI / 180) * 0.55;
   return { tx, ty, rot, rotY, sx, sy, skew };
 }
 
@@ -1230,7 +1263,7 @@ let pendingSeal = false;
 function cardShow(x, y, s, r, o) {
   cardImg.style.display = 'block';
   cardImg.style.opacity = o;
-  cardImg.style.transform = `translate(${x - 32}px, ${y - 68}px) rotate(${r}deg) scale(${s})`;
+  cardImg.style.transform = `translate(${sk(x) - 32}px, ${sk(y) - 68}px) rotate(${r}deg) scale(${s})`;
 }
 
 function cardHide() { cardImg.style.display = 'none'; }
@@ -1320,7 +1353,7 @@ function easeOutBack(k) {
 // 立绘放大到 700px 并下移，胸部以上露出桌面，下半身被桌体挡住
 function doDesk() {
   if (form === 'chibi') { pendingDesk = true; doMorph(); return; }
-  sprite.style.height = '700px';
+  sprite.style.height = 700 * sizeK + 'px';
   showDesk();
   enter('deskin', 0.6);
   say(pick(LINES.desk), 1800);
@@ -1333,7 +1366,7 @@ let pendingWork = false;
 
 function doWork() {
   if (form === 'chibi') { pendingWork = true; doMorph(); return; }
-  sprite.style.height = '700px';
+  sprite.style.height = 700 * sizeK + 'px';
   showDesk();
   work = { smokeT: 0.5, paperT: 0.8, lineT: 2.5 };
   enter('workin', 0.6);
@@ -1346,10 +1379,14 @@ window.pet.getSettings().then((s) => {
   actionEnabled = s || {};
   clickThrough = actionEnabled._clickThrough !== false;
   if (actionEnabled._home) homePos = actionEnabled._home; // 上次的常驻位置
+  sizeK = actionEnabled._size || 1;
+  applySpriteHeight();
 });
 window.pet.onSettings((s) => {
   actionEnabled = s || {};
   clickThrough = actionEnabled._clickThrough !== false; // 点击穿透默认开
+  sizeK = actionEnabled._size || 1; // 整体缩放（窗口已由主进程 resize）
+  applySpriteHeight();
   updateMouseIgnore(lastOver);
   // 拖动频率滑块会连续触发，节流到 3 秒一条
   if (Date.now() - lastSettingsLog > 3000) {
@@ -1706,13 +1743,13 @@ async function scareTick() {
   if (!shake && !arrows) return;
   // 与光标重合或紧挨着（窗口外扩 60px）才会被吓到
   const [px, py] = await window.pet.getPos();
-  const near = c.x >= px - 60 && c.x <= px + WIN_W + 60 && c.y >= py - 60 && c.y <= py + WIN_H + 60;
+  const near = c.x >= px - 60 && c.x <= px + winW() + 60 && c.y >= py - 60 && c.y <= py + winH() + 60;
   if (!near) return;
   lastScare = nowSec;
   cursorTrail.length = 0;
   arrowTimes = [];
   // 背对光标方向尖叫冲刺：一趟冲到边上急停，离开当前位置
-  const awayDir = c.x < px + WIN_W / 2 ? 1 : -1;
+  const awayDir = c.x < px + winW() / 2 ? 1 : -1;
   applyEffect('dash');
   logEvent('交互', shake ? '被晃来晃去的鼠标吓到，尖叫着跑开了' : '被方向键一顿猛戳吓到，尖叫着跑开了');
   doDash({ dir: awayDir, maxLaps: 0, line: pick(LINES.scared) });
@@ -1835,7 +1872,7 @@ stage.addEventListener('mousedown', (e) => {
   // 腰间小本子区域：先记账（可能点开笔记本），但如果直接拖走就取消
   const waistPos = form === 'normal' ? WAIST : form === 'chibi' ? WAIST_CHIBI : null;
   waistPress = !!(waistPos && (state === 'idle' || state === 'walk') &&
-    Math.hypot(e.clientX - waistPos.x, e.clientY - waistPos.y) < 42);
+    Math.hypot(e.clientX - sk(waistPos.x), e.clientY - sk(waistPos.y)) < 42 * sizeK);
   // 化剑/兜风/捣乱期间不响应戳/拖
   if (state === 'swordform' || state === 'swordwait' || state === 'driveform' || state === 'drivewait' ||
       state === 'mischiefform' || state === 'mischiefwait') return;
@@ -1856,8 +1893,8 @@ stage.addEventListener('mousedown', (e) => {
   // 隐藏彩蛋：长按头发超过 5 秒
   longPressFired = false;
   clearTimeout(pressTimer);
-  const inHead = form === 'normal' && e.clientX >= HEAD_REGION.x1 && e.clientX <= HEAD_REGION.x2 &&
-    e.clientY >= HEAD_REGION.y1 && e.clientY <= HEAD_REGION.y2;
+  const inHead = form === 'normal' && e.clientX >= sk(HEAD_REGION.x1) && e.clientX <= sk(HEAD_REGION.x2) &&
+    e.clientY >= sk(HEAD_REGION.y1) && e.clientY <= sk(HEAD_REGION.y2);
   if (inHead) {
     pressTimer = setTimeout(() => {
       if (pressing && !dragging) {
@@ -2363,7 +2400,7 @@ function frame(now) {
       const k = Math.min(stateT / stateDur, 1);
       rotY = turnFrame(k, FORMS[nextForm].front, () => {
         form = nextForm;
-        sprite.style.height = FORMS[form].height + 'px';
+        applySpriteHeight();
       });
       if (stateT >= stateDur) {
         // Q版点了上桌/收法宝：变回姐姐后接着执行
@@ -2434,24 +2471,43 @@ function frame(now) {
       break;
     }
     case 'jumpdown': {
-      // 从窗台跳下：窗口自由落体，到底（主进程 clamp 的位置）落地
-      ledge.vy += 3000 * dt;
+      // 撑伞飘落：换伞图缓降（终端速度 ~230px/s），左右轻摆，落地换回原图
+      if (ledge.vy === 0 && sprite.dataset.cur !== UMBRELLA_SRC) swapSprite(UMBRELLA_SRC);
+      ledge.vy = Math.min(ledge.vy + 900 * dt, 230);
       const my = ledge.vy * dt;
-      window.pet.moveBy(0, my);
+      window.pet.moveBy(Math.sin(stateT * 1.6) * 40 * dt, my);
       ledge.py += my;
-      const stretch = Math.min(ledge.vy / 8000, 0.14);
-      sy = 1 + stretch;
-      sx = 1 - stretch * 0.6;
-      if (ledge.py >= ledge.floorY) enter('land', 0.16);
+      rot = Math.sin(stateT * 1.2) * 5;
+      tx = Math.sin(stateT * 1.3) * 4;
+      // 触底检测：位置到底了就落（看位置不看时间）
+      if (ledge.py >= ledge.floorY) {
+        swapSprite(FORMS[form].front);
+        enter('land', 0.16);
+        break;
+      }
+      // 停滞兜底：实际位置 0.5s 没再往下（被挡住/拖住）也按落地处理
+      ledge.yT = (ledge.yT || 0) + dt;
+      if (ledge.yT >= 0.25) {
+        ledge.yT = 0;
+        window.pet.getPos().then(([, ay]) => {
+          if (!ledge) return;
+          if (ledge.lastY !== undefined && ledge.lastY !== null) ledge.stillN = ay < ledge.lastY + 2 ? (ledge.stillN || 0) + 1 : 0;
+          ledge.lastY = ay;
+        }).catch(() => {});
+      }
+      if ((ledge.stillN || 0) >= 2) {
+        swapSprite(FORMS[form].front);
+        enter('land', 0.16);
+      }
       break;
     }
     case 'climbgo': {
-      // 走到墙边（斜线移动），走路颠簸
+      // 快速冲到墙边（斜线移动），赶路用冲刺速度
       const dx = climb.tx - climb.px, dy = climb.ty - climb.py;
       const dist = Math.hypot(dx, dy);
-      const step = 300 * dt;
-      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
-      rot = Math.sin(stateT * 9) * 2.5;
+      const step = 1100 * dt;
+      ty = -Math.abs(Math.sin(stateT * 18)) * 9;
+      rot = Math.sin(stateT * 18) * 4;
       if (dx < -1) facing = -1; else if (dx > 1) facing = 1;
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
@@ -2465,25 +2521,34 @@ function frame(now) {
         window.pet.moveBy(mx, my);
         climb.px += mx; climb.py += my;
       }
-      if (stateT > 15) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); } // 走不到就算了
+      // 走不到就算了：1s 没挪近 8px 判定卡住了（看进展不看时间）
+      climb.progT += dt;
+      if (climb.progT >= 0.5) {
+        climb.progT = 0;
+        climb.progN = climb.lastDist !== null && dist > climb.lastDist - 8 ? climb.progN + 1 : 0;
+        climb.lastDist = dist;
+        if (climb.progN >= 2) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); }
+      }
       break;
     }
     case 'climbup': {
-      // 32 帧循环爬升：12fps 切帧 + 匀速上移
+      // 53 帧循环爬升：24fps 切帧；上移只跟随脚趾蹬伸（CLIMB_DY），窗口永不下移
       climb.fT += dt;
-      if (climb.fT >= 1 / 12) {
+      if (climb.fT >= 1 / 36) { // 1.5 倍速播放（帧数不变，只加速）
         climb.fT = 0;
         climb.fi = (climb.fi + 1) % CLIMB_SRC.length;
         swapSprite(CLIMB_SRC[climb.fi]);
+        const dy = CLIMB_DY[climb.fi] || 0;
+        if (dy > 0) {
+          window.pet.moveBy(0, -dy);
+          climb.py -= dy;
+        }
       }
-      const step = 200 * dt;
-      window.pet.moveBy(0, -step);
-      climb.py -= step;
       ty = Math.sin(stateT * 5) * 2; // 轻微身体起伏
-      if (climb.py <= climb.topPy) {
-        // 到顶沿：上方够高就上去踱步待会儿，不够就直接跳下来
+      // 到顶沿收尾（复用同一段逻辑）
+      const topOut = (stuck) => {
         swapSprite(FORMS[form].front);
-        if (climb.lieOk && climb.maxX > climb.minX) {
+        if (!stuck && climb.lieOk && climb.maxX > climb.minX) {
           window.pet.moveBy(0, climb.topPy - climb.py);
           ledge = {
             tx: climb.px, ty: climb.topPy,
@@ -2496,12 +2561,24 @@ function frame(now) {
           say(pick(['爬上来了！', '站高高~', '歇会儿~']), 1500);
           enter('onledge', rand(6, 12));
         } else {
-          ledge = { px: climb.px, py: climb.py, vy: 0, floorY: climb.floorY };
+          ledge = { px: climb.px, py: stuck ? (climb.lastY ?? climb.py) : climb.py, vy: 0, floorY: climb.floorY };
           facing = 1;
-          say('上面太窄了，下去咯', 1200);
+          say(stuck ? '爬不动了，下去吧' : '上面太窄了，下去咯', 1200);
           enter('jumpdown');
         }
+      };
+      // 停滞检测：实际位置 0.5s 没再往上走（顶到天花板/窗没了）就停（看位置不看时间）
+      climb.yT += dt;
+      if (climb.yT >= 0.25) {
+        climb.yT = 0;
+        window.pet.getPos().then(([, ay]) => {
+          if (!climb) return;
+          if (climb.lastY !== null) climb.stillN = ay > climb.lastY - 2 ? climb.stillN + 1 : 0;
+          climb.lastY = ay;
+        }).catch(() => {});
       }
+      if (climb.stillN >= 2) topOut(true);
+      else if (climb.py <= climb.topPy) topOut(false);
       break;
     }
     case 'wallgoin': { // 翻牌转侧面，准备去撞墙
@@ -2777,13 +2854,13 @@ function frame(now) {
     case 'deskin': {
       // 桌子升起，立绘下移到桌后
       const k = easeInOut(stateT / stateDur);
-      ty = DESK_TY * k;
+      ty = DESK_TY * sizeK * k;
       if (stateT >= stateDur) enter('deskidle', rand(7, 12));
       break;
     }
     case 'deskidle': {
       // 坐在桌后：呼吸 + 偶尔歪头
-      ty = DESK_TY;
+      ty = DESK_TY * sizeK;
       sy = 1 + 0.012 * Math.sin(t * 2.2);
       rot = 1.5 * Math.sin(t * 0.8);
       if (stateT >= stateDur) { hideDesk(); enter('deskout', 0.5); }
@@ -2792,9 +2869,9 @@ function frame(now) {
     case 'deskout': {
       // 桌子撤走，立绘回位
       const k = easeInOut(stateT / stateDur);
-      ty = DESK_TY * (1 - k);
+      ty = DESK_TY * sizeK * (1 - k);
       if (stateT >= stateDur) {
-        sprite.style.height = FORMS[form].height + 'px';
+        applySpriteHeight();
         enter('idle');
         idleWait = nextIdleWait(3, 6);
       }
@@ -2803,13 +2880,13 @@ function frame(now) {
     case 'workin': {
       // 桌子升起，进入工作状态
       const k = easeInOut(stateT / stateDur);
-      ty = DESK_TY * k;
+      ty = DESK_TY * sizeK * k;
       if (stateT >= stateDur) enter('working', rand(8, 14));
       break;
     }
     case 'working': {
       // 快速捯饬：高频小幅抖动 + 烟雾 + 笛子纸张乱飞
-      ty = DESK_TY - 2 * Math.abs(Math.sin(stateT * 8));
+      ty = DESK_TY * sizeK - 2 * Math.abs(Math.sin(stateT * 8));
       rot = 3 * Math.sin(stateT * 14);
       sy = 1 + 0.015 * Math.sin(stateT * 8);
       // 烟雾
@@ -2849,9 +2926,9 @@ function frame(now) {
     case 'workout': {
       // 桌子撤走，回待机
       const k = easeInOut(stateT / stateDur);
-      ty = DESK_TY * (1 - k);
+      ty = DESK_TY * sizeK * (1 - k);
       if (stateT >= stateDur) {
-        sprite.style.height = FORMS[form].height + 'px';
+        applySpriteHeight();
         enter('idle');
         idleWait = nextIdleWait(3, 6);
       }
@@ -2862,19 +2939,20 @@ function frame(now) {
   sprite.style.transform =
     `translateX(-50%) translate(${tx}px, ${ty}px) rotate(${rot}deg) skewX(${skew}deg) perspective(700px) rotateY(${rotY}deg) scale(${sx * facing * curSize}, ${sy * curSize})`;
 
-  // 气泡每帧跟着立绘头顶走：位置 = 头顶上方，缩放 = 立绘的远近缩放
-  const spriteH = state.startsWith('desk') || state.startsWith('work') ? 700 : FORMS[form].height;
+  // 气泡每帧跟着立绘头顶走：位置 = 头顶上方
+  // 缩放 = 远近缩放 × 整体缩放（人物变小，气泡和字也要跟着小）
+  const spriteH = (state.startsWith('desk') || state.startsWith('work') ? 700 : FORMS[form].height) * sizeK;
   // 睡觉场景中她的头在场景图上部，气泡贴那里
-  const headY = state.startsWith('sleep') ? 280 : WIN_H + ty - spriteH * sy * curSize;
-  const bScale = state.startsWith('sleep') ? 1 : curSize;
+  const headY = state.startsWith('sleep') ? 280 * sizeK : winH() + ty - spriteH * sy * curSize;
+  const bScale = (state.startsWith('sleep') ? 1 : curSize) * sizeK;
   // 可视区域 = 当前窗口：气泡无论缩放/多宽/多高都不出界（四边各留 8px）
   const bw = bubble.offsetWidth * bScale;
   const bh = bubble.offsetHeight * bScale;
   // 气泡比窗口还宽/还高时退化为居中/贴顶，钳制边界反转时不能再用
   const minCx = 8 + bw / 2;
-  const maxCx = WIN_W - 8 - bw / 2;
-  const cx = minCx > maxCx ? WIN_W / 2 : Math.min(Math.max(WIN_W / 2 + tx, minCx), maxCx);
-  const maxTop = WIN_H - 8 - bh;
+  const maxCx = winW() - 8 - bw / 2;
+  const cx = minCx > maxCx ? winW() / 2 : Math.min(Math.max(winW() / 2 + tx, minCx), maxCx);
+  const maxTop = winH() - 8 - bh;
   const top = maxTop < 8 ? 8 : Math.min(Math.max(headY - bh - 6, 8), maxTop);
   bubble.style.left = `${cx}px`;
   bubble.style.top = `${top}px`;
