@@ -30,19 +30,25 @@ const IGNORE_AFTER = 40; // 秒，超过这么久没互动就「走了走了」
 const FAR_Y = -50;       // 走远后向上飘的距离（px）
 // 与 main.js 的窗口基础尺寸保持一致
 // settings._size 是整体缩放系数：窗口会跟着 resize，这里所有窗口坐标也要乘系数
-const WIN_W = 340;
-const WIN_H = 620;
+const WIN_W = 460;
+const WIN_H = 740;
+// 特效/道具坐标标定在 340×620 逻辑画幅上（底部居中对齐窗口）；窗口加大后，
+// SVG 特效层靠 CSS 底部居中锚定，DOM 道具（笛子/踏板/卡牌）的平移要加这个偏移
+const LOGIC_W = 340;
+const LOGIC_H = 620;
 let sizeK = 1;
 const winW = () => Math.round(WIN_W * sizeK);
 const winH = () => Math.round(WIN_H * sizeK);
 const sk = (v) => v * sizeK; // 窗口坐标/尺寸换算
+const offX = () => (winW() - LOGIC_W * sizeK) / 2;
+const offY = () => winH() - LOGIC_H * sizeK;
 
 // 立绘高度与特效层尺寸随整体缩放更新
 function applySpriteHeight() {
   sprite.style.height = FORMS[form].height * sizeK + 'px';
   const fx = document.getElementById('fx');
-  fx.setAttribute('width', winW());
-  fx.setAttribute('height', winH());
+  fx.setAttribute('width', Math.round(LOGIC_W * sizeK));
+  fx.setAttribute('height', Math.round(LOGIC_H * sizeK));
   const card = document.getElementById('cardImg');
   if (card) card.style.width = 64 * sizeK + 'px';
   const board = document.getElementById('boardImg');
@@ -52,11 +58,11 @@ function applySpriteHeight() {
   // 场景图（睡觉/看腿）：DOM 图不随窗口尺寸走，手动乘缩放
   const sleepImg = document.getElementById('sleepImg');
   if (sleepImg) {
-    sleepImg.style.width = 340 * sizeK + 'px';
-    for (const im of sleepImg.querySelectorAll('img')) im.style.width = 340 * sizeK + 'px';
+    sleepImg.style.width = LOGIC_W * sizeK + 'px';
+    for (const im of sleepImg.querySelectorAll('img')) im.style.width = LOGIC_W * sizeK + 'px';
   }
   const legImg = document.getElementById('legImg');
-  if (legImg) legImg.style.width = 340 * sizeK + 'px';
+  if (legImg) legImg.style.width = LOGIC_W * sizeK + 'px';
 }
 
 const FRONT_SRC = '../assets/pet.png';
@@ -199,7 +205,7 @@ const LINES = {
   brock: ['哼', '就不回头', '你自己玩吧', '不想理你了', '哄不好了'],
   knock: ['你理理我嘛', '在吗在吗？开门！', '开门开门！是我！', '理我一下嘛~', '喂——我在这儿！'],
   climb: ['爬上去看看！', '嘿咻嘿咻…', '上面的风景应该不错~'],
-  yell: ['你！就是你！', '戳戳戳，就知道戳！', '别碰我！！', '我数到三！一！！', '大坏蛋！', '哼！气死我了！', '再戳我真生气了！', '出来挨打！（叉腰）', '骂骂咧咧骂骂咧咧', '你礼貌吗！！'],
+  yell: ['你！就是你！', '戳戳戳，就知道戳！', '别碰我！！', '我数到三！一！！', '大坏蛋！', '哼！气死我了！', '再戳我真生气了！', '出来挨打！（叉腰）', '骂骂咧咧骂骂咧咧', '你礼貌吗！！', '手指的就是你！', '别躲！说的就是你！', '你给我过来！'],
 };
 
 function enter(next, dur = 0) {
@@ -504,6 +510,7 @@ function doPoint() {
   applyEffect('point');
   say(pick(LINES.yell), 1800);
   swapSprite(POINT_SRC);
+  fxText('💢', 235 + rand(-15, 15), 190 + rand(-10, 10), 26);
   pointState = { said: 1, lineT: 0 };
   enter('point');
 }
@@ -687,7 +694,7 @@ function fluteShow(x, y, rot, behind) {
   fluteImg.style.display = 'block';
   fluteImg.style.zIndex = behind ? 1 : 3;
   fluteImg.style.opacity = behind ? 0.55 : 1; // 身后时压暗模拟遮挡
-  fluteImg.style.transform = `translate(${sk(x) - 30}px, ${sk(y) - 64}px) rotate(${rot}deg)`;
+  fluteImg.style.transform = `translate(${sk(x) - 30 + offX()}px, ${sk(y) - 64 + offY()}px) rotate(${rot}deg)`;
 }
 
 function fluteHide() { fluteImg.style.display = 'none'; }
@@ -828,7 +835,7 @@ async function doWallBang() {
 
 // ---------- 敲门求关注 ----------
 // 跑到活跃窗口的侧边，侧身对着边沿「棒！棒！棒！」敲门，喊你理理我嘛
-// 侧身图 493x1298，显示高 512 → 显示半宽约 97px；身体在 340 窗口内居中，左右沿 = 170∓97
+// 侧身图 493x1298，显示高 512 → 显示半宽约 97px；身体在窗口内居中，左右沿 = 窗心∓97
 const SIDE_HALF_W = 97;
 let knock = null;
 let pendingKnock = false;
@@ -839,10 +846,11 @@ async function doKnock() {
   const aw = await window.pet.activeWindow();
   let tx, dir;
   if (aw) {
-    // 贴的是「身体边缘」不是窗口框：侧身图显示半宽约 97px，居中在 340 窗口里，
-    // 身体左沿 = 170-97，右沿 = 170+97；让贴墙一侧的身体边和窗口边重合（再多吃 4px 像真贴上）
-    const leftTx = aw.x - (170 * sizeK + SIDE_HALF_W * sizeK) + 4;          // 敲窗口左沿：她站左边，身体右边贴上
-    const rightTx = aw.x + aw.w - (170 * sizeK - SIDE_HALF_W * sizeK) - 4;  // 敲窗口右沿：她站右边，身体左边贴上
+    // 贴的是「身体边缘」不是窗口框：侧身图显示半宽约 97px，居中在窗口里，
+    // 身体左沿 = 窗心-97，右沿 = 窗心+97；让贴墙一侧的身体边和窗口边重合（再多吃 4px 像真贴上）
+    const cx = winW() / 2;
+    const leftTx = aw.x - (cx + SIDE_HALF_W * sizeK) + 4;          // 敲窗口左沿：她站左边，身体右边贴上
+    const rightTx = aw.x + aw.w - (cx - SIDE_HALF_W * sizeK) - 4;  // 敲窗口右沿：她站右边，身体左边贴上
     const leftOk = leftTx >= st.minX, rightOk = rightTx <= st.maxX;
     const dLeft = Math.abs(px - leftTx), dRight = Math.abs(px - rightTx);
     if (leftOk && (!rightOk || dLeft <= dRight)) { tx = leftTx; dir = 1; }
@@ -897,14 +905,14 @@ async function doClimb() {
     idleWait = nextIdleWait(2, 4);
     return;
   }
-  // 站位：攀爬帧的拳头/脚趾触点（实测基准窗口 x≈252）对准窗沿，再压 2px，手紧握、脚蹬紧。
+  // 站位：攀爬帧的拳头/脚趾触点（旧 340 窗口实测 x≈252，即窗心+82）对准窗沿，再压 2px，手紧握、脚蹬紧。
   // 注意别用袖口/小臂最右点（frame-x 410）对齐——那会让拳头恒差 12px；袖口探过窗沿是合理的
-  const GRIP_X = 252 * sizeK;
+  const GRIP_X = winW() / 2 + 82 * sizeK;
   const leftTx = aw.x - GRIP_X + 2;
   const rightTx = aw.x + aw.w - (winW() - GRIP_X) - 2;
   const leftOk = leftTx >= st.minX, rightOk = rightTx <= st.maxX;
   // 选边：以她的中心到两侧窗沿的距离，永远走最近的一边
-  const cx = px + 170 * sizeK;
+  const cx = px + winW() / 2;
   const dLeft = Math.abs(cx - aw.x), dRight = Math.abs(cx - (aw.x + aw.w));
   let tx, useLeft;
   if (leftOk && (!rightOk || dLeft <= dRight)) { tx = leftTx; useLeft = true; }
@@ -1119,7 +1127,7 @@ stage.appendChild(boardImg);
 // boardY: 踏板中心在窗口里的 y（脚下）；boardRot: 角度
 function boardShow(yC, rot) {
   boardImg.style.display = 'block';
-  boardImg.style.transform = `translate(${FOOT_X - 70}px, ${yC - 150}px) rotate(${rot}deg)`;
+  boardImg.style.transform = `translate(${FOOT_X - 70 + offX()}px, ${yC - 150 + offY()}px) rotate(${rot}deg)`;
 }
 
 function boardHide() { boardImg.style.display = 'none'; }
@@ -1265,7 +1273,7 @@ let pendingSeal = false;
 function cardShow(x, y, s, r, o) {
   cardImg.style.display = 'block';
   cardImg.style.opacity = o;
-  cardImg.style.transform = `translate(${sk(x) - 32}px, ${sk(y) - 68}px) rotate(${r}deg) scale(${s})`;
+  cardImg.style.transform = `translate(${sk(x) - 32 + offX()}px, ${sk(y) - 68 + offY()}px) rotate(${r}deg) scale(${s})`;
 }
 
 function cardHide() { cardImg.style.display = 'none'; }
@@ -2756,8 +2764,14 @@ function frame(now) {
       break;
     }
     case 'point': {
-      // 叉腰指人骂骂咧咧：快速小幅点戳抖动，~1.1s 换一句，四句骂完收工
-      rot = Math.sin(stateT * 16) * 1.6;
+      // 入场先往前一戳（缩放冲一下收回），然后快速小幅点戳抖动，~1.1s 换一句，四句骂完收工
+      if (stateT < 0.28) {
+        const punch = 1.13 - 0.13 * easeInOut(stateT / 0.28);
+        sx = punch;
+        sy = punch;
+      } else {
+        rot = Math.sin(stateT * 16) * 1.6;
+      }
       ty = -Math.abs(Math.sin(stateT * 8)) * 2;
       pointState.lineT += dt;
       if (pointState.lineT > 1.15 && pointState.said < 4) {
@@ -2972,7 +2986,7 @@ function frame(now) {
   // 缩放 = 远近缩放 × 整体缩放，但有下限 0.8——人物变再小，字也得能看清
   const spriteH = (state.startsWith('desk') || state.startsWith('work') ? 700 : FORMS[form].height) * sizeK;
   // 睡觉场景中她的头在场景图上部，气泡贴那里
-  const headY = state.startsWith('sleep') ? 280 * sizeK : winH() + ty - spriteH * sy * curSize;
+  const headY = state.startsWith('sleep') ? 280 * sizeK + offY() : winH() + ty - spriteH * sy * curSize;
   const bScale = Math.max((state.startsWith('sleep') ? 1 : curSize) * sizeK, 0.8);
   sendBubbleAnchor(winW() / 2 + tx, headY, bScale);
 

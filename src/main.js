@@ -6,10 +6,11 @@ const https = require('https');
 const os = require('os');
 const path = require('path');
 
-// 窗口基础尺寸：给跳跃/摇摆留出顶部和两侧余量，立绘锚定在底部
+// 窗口基础尺寸：比立绘（512 高）大一圈，给跳跃/旋转/乱飞等会探出身体的动作留余量
 // settings._size 是整体缩放系数（配置页滑块），实际窗口尺寸 = 基础尺寸 × 系数
-const BASE_W = 340;
-const BASE_H = 620;
+// 注意：特效/道具坐标都标定在 340×620 逻辑画幅上（底部居中对齐窗口），改尺寸不用动它们
+const BASE_W = 460;
+const BASE_H = 740;
 function sizeK() { return settings._size || 1; }
 function winW() { return Math.round(BASE_W * sizeK()); }
 function winH() { return Math.round(BASE_H * sizeK()); }

@@ -127,10 +127,12 @@
   }
   #sleepImg .base { display: block; width: 340px; height: auto; }
   #sleepImg .top { position: absolute; top: 0; left: 0; width: 340px; height: auto; }
-  /* 漫画特效 SVG 层 */
+  /* 漫画特效 SVG 层：340×620 逻辑画幅，底部居中对齐窗口（窗口加大后两侧/顶部是余量） */
   #fx {
     position: absolute;
-    inset: 0;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
     pointer-events: none;
   }
   /* 爆裂星/拟声词：弹出后消散 */

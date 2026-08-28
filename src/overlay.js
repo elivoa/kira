@@ -370,23 +370,25 @@ function peekFace(side, y) {
   img.src = '../assets/head_big.png';
   img.onload = () => {
     const W = Math.round(H * img.naturalWidth / img.naturalHeight);
+    // 图右侧的墙沿竖线（约 94.6% 处）对齐屏幕边：她从屏幕外扒着边沿探出头来
+    const off = Math.round(W * 0.054);
     const top = Math.min(Math.max(Math.round(y - H / 2), 10), innerHeight - H - 10);
-    const fromX = side === 'left' ? -60 : 60;
+    const fromX = (side === 'left' ? -1 : 1) * Math.round(W * 0.55);
     const box = document.createElement('div');
-    box.style.cssText = `position:fixed;top:${top}px;${side}:${-Math.round(W / 2)}px;width:${W}px;height:${H}px;` +
+    box.style.cssText = `position:fixed;top:${top}px;${side}:${-off}px;width:${W}px;height:${H}px;` +
       `pointer-events:none;opacity:0;transform:translateX(${fromX}px);` +
       'transition:opacity .45s ease,transform .55s cubic-bezier(.2,1.25,.4,1);' +
       'filter:drop-shadow(0 10px 30px rgba(20,20,50,.45));';
-    // 镜像层：从右侧来时脸转向屏幕中央；img 层做悬浮起伏
+    // 镜像层：原图扒的是右边的沿，从左侧来时镜像到左边；img 层做悬浮起伏
     const flip = document.createElement('div');
-    flip.style.cssText = 'width:100%;height:100%;' + (side === 'right' ? 'transform:scaleX(-1);' : '');
+    flip.style.cssText = 'width:100%;height:100%;' + (side === 'left' ? 'transform:scaleX(-1);' : '');
     img.style.cssText = 'width:100%;height:100%;animation:peekbob 2.6s ease-in-out infinite;';
     flip.appendChild(img);
     box.appendChild(flip);
-    // 气泡台词：贴在探进来的半张脸旁边
+    // 气泡台词：贴在探进来的脸旁边
     const bub = document.createElement('div');
     bub.textContent = PEEK_LINES[Math.floor(Math.random() * PEEK_LINES.length)];
-    bub.style.cssText = `position:fixed;top:${top + Math.round(H * 0.12)}px;${side}:${Math.round(W / 2) + 14}px;` +
+    bub.style.cssText = `position:fixed;top:${top + Math.round(H * 0.12)}px;${side}:${Math.round(W * 0.55)}px;` +
       'pointer-events:none;background:rgba(255,255,255,.95);color:#5b5680;font:600 17px "PingFang SC",sans-serif;' +
       'padding:9px 16px;border-radius:16px;box-shadow:0 4px 14px rgba(80,60,160,.25);opacity:0;transition:opacity .3s ease;';
     document.body.appendChild(box);
