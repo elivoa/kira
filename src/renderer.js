@@ -881,7 +881,11 @@ async function doClimb() {
   const st = await window.pet.getStage();
   const [px, py] = await window.pet.getPos();
   const aw = await window.pet.activeWindow();
-  if (!aw) { idleWait = nextIdleWait(2, 4); return; }
+  if (!aw) {
+    logEvent('自主', '想爬墙但没枚举到可爬的窗口（检查 tools/windows 是否已编译）');
+    idleWait = nextIdleWait(2, 4);
+    return;
+  }
   // 只拦「太矮的窗」：贴屏幕顶的高窗照样爬，位置到顶（clamp）后由停滞检测收尾跳下
   if (aw.h < 260) {
     say('这个太矮了，爬不了', 1400);
@@ -900,7 +904,11 @@ async function doClimb() {
   let tx, useLeft;
   if (leftOk && (!rightOk || dLeft <= dRight)) { tx = leftTx; useLeft = true; }
   else if (rightOk) { tx = rightTx; useLeft = false; }
-  else { idleWait = nextIdleWait(2, 4); return; }
+  else {
+    logEvent('自主', `「${aw.owner}」两侧窗沿都贴不出站位，放弃爬墙`);
+    idleWait = nextIdleWait(2, 4);
+    return;
+  }
   climb = {
     tx, ty: st.floorY, useLeft,
     px, py,
@@ -1575,14 +1583,16 @@ async function idleRandom() {
 async function idleRandomOnce() {
   // 熄屏/锁屏/休眠中：不做任何自主动作，安静等主人回来
   if (screenAsleep) { idleWait = nextIdleWait(2, 5); return; }
-  if (performance.now() / 1000 - lastInteract > IGNORE_AFTER) {
-    if (enabled('leave') && Math.random() < 0.25) { // 走了走了概率降到 1/4
+  if (performance.now() / 1000 - lastInteract > IGNORE_AFTER && enabled('leave')) {
+    if (Math.random() < 0.25) { // 走了走了概率降到 1/4
       applyEffect('leave');
       logEvent('自主', '太久没人理，自己走了走了');
       doLeave();
     } else idleWait = nextIdleWait(3, 6);
     return;
   }
+  // 注意：「走了走了」默认停用，上面的冷落分支不能无条件 return——
+  // 否则被冷落 40 秒后她就永远站着不动了，要照常走后面的趴睡/问脑/随机逻辑
   // 在外面浪太久了先回家
   if (await checkHome()) return;
   // 被冷落了：没事就去趴桌睡一会儿

@@ -19,6 +19,19 @@ const WINDOWS_BIN = path.join(__dirname, '..', 'tools', 'windows');
 // 方向键全局监听（CGEventTap，tools/keys.swift 编译而来）；需要「输入监控」权限，没权限会自行退出
 const KEYS_BIN = path.join(__dirname, '..', 'tools', 'keys');
 
+// 启动自检：这两个二进制是 gitignore 的本机编译产物，新机器上没有就现场编译（要 Xcode 命令行工具的 swiftc）
+function ensureTool(bin) {
+  return new Promise((resolve) => {
+    if (fs.existsSync(bin)) return resolve();
+    const src = bin + '.swift';
+    execFile('swiftc', ['-O', src, '-o', bin], { timeout: 180000 }, (err) => {
+      if (err) mainLog('系统', `编译 ${path.basename(bin)} 失败，相关功能不可用（手动跑：swiftc -O tools/${path.basename(src)} -o tools/${path.basename(bin)}）`);
+      else mainLog('系统', `首次启动，自动编译了 tools/${path.basename(bin)}`);
+      resolve();
+    });
+  });
+}
+
 let win = null;
 let overlay = null; // 全屏特效覆盖层（点击穿透）
 let bubbleWin = null; // 气泡独立窗口：可以比人物窗口宽很多，字号有下限
@@ -582,7 +595,8 @@ function applyWindowSize() {
   win.setPosition(p.x, p.y);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await Promise.all([ensureTool(WINDOWS_BIN), ensureTool(KEYS_BIN)]); // 首次启动先补齐编译产物
   createWindow();
   createOverlay();
   createBubble();
