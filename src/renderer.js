@@ -223,16 +223,21 @@ function say(text, ms = 1800) {
   window.pet.bubbleSay({ text, ms, sticky: false });
 }
 
-// 主动搭话的粘性气泡：不自动消失，点一下才关；样式与自言自语气泡区分
+// 主动搭话的粘性气泡：12 秒不点会自己消失（不算看过），点掉才算看到；样式与自言自语气泡区分
 let stickyActive = false;
 function saySticky(text) {
   stickyActive = true;
-  window.pet.bubbleSay({ text, sticky: true });
+  window.pet.bubbleSay({ text, sticky: true, ms: STICKY_SHOW_MS });
 }
-// 气泡在独立窗口里，点掉后由主进程回执解除 sticky 状态
+// 气泡在独立窗口里：点掉 = 看到了（记互动、这条搭话翻篇）；超时自己消失 = 没看到，稍后还会再拿出来
 window.pet.onBubbleDismissed(() => {
   stickyActive = false;
-  logEvent('交互', '点掉了 Kira 的主动搭话');
+  lastInteract = performance.now() / 1000;
+  pendingProactive = null;
+  logEvent('交互', '看到了 Kira 的主动搭话');
+});
+window.pet.onBubbleHidden(() => {
+  stickyActive = false;
 });
 
 // ---------- 数值面板 ----------
@@ -1655,18 +1660,26 @@ async function idleRandomOnce() {
 
 // 数值缓慢变化：恢复精/气/神，冷落涨透明值和降心情
 let lastChatter = performance.now() / 1000;
-// 主动搭话：用户闲置 4 分钟后才可能触发，两次至少隔 8 分钟
+// 主动搭话：用户闲置 4 分钟后才可能触发，新消息两次至少隔 8 分钟
 const PROACTIVE_AFTER = 240;
 const PROACTIVE_COOLDOWN = 480;
+const PROACTIVE_REGAP = 150; // 没被理的搭话，隔这么久再拿出来给你看
+const PROACTIVE_SHOW_MAX = 3; // 同一条最多拿出来几次，都不理才换掉
+const STICKY_SHOW_MS = 12000; // 粘性气泡不点也会自己消失（不算看过）
 let lastProactive = 0;
+// 没被点掉的搭话：自己消失不算看过，过一会儿原样再拿出来；点掉才翻篇
+let pendingProactive = null; // { text, shown }
 
-// 有 key 才调大模型；拿到的话用粘性气泡说（需点击关闭，区别于自言自语）
+// 有 key 才调大模型；拿到的话用粘性气泡说（区别于自言自语）
 async function maybeProactiveChat() {
   try {
     const cfg = await window.pet.getChatConfig();
     if (!cfg || !cfg.hasKey) return;
     const r = await window.pet.chatProactive();
-    if (r && r.ok && r.text) saySticky(r.text);
+    if (r && r.ok && r.text) {
+      pendingProactive = { text: r.text, shown: 1 };
+      saySticky(r.text);
+    }
   } catch {}
 }
 
@@ -1689,10 +1702,23 @@ setInterval(() => {
     lastChatter = nowSec;
     say(pickPhrase(), 2800);
   }
-  // 有 key 且闲置久了：主动调大模型找主人搭话（粘性气泡，需点击关闭）
-  if (state === 'idle' && !stickyActive && idleFor > PROACTIVE_AFTER && nowSec - lastProactive > PROACTIVE_COOLDOWN) {
-    lastProactive = nowSec;
-    maybeProactiveChat();
+  // 有 key 且闲置久了：主动调大模型找主人搭话；没被理的搭话过一会儿原样再拿出来，几次都不理才换新的
+  if (state === 'idle' && !stickyActive && idleFor > PROACTIVE_AFTER) {
+    if (pendingProactive) {
+      if (nowSec - lastProactive > PROACTIVE_REGAP) {
+        lastProactive = nowSec;
+        pendingProactive.shown++;
+        if (pendingProactive.shown > PROACTIVE_SHOW_MAX) {
+          logEvent('系统', '搭话拿出来了几次都没被理，这条先收回去了');
+          pendingProactive = null;
+        } else {
+          saySticky(pendingProactive.text);
+        }
+      }
+    } else if (nowSec - lastProactive > PROACTIVE_COOLDOWN) {
+      lastProactive = nowSec;
+      maybeProactiveChat();
+    }
   }
 }, 1000);
 

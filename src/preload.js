@@ -81,4 +81,6 @@ contextBridge.exposeInMainWorld('pet', {
   bubbleIgnore: (flag) => ipcRenderer.send('bubble-ignore', flag),
   bubbleDismiss: () => ipcRenderer.send('bubble-dismissed'),
   onBubbleDismissed: (fn) => ipcRenderer.on('bubble-dismissed', () => fn()),
+  bubbleHidden: () => ipcRenderer.send('bubble-hidden'),
+  onBubbleHidden: (fn) => ipcRenderer.on('bubble-hidden', () => fn()),
 });

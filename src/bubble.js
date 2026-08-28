@@ -25,17 +25,25 @@ window.pet.onBubbleSay(({ text, ms, sticky: st }) => {
     bubble.style.width = `${Math.max(160, Math.min(460, 40 + text.length * 9))}px`;
     const hint = document.createElement('span');
     hint.className = 'sticky-hint';
-    hint.textContent = '✦ 点我消失';
+    hint.textContent = '✦ 点我表示看到了';
     bubble.appendChild(hint);
+    // 不点也会自己消失：不算看过，桌宠稍后还会把这条再拿出来
+    bubbleTimer = setTimeout(() => {
+      if (!sticky) return; // 已经被点掉了
+      sticky = false;
+      bubble.classList.remove('show', 'sticky');
+      window.pet.bubbleHidden();
+    }, ms || 12000);
   } else {
     bubbleTimer = setTimeout(() => bubble.classList.remove('show'), ms || 1800);
   }
   bubble.classList.add('show');
 });
 
-// 粘性气泡点一下关闭，并通知桌宠解除 sticky 状态
+// 粘性气泡点一下关闭：算看过了，通知桌宠这条翻篇
 bubble.addEventListener('click', () => {
   if (!sticky) return;
+  clearTimeout(bubbleTimer);
   sticky = false;
   bubble.classList.remove('show', 'sticky');
   window.pet.bubbleDismiss();

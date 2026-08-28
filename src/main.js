@@ -689,6 +689,9 @@ app.whenReady().then(async () => {
   ipcMain.on('bubble-dismissed', () => {
     if (win) win.webContents.send('bubble-dismissed');
   });
+  ipcMain.on('bubble-hidden', () => {
+    if (win) win.webContents.send('bubble-hidden');
+  });
 
   // 桌宠当前窗口位置（渲染层自主移动时的基准）
   ipcMain.handle('get-pos', () => (win ? win.getPosition() : [0, 0]));
