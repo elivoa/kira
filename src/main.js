@@ -11,6 +11,10 @@ const path = require('path');
 // 注意：特效/道具坐标都标定在 340×620 逻辑画幅上（底部居中对齐窗口），改尺寸不用动它们
 const BASE_W = 460;
 const BASE_H = 740;
+// 窗口底部比内容多出的固定高度：装立绘 drop-shadow(0 6px 14px) 的向下衰减（约 20px）。
+// winH() 仍是「内容高度」（脚底 = 窗口底往上 SHADOW_PAD），所有贴底/夹取公式语义不变；
+// 只有真正设置窗口像素高度的地方要 + SHADOW_PAD。阴影像素不随 _size 缩放，所以是固定值
+const SHADOW_PAD = 24;
 function sizeK() { return settings._size || 1; }
 function winW() { return Math.round(BASE_W * sizeK()); }
 function winH() { return Math.round(BASE_H * sizeK()); }
@@ -444,7 +448,7 @@ function createWindow() {
   const area = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
     width: winW(),
-    height: winH(),
+    height: winH() + SHADOW_PAD,
     x: Math.round(area.width - winW() - 100),
     y: Math.round(area.height - winH()),
     frame: false,
@@ -659,7 +663,7 @@ function clampToDrag(x, y, cursor) {
 function applyWindowSize() {
   if (!win) return;
   const b = win.getBounds();
-  const w = winW(), h = winH();
+  const w = winW(), h = winH() + SHADOW_PAD;
   win.setBounds({ x: Math.round(b.x + b.width - w), y: Math.round(b.y + b.height - h), width: w, height: h });
   const p = clampToScreen(win.getPosition()[0], win.getPosition()[1]);
   win.setPosition(p.x, p.y);
@@ -793,7 +797,7 @@ app.whenReady().then(async () => {
     const area = petArea();
     overlay.webContents.send('fx-poop', {
       fromX: b.x + b.width / 2 - area.x,
-      fromY: b.y + b.height * 0.55 - area.y,
+      fromY: b.y + (b.height - SHADOW_PAD) * 0.55 - area.y, // 按内容高度取点，底部阴影余量不算身体
     });
   });
 
@@ -805,7 +809,7 @@ app.whenReady().then(async () => {
     const area = petArea();
     overlay.webContents.send('fx-sword', {
       x: b.x + b.width / 2 - area.x,
-      y: b.y + b.height / 2 - area.y,
+      y: b.y + (b.height - SHADOW_PAD) / 2 - area.y,
     });
   });
   ipcMain.on('sword-done', () => {
@@ -820,7 +824,7 @@ app.whenReady().then(async () => {
     const area = petArea();
     overlay.webContents.send('fx-peek', {
       side: Math.random() < 0.5 ? 'left' : 'right',
-      y: b.y + b.height * 0.35 - area.y,
+      y: b.y + (b.height - SHADOW_PAD) * 0.35 - area.y,
     });
   });
   ipcMain.on('peek-done', () => {
