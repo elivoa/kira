@@ -163,9 +163,11 @@ function overSprite(cx, cy) {
 }
 
 // 点击穿透：渲染层根据光标是否在角色上来回切换
+// 按住不放（拖拽中）时一律接管：拖到屏幕外沿时光标会滑出立绘，
+// 这时若切成穿透，mouseup 就收不到了，她会一直粘在鼠标上
 function updateMouseIgnore(over) {
   lastOver = over;
-  const want = clickThrough ? !over : false;
+  const want = clickThrough && !pressing ? !over : false;
   if (want !== mouseIgnored) {
     mouseIgnored = want;
     window.pet.setMouseIgnore(want);
@@ -1958,6 +1960,8 @@ stage.addEventListener('mousedown', (e) => {
 
 window.addEventListener('mousemove', (e) => {
   if (!pressing) return;
+  // 兜底：松手事件丢了（窗口切穿透那一瞬）就补一次，别让她一直跟着鼠标走
+  if (!mouseIgnored && e.buttons === 0) { window.dispatchEvent(new MouseEvent('mouseup')); return; }
   if (!dragging && Math.hypot(e.screenX - downX, e.screenY - downY) > 5) {
     dragging = true;
     waistPress = false; // 拖走了，不开笔记本
