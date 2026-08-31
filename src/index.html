@@ -12,6 +12,16 @@
     user-select: none;
     -webkit-user-select: none;
   }
+  /* 窗口比内容高出底部 24px（main.js SHADOW_PAD）：立绘 drop-shadow(0 6px 14px)
+     向下的衰减画在这条余量里，不再被窗口底边切平。body 收短后所有绝对定位元素
+     锚到 body，顶边坐标系与原来逐像素一致；overflow 必须放开，否则阴影在同一条线上再被 body 切一次 */
+  body {
+    position: absolute;
+    inset: 0 0 24px 0;
+    width: auto;
+    height: auto;
+    overflow: visible;
+  }
   #stage {
     position: absolute;
     inset: 0;
