@@ -575,15 +575,46 @@ function syncOverlay(dpy) {
   overlay.setBounds({ x: a.x, y: a.y, width: a.width, height: a.height });
 }
 
-// 把窗口位置限制在当前显示器工作区内
+// 把窗口位置限制在某块显示器（默认桌宠当前所在屏）的工作区内
 // 垂直方向允许高出屏幕顶 winH()-160：攀爬动作要沿高窗爬到顶沿，窗口大部可以出屏，
 // 保留 160px 可见（立绘脚部），拖拽/走路也不会把她弄丢
-function clampToScreen(x, y) {
-  const area = petArea();
+function clampToScreen(x, y, dpy) {
+  const area = (dpy || petDisplay()).workArea;
   return {
     x: Math.min(Math.max(x, area.x), area.x + area.width - winW()),
     y: Math.min(Math.max(y, area.y - (winH() - 160)), area.y + area.height - winH()),
   };
+}
+
+// 一块屏的四条边外侧是否还接着别的屏（工作区在该方向越界且另一轴有交叠）
+function displayNeighbors(d) {
+  const a = d.workArea;
+  const n = { left: false, right: false, top: false, bottom: false };
+  for (const e of screen.getAllDisplays()) {
+    if (e.id === d.id) continue;
+    const b = e.workArea;
+    const vOverlap = b.y < a.y + a.height && b.y + b.height > a.y;
+    const hOverlap = b.x < a.x + a.width && b.x + b.width > a.x;
+    if (vOverlap && b.x < a.x) n.left = true;
+    if (vOverlap && b.x + b.width > a.x + a.width) n.right = true;
+    if (hOverlap && b.y < a.y) n.top = true;
+    if (hOverlap && b.y + b.height > a.y + a.height) n.bottom = true;
+  }
+  return n;
+}
+
+// 拖拽专用夹取：以「光标所在的屏」为准，且接着别的屏的那一侧完全不夹，
+// 人物才能跨过屏幕交界（光标始终落在窗口内，所以不会被拖丢）；
+// 桌面外沿（没有邻屏的那侧）仍按工作区夹住，不让她掉出屏幕
+function clampToDrag(x, y, cursor) {
+  const d = screen.getDisplayNearestPoint(cursor);
+  const a = d.workArea, w = winW(), h = winH();
+  const n = displayNeighbors(d);
+  if (!n.left) x = Math.max(x, a.x);
+  if (!n.right) x = Math.min(x, a.x + a.width - w);
+  if (!n.top) y = Math.max(y, a.y - (h - 160));
+  if (!n.bottom) y = Math.min(y, a.y + a.height - h);
+  return { x, y };
 }
 
 // 整体缩放变化时重设窗口尺寸，保持右下角锚定并夹回屏幕
@@ -657,11 +688,18 @@ app.whenReady().then(async () => {
   ipcMain.on('drag-move', () => {
     if (!win || !dragOffset) return;
     const cursor = screen.getCursorScreenPoint();
-    const p = clampToScreen(Math.round(cursor.x - dragOffset.dx), Math.round(cursor.y - dragOffset.dy));
+    const p = clampToDrag(Math.round(cursor.x - dragOffset.dx), Math.round(cursor.y - dragOffset.dy), cursor);
     win.setPosition(p.x, p.y);
   });
 
   ipcMain.on('drag-end', () => {
+    // 落点归到光标所在那块屏：跨屏时松手可能还半截跨在交界上，
+    // 先坐实到一块屏，免得之后自主走动被 clampToScreen 猛地拽回去
+    if (win && dragOffset) {
+      const [x, y] = win.getPosition();
+      const p = clampToScreen(x, y, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
+      if (p.x !== x || p.y !== y) win.setPosition(p.x, p.y);
+    }
     dragOffset = null;
     syncOverlay(); // 被拎到别的显示器了，覆盖层跟过去
   });
