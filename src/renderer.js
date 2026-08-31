@@ -133,9 +133,12 @@ for (let i = 1; i <= WALK_N; i++) {
   new Image().src = s; // 预加载，切帧不闪
 }
 // 每累计走这么多 px 切下一帧（可调）：移动快帧就快、慢就慢、停下就停在当前帧。
-// 标定：新源视频支撑脚相对身体后移 ≈ 9.7 素材px/帧，素材高 836 显示高 512 → 5.9 显示px/帧。
-// 这个值等于步幅时脚底与地面零打滑（脚底摩擦匹配），偏离就会滑步
-const WALK_PX_PER_FRAME = 5.9;
+// 标定（脚部实测）：底部鞋印连通块逐帧跟踪支撑脚，中位地速 7.4 素材px/帧，
+// 素材高 836 显示高 512 → 4.54 显示px/帧（1s/帧前进合成图 + 网格线验证：此值下支撑脚粘地；
+// 之前按全帧运动量估的 5.9 偏大 30%，支撑脚持续前滑、腿前后跳）。
+// 帧内脚速不均导致的滑步，由 tools/walk_foot_fix.js 在素材侧把接触点掰到恒速线解决，
+// 不用变速切帧（接触点 WALK_PX 表试过，体感不行已撤回）
+const WALK_PX_PER_FRAME = 4.54;
 // 用走路帧的地面移动状态（dash 不在内：只有 side 侧面版用帧，在 dashFrame 里手动推）
 const WALK_FRAME_STATES = new Set(['walk', 'walkfar', 'gohome', 'goledge', 'onledge', 'knockgo', 'climbgo', 'wallgo', 'evade']);
 // 走路帧的链内出口：这些 next 状态会自己换图/继续用帧，enter 时不做立绘恢复兜底
@@ -286,6 +289,9 @@ function enter(next, dur = 0) {
     sleepImg.style.opacity = 0;
     setSpriteVeiled(false);
   }
+  // 桌子（来张桌子/工作模式）只在 desk/work 链内存在：菜单之外的切换路径（自主 idleRandom、
+  // 大模型决策 DISPATCH、拖拽打断等）没有 resetDesk，桌子+放大立绘会叠到新动作上（已踩坑）
+  if (!String(next).startsWith('desk') && !String(next).startsWith('work') && document.getElementById('desk')) resetDesk();
 }
 
 function say(text, ms = 1800) {
@@ -770,8 +776,14 @@ function doFluteFly() {
   say(pick(['看我的！', '笛子，去！', '给你表演一个~']), 1500);
 }
 
+// 散步的边缘约束：记录当前位置与目标边缘，走到边就停，不原地干走
+let walkEdge = null; // { tx, px }，px 是渲染层估计的窗口位置
 function doWalk(dir) {
   walkDir = dir || (Math.random() < 0.5 ? -1 : 1);
+  walkEdge = null;
+  Promise.all([window.pet.getStage(), window.pet.getPos()]).then(([st, [px]]) => {
+    walkEdge = { tx: walkDir > 0 ? st.maxX : st.minX, px };
+  }).catch(() => {});
   if (form === 'normal') {
     // 姐姐形态用走路序列帧散步：先翻牌转成走路当前帧，帧图朝左，facing = -walkDir 保证镜像方向正确
     facing = -walkDir;
@@ -2297,10 +2309,10 @@ window.pet.onMenuAction((id) => {
 
 // ---------- 动画主循环 ----------
 const GRAVITY = 2600;
-// 新素材地面速度 ≈9.7 素材px/帧 × 24fps × 显示缩放 ≈ 142 显示px/s：WALK_SPEED 取 140
-// 时播放节奏 ≈24fps 与视频一致；若速度远高于此（如旧值 280），切帧 48fps 远超
-// 80ms 交叉淡化设计节奏，相邻帧互相涂抹，视觉上只有一半帧在生效
-const WALK_SPEED = 140; // px/s
+// 脚部实测地速 ≈7.4 素材px/帧 × 24fps × 显示缩放 ≈ 109 显示px/s：WALK_SPEED 取 109 时
+// 播放节奏 ≈24fps 与视频一致；若速度远高于此（如 140/280），切帧率超出 38ms 交叉淡化
+// 设计节奏，相邻帧互相涂抹，帧被快进看不清（「只有一半帧在生效」的根因）
+const WALK_SPEED = 109; // px/s
 let last = performance.now();
 
 function frame(now) {
@@ -2335,7 +2347,21 @@ function frame(now) {
       break;
     }
     case 'walk': {
-      const mx = walkDir * WALK_SPEED * dt;
+      let mx = walkDir * WALK_SPEED * dt;
+      if (walkEdge) {
+        // 边缘夹取：渲染层估计位置到边就停（主进程同样会钳，两边一致），不原地干走
+        const remain = walkEdge.tx - walkEdge.px;
+        if (Math.sign(remain) !== walkDir || Math.abs(remain) <= 2) mx = 0;
+        else if (Math.abs(remain) < Math.abs(mx)) mx = Math.sign(remain) * Math.abs(remain);
+        walkEdge.px += mx;
+        if (mx === 0) {
+          walkEdge = null;
+          // 姐姐形态翻牌转回正面，其它形态直接回待机
+          if (form === 'normal') enter('walkout', 0.3);
+          else { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
+          break;
+        }
+      }
       window.pet.moveBy(mx, 0);
       if (!walkAnimAdvance(mx)) {
         // 没有走路帧素材的形态：保持旧的走路颠簸 + 前倾
