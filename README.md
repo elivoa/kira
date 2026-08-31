@@ -72,6 +72,9 @@ tools/
   cutout_climb.js 攀爬帧抠图：近白底 → 透明底 32 帧（保画布对齐 + 2x 降采样），node tools/cutout_climb.js <srcDir> <outDir>
   windows.swift macOS 窗口枚举（CGWindowList），编译后供「去窗台玩」使用
   keys.swift    方向键全局监听（CGEventTap，需输入监控权限），编译后供「吓她一跳」使用
+  video_climb_frames3.js 爬墙视频抠帧（暗底色键），node tools/video_climb_frames3.js <srcDir> <outDir> --seq ...
+  video_walk_frames.js  走路视频抠帧（浅底色键，全帧步态循环 → assets/walk），node tools/video_walk_frames.js <srcDir> <outDir> --seq ...
+  trim_bottom.js        序列帧统一裁底边（保画布对齐），node tools/trim_bottom.js <dir> <rows>
 ```
 
 ## 换立绘

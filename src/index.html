@@ -29,6 +29,22 @@
     pointer-events: none;
     filter: drop-shadow(0 6px 14px rgba(20, 20, 50, 0.35));
   }
+  /* 走路帧交叉淡化层：切帧时顶旧帧淡出，新帧在 #sprite 垫底，切换不生硬。
+     淡化 38ms：短于走速 140px/s 的切帧间隔（42ms），保证每次淡化完整收尾——
+     否则画面恒为前后两帧 ~50% 混合，淡色小件（手）会被冲没、动作发糊。
+     不挂 drop-shadow：淡出层也投影的话，每次切帧新旧两帧阴影叠加，
+     白底下阴影会以切帧节奏明暗闪烁；阴影只由 #sprite 承担 */
+  #spriteX {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    height: 512px;
+    transform-origin: 50% 100%;
+    will-change: transform, opacity;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 38ms linear;
+  }
   /* 戳一戳冒出的爱心 */
   .heart {
     position: absolute;
@@ -210,6 +226,7 @@
 <body>
   <div id="stage">
     <img id="sprite" src="../assets/pet.png" data-cur="../assets/pet.png" draggable="false" alt="">
+    <img id="spriteX" src="../assets/pet.png" draggable="false" alt="">
     <svg id="fx" width="340" height="620" viewBox="0 0 340 620"></svg>
     <div id="statsPanel"></div>
     <input id="miniChat" placeholder="对她说点什么…" maxlength="200" autocomplete="off">

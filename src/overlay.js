@@ -140,15 +140,11 @@ function ensureSwordDefs() {
   el('stop', { offset: '100%', 'stop-color': '#dfe4f4' }, g);
 }
 
-// 银刃金镡紫柄的剑，剑尖朝 -y（配合朝向旋转）
+// 真剑素材（assets/sword_blade.png：音符银刃 + 藏青柄 + K 坠彩虹穗），剑尖朝左，基准宽 190
 function makeSword() {
-  ensureSwordDefs();
   const g = el('g', {});
-  el('polygon', { points: '0,-78 8,-56 8,30 -8,30 -8,-56', fill: 'url(#bladeGrad)', stroke: '#8a8fa8', 'stroke-width': 1.5 }, g);
-  el('line', { x1: 0, y1: -54, x2: 0, y2: 28, stroke: '#f4f6ff', 'stroke-width': 1.5, opacity: 0.8 }, g);
-  el('rect', { x: -17, y: 30, width: 34, height: 8, rx: 3.5, fill: '#e8c86a', stroke: '#a8842a', 'stroke-width': 1.5 }, g);
-  el('rect', { x: -6, y: 38, width: 12, height: 27, rx: 4, fill: '#2c2a54', stroke: '#1a1836', 'stroke-width': 1.5 }, g);
-  el('circle', { cx: 0, cy: 71, r: 6.5, fill: '#7d6fd0', stroke: '#e6e0ff', 'stroke-width': 2 }, g);
+  const W = 190, H = W * 648 / 1447;
+  el('image', { href: '../assets/sword_blade.png', x: -W / 2, y: -H / 2, width: W, height: H }, g);
   return g;
 }
 
@@ -226,8 +222,8 @@ function flySword(homeX, homeY) {
     pts.push([x, y]);
     if (pts.length > 12) pts.shift();
     trail.setAttribute('d', 'M' + pts.map((p) => p.join(',')).join(' L'));
-    // 剑尖朝运动方向
-    const ang = Math.atan2(vy, vx) * 180 / Math.PI + 90;
+    // 剑尖朝运动方向（素材剑尖朝左，+180 对齐速度方向）
+    const ang = Math.atan2(vy, vx) * 180 / Math.PI + 180;
     sword.setAttribute('transform', `translate(${x},${y}) rotate(${ang})`);
     requestAnimationFrame(frame);
   }
@@ -628,6 +624,7 @@ const menuLayer = document.getElementById('menuLayer');
 const MENU_TREE = [
   { id: 'act', icon: '🐾', label: '动作', children: [
     { id: 'walk', icon: '🐾', label: '走一走' },
+    { id: 'walkfar', icon: '🚶‍♀️', label: '走到另一边' },
     { id: 'hop', icon: '🐇', label: '跳一下' },
     { id: 'spin', icon: '🌀', label: '转个圈' },
     { id: 'sway', icon: '💗', label: '撒个娇' },

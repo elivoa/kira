@@ -1,4 +1,4 @@
-// 全局方向键监听：CGEventTap 只关心 keyDown 里的方向键，按一次往 stdout 打一行 "arrow"
+// 全局键盘监听：CGEventTap 关心 keyDown，任何键按一次往 stdout 打一行 "key"，方向键额外再打一行 "arrow"
 // 需要「输入监控」权限（macOS 会在首次运行时弹授权，或在 系统设置→隐私与安全性→输入监控 里开）；
 // 没权限时 tap 创建失败，打日志退出非零，主进程据此降级为只检测鼠标
 import Cocoa
@@ -13,8 +13,11 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     if let t = theTap { CGEvent.tapEnable(tap: t, enable: true) }
     return nil
   }
-  if type == .keyDown, arrowCodes.contains(event.getIntegerValueField(.keyboardEventKeycode)) {
-    print("arrow")
+  if type == .keyDown {
+    print("key")
+    if arrowCodes.contains(event.getIntegerValueField(.keyboardEventKeycode)) {
+      print("arrow")
+    }
     fflush(stdout)
   }
   return Unmanaged.passUnretained(event)

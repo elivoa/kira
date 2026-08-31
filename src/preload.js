@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('pet', {
   onPowerState: (fn) => ipcRenderer.on('power-state', (_e, d) => fn(d)),
   getPowerState: () => ipcRenderer.invoke('get-power-state'),
   activeWindow: () => ipcRenderer.invoke('active-window'),
+  inputContext: () => ipcRenderer.invoke('input-context'),
   getPathForFile: (f) => webUtils.getPathForFile(f),
   folderDrop: (p) => ipcRenderer.send('folder-drop', p),
   // 星盘右键菜单（overlay 侧）

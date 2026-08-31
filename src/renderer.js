@@ -46,13 +46,15 @@ const offY = () => winH() - LOGIC_H * sizeK;
 // 立绘高度与特效层尺寸随整体缩放更新
 function applySpriteHeight() {
   sprite.style.height = FORMS[form].height * sizeK + 'px';
+  const sx2 = document.getElementById('spriteX');
+  if (sx2) sx2.style.height = sprite.style.height;
   const fx = document.getElementById('fx');
   fx.setAttribute('width', Math.round(LOGIC_W * sizeK));
   fx.setAttribute('height', Math.round(LOGIC_H * sizeK));
   const card = document.getElementById('cardImg');
   if (card) card.style.width = 64 * sizeK + 'px';
   const board = document.getElementById('boardImg');
-  if (board) board.style.width = 140 * sizeK + 'px';
+  if (board) board.style.width = 200 * sizeK + 'px'; // 真剑踏板宽度
   const flute = document.getElementById('fluteImg');
   if (flute) flute.style.width = 60 * sizeK + 'px';
   // 场景图（睡觉/看腿）：DOM 图不随窗口尺寸走，手动乘缩放
@@ -68,7 +70,7 @@ function applySpriteHeight() {
 const FRONT_SRC = '../assets/pet.png';
 const BACK_SRC = '../assets/pet_back.png';
 const CHIBI_SRC = '../assets/chibi.png';
-const SIDE_SRC = '../assets/pet_side.png'; // 侧面图（朝左，镜像即朝右），姐姐形态走路/侧面暴走用
+const SIDE_SRC = '../assets/pet_side.png'; // 侧面图（朝左，镜像即朝右），背对形态偷偷回头看一眼用
 const FLUTE_SRC = '../assets/flute.png';   // 法宝形态（银笛）
 const NOTE_SRC = '../assets/note.png';     // 法宝形态（星月夜笔记本）
 
@@ -113,6 +115,56 @@ for (let i = 1; i <= 53; i++) {
   const s = `../assets/climb/f${String(i).padStart(2, '0')}.png`;
   CLIMB_SRC.push(s);
   new Image().src = s; // 预加载，爬升切帧不闪
+}
+
+// 走路序列帧：侧面走路循环（源视频 24fps 走路段 4~96 全用，tools/walk_loop_align.js
+// 按脚底间距信号对齐成 4 个完整步态周期共 100 帧：各周期保持自然长度 27/24/25/24，
+// 不复制帧（复制帧是 42ms 冻结卡顿）；首尾残段用同相位桥接接合（桥接相位须同时锁
+// 脚与胳膊——AI 视频手臂摆动与步频不同步，脚对上时胳膊可能反相；脚用 spread 波形、
+// 胳膊用上半身前缘 armSig，跨周期候选联合评分），回卷即视频连续帧；
+// 接点柔化与边缘雾清理由 tools/walk_post.js 完成），
+// 帧图朝左（sx*facing 镜像即朝右），脚底在画布底部，
+// 显示方式与攀爬帧相同（sprite 底部居中锚定，高 FORMS.normal.height * sizeK）。
+const WALK_N = 100;
+const WALK_SRC = [];
+for (let i = 1; i <= WALK_N; i++) {
+  const s = `../assets/walk/f${String(i).padStart(2, '0')}.png`;
+  WALK_SRC.push(s);
+  new Image().src = s; // 预加载，切帧不闪
+}
+// 每累计走这么多 px 切下一帧（可调）：移动快帧就快、慢就慢、停下就停在当前帧。
+// 标定：新源视频支撑脚相对身体后移 ≈ 9.7 素材px/帧，素材高 836 显示高 512 → 5.9 显示px/帧。
+// 这个值等于步幅时脚底与地面零打滑（脚底摩擦匹配），偏离就会滑步
+const WALK_PX_PER_FRAME = 5.9;
+// 用走路帧的地面移动状态（dash 不在内：只有 side 侧面版用帧，在 dashFrame 里手动推）
+const WALK_FRAME_STATES = new Set(['walk', 'walkfar', 'gohome', 'goledge', 'onledge', 'knockgo', 'climbgo', 'wallgo', 'evade']);
+// 走路帧的链内出口：这些 next 状态会自己换图/继续用帧，enter 时不做立绘恢复兜底
+const WALK_KEEP_STATES = new Set([...WALK_FRAME_STATES, 'walkout', 'gohomeout', 'jumpdown', 'evadeout']);
+
+// 走路帧推进器：按窗口实际位移推进帧（快就快切、慢就慢切、停下停在当前帧）。
+// 相位 fi 全局连续不重置，93 帧长条靠多场走路接力播完。
+// 走路帧只有姐姐形态素材：form!=='normal' 时返回 false 且不动立绘，调用方保持旧的颠簸表现
+const walkAnim = { fi: 0, acc: 0 };
+const spriteX = document.getElementById('spriteX'); // 交叉淡化层
+function walkAnimAdvance(px) {
+  if (form !== 'normal') return false;
+  walkAnim.acc += Math.abs(px);
+  let advanced = false;
+  while (walkAnim.acc >= WALK_PX_PER_FRAME) {
+    walkAnim.acc -= WALK_PX_PER_FRAME;
+    walkAnim.fi = (walkAnim.fi + 1) % WALK_SRC.length;
+    advanced = true;
+  }
+  if (!advanced) return true;
+  // 交叉淡化：旧帧顶到上层 80ms 淡出，新帧在底层立即就位，帧切换不生硬
+  spriteX.src = sprite.src;
+  spriteX.style.transition = 'none';
+  spriteX.style.opacity = 1;
+  void spriteX.offsetWidth; // reflow，让 opacity=1 先生效再挂过渡
+  spriteX.style.transition = '';
+  spriteX.style.opacity = 0;
+  swapSprite(WALK_SRC[walkAnim.fi]);
+  return true;
 }
 
 // ---------- 点击穿透 ----------
@@ -182,6 +234,7 @@ const LINES = {
   spin: ['转圈圈~', '晕晕的...'],
   sway: ['♪~', '啦啦啦~'],
   walk: ['散散步~', '去哪儿呢？'],
+  walkfar: ['去那边看看~', '巡视一下领地~', '出发出发！'],
   drag: ['要被带走啦！', '轻一点嘛~'],
   leave: ['哼，不理你了，走了走了', '走了走了！', '都不理我...走了'],
   back: ['我回来啦', '知道想我了？', '哼，还是回来陪你了'],
@@ -190,6 +243,7 @@ const LINES = {
   qsway: ['摇呀摇~', '♪♪', '左摇右摆~'],
   ledge: ['上去看看！', '站高高~', '这边风景好~'],
   gohome: ['回去咯', '玩够了，回家~', '该回去了'],
+  evade: ['不挡你啦~', '我挪挪~', '给你让个地儿~'],
   dash: ['暴走！', '冲鸭！', '让开让开！'],
   dashSide: ['跑起来！', '哒哒哒哒', '跟上我！'],
   fly: ['御剑飞行！', '起飞咯~', '看我能飞多高'],
@@ -214,8 +268,16 @@ function enter(next, dur = 0) {
   state = next;
   stateT = 0;
   stateDur = dur;
-  // 离开飘移状态时清掉影子和灯笼，离开飞行时收掉踏板，离开乱飞时收掉笛子，离开睡觉时撤被褥
-  if (next !== 'walk' && next !== 'gohome') hideFloatFx();
+  // 走路帧相位跨状态/跨场次保持连续不重置：93 帧长条一场走不完，回 f01 起步会导致尾部帧永远轮不到
+  // 走路帧只在移动状态链内显示；被打断离开（超时/戳一戳/被吓跑/菜单切动作等）兜底恢复立绘
+  if (!WALK_KEEP_STATES.has(next) && WALK_SRC.includes(sprite.dataset.cur)) swapSprite(FORMS[form].front);
+  // 离开移动状态链时藏掉交叉淡化层（链内 80ms 自行淡出，不用管）
+  if (!WALK_KEEP_STATES.has(next)) {
+    spriteX.style.transition = 'none';
+    spriteX.style.opacity = 0;
+  }
+  // 飘移特效（影子+灯笼）已随走路帧下线；离开飞行时收掉踏板，离开乱飞时收掉笛子，离开睡觉时撤被褥
+  hideFloatFx();
   if (next !== 'fly') boardHide();
   if (next !== 'flutefly' && next !== 'fluteback' && next !== 'fluteturn' && next !== 'working') fluteHide();
   if (next !== 'legshow') legImg.style.opacity = 0; // 看腿图只在展示期间存在
@@ -708,10 +770,10 @@ function doFluteFly() {
   say(pick(['看我的！', '笛子，去！', '给你表演一个~']), 1500);
 }
 
-function doWalk() {
-  walkDir = Math.random() < 0.5 ? -1 : 1;
+function doWalk(dir) {
+  walkDir = dir || (Math.random() < 0.5 ? -1 : 1);
   if (form === 'normal') {
-    // 姐姐形态用侧面图散步：先翻牌转成侧面，侧图朝左，facing = -walkDir 保证镜像方向正确
+    // 姐姐形态用走路序列帧散步：先翻牌转成走路当前帧，帧图朝左，facing = -walkDir 保证镜像方向正确
     facing = -walkDir;
     enter('walkin', 0.32);
   } else {
@@ -719,6 +781,23 @@ function doWalk() {
     enter('walk', rand(1.6, 3));
   }
   if (Math.random() < 0.4) say(pick(LINES.walk), 1500);
+}
+
+// 走到另一边：朝更远那侧屏幕边缘一直走，到边停下（同款翻牌起步 + 走路帧）
+let farwalk = null;
+async function doWalkFar() {
+  const st = await window.pet.getStage();
+  const [px] = await window.pet.getPos();
+  walkDir = px > (st.minX + st.maxX) / 2 ? -1 : 1; // 朝更远的一端
+  farwalk = { tx: walkDir > 0 ? st.maxX : st.minX, px };
+  if (form === 'normal') {
+    facing = -walkDir;
+    enter('walkfarin', 0.32);
+  } else {
+    facing = walkDir;
+    enter('walkfar', 60);
+  }
+  if (Math.random() < 0.4) say(pick(LINES.walkfar), 1500);
 }
 
 // 走了走了：翻牌转身换背面图 → 走远缩小 → 远处待一会儿 → 走回来 → 转身换回正面
@@ -1004,9 +1083,8 @@ function dashFrame(dt) {
       d.v = 700;
       fxBurst(FOOT_X, FOOT_Y - 30);
       if (d.side) {
-        // 侧面奔跑版：爆裂瞬间换成侧面图
-        sprite.dataset.cur = SIDE_SRC;
-        sprite.src = SIDE_SRC;
+        // 侧面奔跑版：爆裂瞬间换成走路帧开跑（相位接续，不重置）
+        swapSprite(WALK_SRC[walkAnim.fi]);
         facing = -d.dir;
         fxText('哒哒哒', FOOT_X, 360);
       } else {
@@ -1022,6 +1100,7 @@ function dashFrame(dt) {
     if (nx <= d.minX) { nx = d.minX; turned = true; }
     if (nx >= d.maxX) { nx = d.maxX; turned = true; }
     window.pet.moveBy(nx - d.px, 0);
+    if (d.side) walkAnimAdvance(nx - d.px); // 侧面版：帧随冲刺速度快进
     d.px = nx;
     // 速度线拖尾
     d.lineT -= dt;
@@ -1058,6 +1137,7 @@ function dashFrame(dt) {
     // 侧面版急刹：滑步 + 后仰 + 扬尘，然后镜像掉头接着冲
     d.v = Math.max(d.v - 3200 * dt, 900);
     window.pet.moveBy(d.dir * d.v * dt, 0);
+    walkAnimAdvance(d.dir * d.v * dt); // skid 是 side 版专属子状态，直接推帧
     rot = -d.dir * 12;
     skew = -d.dir * 4;
     ty = -Math.abs(Math.sin(d.subT * 18)) * 4;
@@ -1076,18 +1156,16 @@ function dashFrame(dt) {
     d.v = Math.max(d.v - 4800 * dt, 0);
     const nx = d.px + d.dir * d.v * dt;
     window.pet.moveBy(nx - d.px, 0);
+    if (d.side) walkAnimAdvance(nx - d.px);
     d.px = nx;
     rot = -d.dir * 10;
     skew = -d.dir * 5;
     if (d.v <= 100) {
       fxDust(FOOT_X, FOOT_Y, 6);
       fxText('フーッ', FOOT_X, 350, 26);
-      if (d.side) {
-        // 跑完换回正面图
-        sprite.dataset.cur = FORMS[form].front;
-        sprite.src = FORMS[form].front;
-        facing = 1;
-      }
+      // 跑完换回正面图（侧面版的走路帧、被吓从走路状态切入的残留都在这里恢复）
+      swapSprite(FORMS[form].front);
+      facing = 1;
       enter('idle');
       idleWait = nextIdleWait(3, 6);
     }
@@ -1099,9 +1177,13 @@ function dashFrame(dt) {
   return { tx, ty, rot, rotY, sx, sy, skew };
 }
 
-// ---------- 御剑飞行 ----------
+// ---------- 御剑飞行（真剑踏板 + 飞行姿态人物） ----------
 // 起飞爬升 → 高空波浪巡航（到边纸片人掉头）→ 滑翔落地
 let fly = null;
+
+// 飞行姿态立绘（assets/fly_girl.png：裙摆发丝向后飘的驭剑姿，脸朝左）
+const FLY_GIRL_SRC = '../assets/fly_girl.png';
+new Image().src = FLY_GIRL_SRC;
 
 async function doFly() {
   const st = await window.pet.getStage();
@@ -1115,21 +1197,23 @@ async function doFly() {
     laps: 0, maxLaps: 2 + (Math.random() < 0.5 ? 1 : 0),
     flipT: 1, lineT: 0, texted: false,
   };
+  facing = -fly.dir; // 素材脸朝左：往右飞要镜像
+  swapSprite(FLY_GIRL_SRC);
   enter('fly');
   say(pick(LINES.fly), 1600);
 }
 
-// ---------- 御法宝飞行 ----------
-// 踩一块放大的法宝（笛子）踏板巡航：起飞时踏板从脚下升起，落地后踏板飞走
+// ---------- 御剑踏板（真剑素材，横剑） ----------
+// 起飞时踏板从脚下升起，落地后踏板飞走
 const boardImg = document.createElement('img');
 boardImg.id = 'boardImg';
-boardImg.src = '../assets/flute.png';
+boardImg.src = '../assets/sword_blade.png';
 stage.appendChild(boardImg);
 
-// boardY: 踏板中心在窗口里的 y（脚下）；boardRot: 角度
+// boardY: 踏板中心在窗口里的 y（脚下）；boardRot: 角度。剑宽 200，中心对准脚下；剑尖随飞行方向镜像
 function boardShow(yC, rot) {
   boardImg.style.display = 'block';
-  boardImg.style.transform = `translate(${FOOT_X - 70 + offX()}px, ${yC - 150 + offY()}px) rotate(${rot}deg)`;
+  boardImg.style.transform = `translate(${FOOT_X - 100 * sizeK + offX()}px, ${yC - 45 * sizeK + offY()}px) rotate(${rot}deg) scaleX(${-fly.dir})`;
 }
 
 function boardHide() { boardImg.style.display = 'none'; }
@@ -1154,7 +1238,7 @@ function flyFrame(dt) {
     rot = f.dir * 6 * k;
     skew = -f.dir * 2 * k;
     sy = 1 + 0.05 * Math.sin(f.subT * 10);
-    boardShow(680 - 74 * k, 90 - f.dir * 10 * k);
+    boardShow(680 - 74 * k, f.dir * 10 * k);
     if (!f.texted) { f.texted = true; fxText('嗖——', FOOT_X, 300); }
     if (k >= 1) { f.sub = 'cruise'; f.subT = 0; }
   } else if (f.sub === 'cruise') {
@@ -1171,7 +1255,7 @@ function flyFrame(dt) {
     rot = f.dir * 4 + f.dir * slope * 30;
     skew = -f.dir * 2;
     ty = -2 * Math.abs(Math.sin(f.subT * 6));
-    boardShow(606, 90 - f.dir * 6 + slope * 57.3 * f.dir * 0.7);
+    boardShow(606, f.dir * 6 + slope * 57.3 * f.dir * 0.7);
     f.lineT -= dt;
     if (f.lineT <= 0) { fxSpeedLine(f.dir); f.lineT = 0.08; }
     if (turned) {
@@ -1189,10 +1273,12 @@ function flyFrame(dt) {
     f.py = ty2;
     rot = f.dir * 6 * (1 - k);
     skew = -f.dir * 2 * (1 - k);
-    boardShow(606 + 120 * k * k, 90 - f.dir * 10 * (1 - k));
+    boardShow(606 + 120 * k * k, f.dir * 10 * (1 - k));
     if (k >= 1) {
       boardHide();
       fxDust(FOOT_X, FOOT_Y, 3);
+      swapSprite(FORMS[form].front); // 落地换回当前形态立绘
+      facing = 1;
       enter('land', 0.16);
     }
   }
@@ -1444,10 +1530,103 @@ async function doGoHome() {
   const dir = homePos.x >= px ? 1 : -1;
   homeward = { tx: homePos.x, ty: homePos.y, px, py };
   logEvent('自主', '玩够了，走回常驻位置');
-  // 姐姐形态用侧面图走，Q版直接镜像走
+  // 姐姐形态翻牌换走路帧走回去，其它形态直接镜像走
   if (form === 'normal') { facing = -dir; enter('gohomein', 0.32); }
   else { facing = dir; enter('gohome'); }
   if (Math.random() < 0.6) say(pick(LINES.gohome), 1500);
+}
+
+// ---------- 避让：不挡输入区 / 不挡前台窗口 ----------
+// inputContext 由主进程提供；包成可替换的模块级变量，测试时可注入 mock
+let getInputContext = () => window.pet.inputContext();
+const EVADE_COOLDOWN = 4;   // 秒，避让后缓缓，别来回抖
+const DANGER_PAD_X = 40;    // 光标危险区横向外扩
+const DANGER_PAD_Y = 50;    // 光标危险区纵向外扩
+let evading = null;         // { tx, ty, px, py }，px/py 是渲染层估计的窗口位置
+let lastEvade = -EVADE_COOLDOWN;
+let evadeChecking = false;  // 异步重入保护：一次查询没完不叠下一次
+let softHits = 0;           // 软避让：连续相交 tick 计数
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+async function evadeTick() {
+  if (evadeChecking) return;
+  evadeChecking = true;
+  try { await evadeCheck(); } finally { evadeChecking = false; }
+}
+
+async function evadeCheck() {
+  const nowSec = performance.now() / 1000;
+  if (nowSec - lastEvade < EVADE_COOLDOWN) return;
+  if (state !== 'idle' && state !== 'walk') return; // 其它动作状态（敲窗/爬墙/睡觉/被拖拽等）不打扰
+  let ctx;
+  try { ctx = await getInputContext(); } catch { return; }
+  if (!ctx) return;
+  const [px, py] = await window.pet.getPos();
+  const pet = { x: px, y: py, w: winW(), h: winH() };
+  if (ctx.typing) {
+    softHits = 0;
+    // 危险区：光标矩形四向外扩；拿不到光标用前台窗口矩形
+    let danger = null;
+    if (ctx.caret) {
+      danger = {
+        x: ctx.caret.x - DANGER_PAD_X, y: ctx.caret.y - DANGER_PAD_Y,
+        w: ctx.caret.width + DANGER_PAD_X * 2, h: ctx.caret.height + DANGER_PAD_Y * 2,
+      };
+    } else if (ctx.active) {
+      danger = { x: ctx.active.x, y: ctx.active.y, w: ctx.active.w, h: ctx.active.h };
+    }
+    if (danger && rectsOverlap(pet, danger)) {
+      const target = await pickEvadeTarget(ctx, px);
+      if (target) doEvade(target, px, py);
+    }
+    return;
+  }
+  // 软避让：站着不动且一直压着前台窗口，连续 3 个 tick 就自己走开
+  if (state === 'idle' && ctx.active && rectsOverlap(pet, { x: ctx.active.x, y: ctx.active.y, w: ctx.active.w, h: ctx.active.h })) {
+    if (++softHits >= 3) {
+      softHits = 0;
+      lastEvade = nowSec;
+      const awayDir = px + winW() / 2 < ctx.active.x + ctx.active.w / 2 ? -1 : 1;
+      logEvent('自主', '一直挡着窗口，自己挪开');
+      doWalk(awayDir);
+    }
+  } else {
+    softHits = 0;
+  }
+}
+
+// 挑一个不挡事的目标点（返回窗口左上角 {x, y}，y 贴地板）
+async function pickEvadeTarget(ctx, px) {
+  const st = await window.pet.getStage();
+  const ty = st.floorY;
+  if (ctx.active) {
+    // 优先贴 active 左侧/右侧完整避开：两边都能放下时选近的，只一边能放用那一边
+    const leftX = ctx.active.x - winW() - 12;
+    const rightX = ctx.active.x + ctx.active.w + 12;
+    const leftOk = leftX >= st.minX;
+    const rightOk = rightX <= st.maxX;
+    if (leftOk && rightOk) return { x: Math.abs(px - leftX) <= Math.abs(px - rightX) ? leftX : rightX, y: ty };
+    if (leftOk) return { x: leftX, y: ty };
+    if (rightOk) return { x: rightX, y: ty };
+  }
+  // active 太大避不开（或没有 active）：去离 caret 中心 x 最远的一侧屏幕角落
+  const caretCx = ctx.caret ? ctx.caret.x + ctx.caret.width / 2 : px + winW() / 2;
+  const x = Math.abs(st.minX - caretCx) >= Math.abs(st.maxX - caretCx) ? st.minX : st.maxX;
+  return { x, y: ty };
+}
+
+function doEvade(target, px, py) {
+  lastEvade = performance.now() / 1000;
+  evading = { tx: target.x, ty: target.y, px, py };
+  const dir = target.x >= px ? 1 : -1;
+  logEvent('自主', '你在打字，让开输入区');
+  // 姐姐形态翻牌换走路帧走过去，其它形态直接镜像走
+  if (form === 'normal') { facing = -dir; enter('evadein', 0.32); }
+  else { facing = dir; enter('evade'); }
+  say(pick(LINES.evade), 1500);
 }
 
 // ---------- 日志（自主动作 / 交互 / 系统事件） ----------
@@ -1492,6 +1671,7 @@ function applyTouming() {
 // 动作对数值的影响（进入动作时结算一次）
 const EFFECTS = {
   walk: { jing: -3, mood: 1 },
+  walkfar: { jing: -6, mood: 2 },
   hop: { jing: -4, mood: 2 },
   spin: { jing: -3, mood: 2 },
   sway: { jing: -2, mood: 3 },
@@ -1532,7 +1712,7 @@ function applyEffect(id) {
 }
 
 const DISPATCH = {
-  walk: doWalk, hop: doHop, spin: doSpin, sway: doSway,
+  walk: doWalk, walkfar: doWalkFar, hop: doHop, spin: doSpin, sway: doSway,
   qbounce: doQBounce, qsway: doQSway, morph: doMorph,
   desk: doDesk, seal: doSeal, goledge: doGoLedge,
   dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive, mischief: doMischief, flutefly: doFluteFly, sleep: doSleep, wallbang: doWallBang, work: doWork,
@@ -1730,6 +1910,8 @@ setInterval(() => {
       maybeProactiveChat();
     }
   }
+  // 避让检查：打字中不挡输入区，平时不长期压着前台窗口
+  evadeTick().catch(() => {});
 }, 1000);
 
 // ---------- 惊吓检测：光标贴着 Kira 时晃鼠标 / 连按方向键 → 害怕地尖叫快跑 ----------
@@ -2115,7 +2297,10 @@ window.pet.onMenuAction((id) => {
 
 // ---------- 动画主循环 ----------
 const GRAVITY = 2600;
-const WALK_SPEED = 130; // px/s
+// 新素材地面速度 ≈9.7 素材px/帧 × 24fps × 显示缩放 ≈ 142 显示px/s：WALK_SPEED 取 140
+// 时播放节奏 ≈24fps 与视频一致；若速度远高于此（如旧值 280），切帧 48fps 远超
+// 80ms 交叉淡化设计节奏，相邻帧互相涂抹，视觉上只有一半帧在生效
+const WALK_SPEED = 140; // px/s
 let last = performance.now();
 
 function frame(now) {
@@ -2143,29 +2328,23 @@ function frame(now) {
       break;
     }
     case 'walkin': {
-      // 翻牌转成侧面图，然后开走
+      // 翻牌转成走路当前帧，然后开走
       const k = Math.min(stateT / stateDur, 1);
-      rotY = turnFrame(k, SIDE_SRC);
+      rotY = turnFrame(k, WALK_SRC[walkAnim.fi]);
       if (stateT >= stateDur) enter('walk', rand(1.6, 3));
       break;
     }
     case 'walk': {
-      if (form === 'normal') {
-        // 飘移：悬浮慢起伏 + 前倾，地面影子跟随，两个红灯笼一前一后
-        const h = 15 + 8 * Math.sin(stateT * 4.2);
-        ty = -h;
-        rot = walkDir * 5 + 2.5 * Math.sin(stateT * 2.1);
-        showFloatFx();
-        updateFloatFx(h, walkDir, t);
-      } else {
-        // Q版：走路颠簸 + 前倾
+      const mx = walkDir * WALK_SPEED * dt;
+      window.pet.moveBy(mx, 0);
+      if (!walkAnimAdvance(mx)) {
+        // 没有走路帧素材的形态：保持旧的走路颠簸 + 前倾
         const ph = stateT * 9;
         ty = -Math.abs(Math.sin(ph)) * 7;
         rot = Math.sin(ph) * 2.5 + walkDir * 3;
       }
-      window.pet.moveBy(walkDir * WALK_SPEED * dt, 0);
       if (stateT >= stateDur) {
-        // 姐姐形态翻牌转回正面，Q版直接回待机
+        // 姐姐形态翻牌转回正面，其它形态直接回待机
         if (form === 'normal') enter('walkout', 0.3);
         else { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
       }
@@ -2178,30 +2357,51 @@ function frame(now) {
       if (stateT >= stateDur) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
       break;
     }
-    case 'gohomein': {
-      // 翻牌转成侧面图，准备走回家
+    case 'walkfarin': {
+      // 翻牌转成走路当前帧，然后朝另一端开走
       const k = Math.min(stateT / stateDur, 1);
-      rotY = turnFrame(k, SIDE_SRC);
+      rotY = turnFrame(k, WALK_SRC[walkAnim.fi]);
+      if (stateT >= stateDur) enter('walkfar', 60);
+      break;
+    }
+    case 'walkfar': {
+      // 一直走到屏幕另一端（斜向不存在的纯水平位移），到边停
+      if (!farwalk) { enter('idle'); idleWait = nextIdleWait(2, 5); break; }
+      const step = WALK_SPEED * dt;
+      const dx = farwalk.tx - farwalk.px;
+      if (Math.abs(dx) <= step + 2) {
+        window.pet.moveBy(dx, 0);
+        walkAnimAdvance(dx);
+        farwalk = null;
+        // 姐姐形态翻牌转回正面，其它形态直接回待机
+        if (form === 'normal') enter('walkout', 0.3);
+        else { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
+      } else {
+        const mx = Math.sign(dx) * step;
+        window.pet.moveBy(mx, 0);
+        farwalk.px += mx;
+        if (!walkAnimAdvance(mx)) {
+          // 没有走路帧素材的形态：保持旧的走路颠簸 + 前倾
+          const ph = stateT * 9;
+          ty = -Math.abs(Math.sin(ph)) * 7;
+          rot = Math.sin(ph) * 2.5 + walkDir * 3;
+        }
+      }
+      if (stateT >= stateDur) { farwalk = null; facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); } // 走不到就算了
+      break;
+    }
+    case 'gohomein': {
+      // 翻牌转成走路当前帧，准备走回家
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, WALK_SRC[walkAnim.fi]);
       if (stateT >= stateDur) enter('gohome');
       break;
     }
     case 'gohome': {
-      // 朝常驻位置飘回去（斜线移动）
+      // 朝常驻位置走回去（斜线移动）
       const dx = homeward.tx - homeward.px, dy = homeward.ty - homeward.py;
       const dist = Math.hypot(dx, dy);
-      const step = 220 * dt;
-      const dir = Math.sign(dx) || 1;
-      if (form === 'normal') {
-        // 飘移：悬浮慢起伏 + 影子灯笼跟随
-        const h = 15 + 8 * Math.sin(stateT * 4.2);
-        ty = -h;
-        rot = dir * 5 + 2.5 * Math.sin(stateT * 2.1);
-        showFloatFx();
-        updateFloatFx(h, dir, t);
-      } else {
-        ty = -Math.abs(Math.sin(stateT * 9)) * 7;
-        rot = Math.sin(stateT * 9) * 2.5;
-      }
+      const step = 280 * dt;
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
         if (form === 'normal') enter('gohomeout', 0.3);
@@ -2210,12 +2410,54 @@ function frame(now) {
         const mx = dx / dist * step, my = dy / dist * step;
         window.pet.moveBy(mx, my);
         homeward.px += mx; homeward.py += my;
+        if (!walkAnimAdvance(Math.hypot(mx, my))) {
+          // 没有走路帧素材的形态：保持旧的走路颠簸
+          ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+          rot = Math.sin(stateT * 9) * 2.5;
+        }
       }
       if (stateT > 12) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); } // 走不到就算了
       break;
     }
     case 'gohomeout': {
       // 到家了，翻牌转回正面图
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, FORMS[form].front);
+      if (stateT >= stateDur) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
+      break;
+    }
+    case 'evadein': {
+      // 翻牌转成走路当前帧，准备去旁边让开
+      const k = Math.min(stateT / stateDur, 1);
+      rotY = turnFrame(k, WALK_SRC[walkAnim.fi]);
+      if (stateT >= stateDur) enter('evade');
+      break;
+    }
+    case 'evade': {
+      // 朝避让目标点走过去（斜线移动，同 gohome）
+      if (!evading) { enter('idle'); idleWait = nextIdleWait(2, 4); break; }
+      const dx = evading.tx - evading.px, dy = evading.ty - evading.py;
+      const dist = Math.hypot(dx, dy);
+      const step = 280 * dt;
+      if (dist <= step + 2) {
+        window.pet.moveBy(dx, dy);
+        if (form === 'normal') enter('evadeout', 0.3);
+        else { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
+      } else {
+        const mx = dx / dist * step, my = dy / dist * step;
+        window.pet.moveBy(mx, my);
+        evading.px += mx; evading.py += my;
+        if (!walkAnimAdvance(Math.hypot(mx, my))) {
+          // 没有走路帧素材的形态：保持旧的走路颠簸
+          ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+          rot = Math.sin(stateT * 9) * 2.5;
+        }
+      }
+      if (stateT > 12) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); } // 走不到就算了
+      break;
+    }
+    case 'evadeout': {
+      // 让开了，翻牌转回正面图
       const k = Math.min(stateT / stateDur, 1);
       rotY = turnFrame(k, FORMS[form].front);
       if (stateT >= stateDur) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 5); }
@@ -2474,13 +2716,13 @@ function frame(now) {
       break;
     }
     case 'goledge': {
-      // 朝窗台走（斜线移动），走路颠簸
+      // 朝窗台走（斜线移动）
       const dx = ledge.tx - ledge.px, dy = ledge.ty - ledge.py;
       const dist = Math.hypot(dx, dy);
       const step = 300 * dt;
-      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
-      rot = Math.sin(stateT * 9) * 2.5;
-      if (dx < -1) facing = -1; else if (dx > 1) facing = 1;
+      // 帧图朝左：姐姐形态按移动方向镜像，其它形态维持原来的装饰性镜像
+      if (dx < -1) facing = form === 'normal' ? 1 : -1;
+      else if (dx > 1) facing = form === 'normal' ? -1 : 1;
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
         ledge.px = ledge.tx; ledge.py = ledge.ty;
@@ -2490,20 +2732,29 @@ function frame(now) {
         const mx = dx / dist * step, my = dy / dist * step;
         window.pet.moveBy(mx, my);
         ledge.px += mx; ledge.py += my;
+        if (!walkAnimAdvance(Math.hypot(mx, my))) {
+          ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+          rot = Math.sin(stateT * 9) * 2.5;
+        }
       }
       if (stateT > 15) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); } // 走不到就算了
       break;
     }
     case 'onledge': {
-      // 沿窗台上沿来回踱步
-      let nx = ledge.px + ledge.dir * 55 * dt;
+      // 沿窗台上沿来回踱步（150px/s：踱步的悠闲感保留，又不至于卡成幻灯片）
+      let nx = ledge.px + ledge.dir * 150 * dt;
       if (nx < ledge.minX) { nx = ledge.minX; ledge.dir = 1; }
       if (nx > ledge.maxX) { nx = ledge.maxX; ledge.dir = -1; }
-      window.pet.moveBy(nx - ledge.px, 0);
+      const moved = nx - ledge.px;
+      window.pet.moveBy(moved, 0);
       ledge.px = nx;
-      facing = ledge.dir;
-      ty = -Math.abs(Math.sin(stateT * 8)) * 5;
-      rot = Math.sin(stateT * 8) * 2;
+      // 帧图朝左：姐姐形态按踱步方向镜像，其它形态维持原逻辑
+      facing = form === 'normal' ? -ledge.dir : ledge.dir;
+      if (!walkAnimAdvance(moved)) {
+        // 没有走路帧素材的形态：保持旧的踱步颠簸
+        ty = -Math.abs(Math.sin(stateT * 8)) * 5;
+        rot = Math.sin(stateT * 8) * 2;
+      }
       if (stateT >= stateDur) { facing = 1; ledge.vy = 0; enter('jumpdown'); }
       break;
     }
@@ -2539,13 +2790,12 @@ function frame(now) {
       break;
     }
     case 'climbgo': {
-      // 快速冲到墙边（斜线移动），赶路用冲刺速度
+      // 快速冲到墙边（斜线移动），赶路用冲刺速度，走路帧跟着位移快进
       const dx = climb.tx - climb.px, dy = climb.ty - climb.py;
       const dist = Math.hypot(dx, dy);
       const step = 1100 * dt;
-      ty = -Math.abs(Math.sin(stateT * 18)) * 9;
-      rot = Math.sin(stateT * 18) * 4;
-      if (dx < -1) facing = -1; else if (dx > 1) facing = 1;
+      // 帧图朝左：按移动方向镜像
+      if (dx < -1) facing = 1; else if (dx > 1) facing = -1;
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
         climb.px = climb.tx; climb.py = climb.ty;
@@ -2559,6 +2809,7 @@ function frame(now) {
         const mx = dx / dist * step, my = dy / dist * step;
         window.pet.moveBy(mx, my);
         climb.px += mx; climb.py += my;
+        walkAnimAdvance(Math.hypot(mx, my));
       }
       // 走不到就算了：1s 没挪近 8px 判定卡住了（看进展不看时间）
       climb.progT += dt;
@@ -2622,9 +2873,9 @@ function frame(now) {
       else if (climb.py <= climb.topPy) topOut(false);
       break;
     }
-    case 'wallgoin': { // 翻牌转侧面，准备去撞墙
+    case 'wallgoin': { // 翻牌转成走路当前帧，准备去撞墙
       const k = Math.min(stateT / stateDur, 1);
-      rotY = turnFrame(k, SIDE_SRC);
+      rotY = turnFrame(k, WALK_SRC[walkAnim.fi]);
       if (stateT >= stateDur) enter('wallgo');
       break;
     }
@@ -2633,17 +2884,20 @@ function frame(now) {
       const dx = wall.tx - wall.px, dy = wall.ty - wall.py;
       const dist = Math.hypot(dx, dy);
       const step = 280 * dt;
-      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
-      rot = Math.sin(stateT * 9) * 2.5;
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
         wall.px = wall.tx; wall.py = wall.ty;
         wall.phase = 'wind'; wall.phaseT = 0;
+        swapSprite(FORMS[form].front); // 撞墙不用走路帧，恢复立绘
         enter('wallbang');
       } else {
         const mx = dx / dist * step, my = dy / dist * step;
         window.pet.moveBy(mx, my);
         wall.px += mx; wall.py += my;
+        if (!walkAnimAdvance(Math.hypot(mx, my))) {
+          ty = -Math.abs(Math.sin(stateT * 9)) * 7;
+          rot = Math.sin(stateT * 9) * 2.5;
+        }
       }
       if (stateT > 12) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); }
       break;
@@ -2703,19 +2957,17 @@ function frame(now) {
       if (stateT >= stateDur) { doGoHome(); }
       break;
     }
-    case 'knockin': { // 翻牌转侧面，准备去敲门
+    case 'knockin': { // 翻牌转成走路当前帧，准备去敲门
       const k = Math.min(stateT / stateDur, 1);
-      rotY = turnFrame(k, SIDE_SRC);
+      rotY = turnFrame(k, WALK_SRC[walkAnim.fi]);
       if (stateT >= stateDur) enter('knockgo');
       break;
     }
     case 'knockgo': {
-      // 侧身朝窗口边沿飘过去（斜线移动）
+      // 朝窗口边沿走过去（斜线移动）
       const dx = knock.tx - knock.px, dy = knock.ty - knock.py;
       const dist = Math.hypot(dx, dy);
       const step = 280 * dt;
-      ty = -Math.abs(Math.sin(stateT * 9)) * 7;
-      rot = Math.sin(stateT * 9) * 2.5;
       if (dist <= step + 2) {
         window.pet.moveBy(dx, dy);
         knock.px = knock.tx; knock.py = knock.ty;
@@ -2728,6 +2980,7 @@ function frame(now) {
         const mx = dx / dist * step, my = dy / dist * step;
         window.pet.moveBy(mx, my);
         knock.px += mx; knock.py += my;
+        walkAnimAdvance(Math.hypot(mx, my));
       }
       if (stateT > 12) { facing = 1; enter('idle'); idleWait = nextIdleWait(2, 4); }
       break;
@@ -2985,6 +3238,7 @@ function frame(now) {
 
   sprite.style.transform =
     `translateX(-50%) translate(${tx}px, ${ty}px) rotate(${rot}deg) skewX(${skew}deg) perspective(700px) rotateY(${rotY}deg) scale(${sx * facing * curSize}, ${sy * curSize})`;
+  spriteX.style.transform = sprite.style.transform; // 淡化层与立绘同动
 
   // 气泡在独立窗口：每帧把头顶锚点（窗口局部坐标）报给主进程定位
   // 缩放 = 远近缩放 × 整体缩放，但有下限 0.8——人物变再小，字也得能看清

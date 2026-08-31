@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!-- 走路连续性测试页：stub window.pet，加载真实 renderer.js，外部 spec 驱动 doWalk 并逐帧截图 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #3a3f4a; user-select: none; }
+  #stage { position: absolute; inset: 0; }
+  #sprite { position: absolute; bottom: 0; left: 50%; height: 512px; transform-origin: 50% 100%; will-change: transform; pointer-events: none; }
+  #spriteX { position: absolute; bottom: 0; left: 50%; height: 512px; transform-origin: 50% 100%; will-change: transform, opacity; pointer-events: none; opacity: 0; transition: opacity 38ms linear; }
+  #fx { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); pointer-events: none; }
+  #statsPanel { display: none; }
+  #miniChat { display: none; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <img id="sprite" src="../assets/pet.png" data-cur="../assets/pet.png" draggable="false" alt="">
+    <img id="spriteX" src="../assets/pet.png" draggable="false" alt="">
+    <svg id="fx" width="340" height="620" viewBox="0 0 340 620"></svg>
+    <div id="statsPanel"></div>
+    <input id="miniChat">
+  </div>
+  <script>
+    // window.pet 桩：只覆盖渲染层启动/走路会触到的 API，其余一律安全的空实现
+    (() => {
+      let px = 800, py = 0;
+      const stage = { minX: 0, maxX: 4000, floorY: 0, workH: 800 };
+      const noop = () => {};
+      const stub = {
+        moveBy: (dx, dy) => { px = Math.max(stage.minX, Math.min(stage.maxX, px + dx)); py += dy; },
+        getPos: async () => [px, py],
+        getStage: async () => stage,
+        getPowerState: async () => false,
+        onPowerState: noop,
+        setMouseIgnore: noop,
+        bubbleSay: noop,
+        onBubbleDismissed: noop,
+        onBubbleHidden: noop,
+        peekStart: noop,
+        onPeekEnd: noop,
+        findLedge: async () => null,
+        activeWindow: async () => null,
+        getSettings: async () => new Proxy({}, { get: (t, k) => (String(k).startsWith('_') ? undefined : false) }), // 关掉全部自主动作，测试只手动 doWalk
+        onSettings: noop,
+        getStats: async () => ({}),
+        saveStats: noop,
+        getCursor: async () => [-9999, -9999],
+        inputContext: async () => null,
+        logAppend: noop,
+        decideAction: async () => null,
+        getChatConfig: async () => null,
+        chatProactive: async () => null,
+        chatSend: async () => null,
+        chatInject: noop,
+        onChatToken: noop,
+        onSwordEnd: noop,
+        onDriveEnd: noop,
+        onMischiefEnd: noop,
+        onArrowKey: noop,
+        dragStart: noop,
+        dragMove: noop,
+        dragEnd: noop,
+      };
+      window.pet = new Proxy(stub, { get: (t, k) => (k in t ? t[k] : (() => Promise.resolve(null))) });
+    })();
+  </script>
+  <script src="actions.js"></script>
+  <script src="phrases.js"></script>
+  <script src="renderer.js"></script>
+  <script>document.title = 'READY';</script>
+</body>
+</html>

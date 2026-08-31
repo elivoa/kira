@@ -4,6 +4,7 @@
 // off: true 默认关闭（设置页里显示为关，可手动再打开）
 const ACTIONS = {
   walk:    { name: '走一走',   forms: ['normal', 'chibi', 'back'], intrusive: false, w: 22, auto: true },
+  walkfar: { name: '走到另一边', forms: ['normal', 'chibi', 'back'], intrusive: false, w: 6,  auto: true },
   hop:     { name: '跳一下',   forms: ['normal', 'back'],    intrusive: false, w: 10, auto: true },
   spin:    { name: '转个圈',   forms: ['normal', 'chibi', 'back'], intrusive: false, w: 9,  auto: true },
   sway:    { name: '撒个娇',   forms: ['normal'],            intrusive: false, w: 10, auto: true },

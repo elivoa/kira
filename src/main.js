@@ -19,6 +19,8 @@ function winH() { return Math.round(BASE_H * sizeK()); }
 const WINDOWS_BIN = path.join(__dirname, '..', 'tools', 'windows');
 // 方向键全局监听（CGEventTap，tools/keys.swift 编译而来）；需要「输入监控」权限，没权限会自行退出
 const KEYS_BIN = path.join(__dirname, '..', 'tools', 'keys');
+// 读一次当前输入光标（AXUIElement，tools/caret.swift 编译而来）：一次性进程，stdout 一行 JSON
+const CARET_BIN = path.join(__dirname, '..', 'tools', 'caret');
 
 // 启动自检：这两个二进制是 gitignore 的本机编译产物，新机器上没有就现场编译（要 Xcode 命令行工具的 swiftc）
 function ensureTool(bin) {
@@ -40,6 +42,10 @@ let bubbleAnchor = null; // 人物窗口内局部坐标 {x, y, scale}，桌宠�
 let lastBubbleScale = 1;
 // 拖拽时窗口与鼠标的偏移
 let dragOffset = null;
+// 最近一次键盘输入时间（keys 子进程的 "key" 行更新），判断用户是否正在打字
+let lastTypeAt = 0;
+// 输入光标查询缓存：AX 查询有开销，400ms 内复用上次结果（null 也缓存）
+let caretCache = null;
 
 // ---------- 统一配置（~/.config/kira/config.json） ----------
 // Kimi key、动作开关/频率/点击穿透、笔记本窗口位置都存这一个文件
@@ -152,8 +158,8 @@ const CHAT_TOOLS = [
         properties: {
           action: {
             type: 'string',
-            enum: ['hop', 'spin', 'sway', 'walk', 'fly', 'sword', 'morph', 'desk', 'drive', 'goledge'],
-            description: 'hop跳一下 spin转个圈 sway撒娇 walk走一走 fly御剑飞行 sword化身成剑 morph变个身 desk来张桌子 drive去兜风 goledge去窗台玩',
+            enum: ['hop', 'spin', 'sway', 'walk', 'walkfar', 'fly', 'sword', 'morph', 'desk', 'drive', 'goledge'],
+            description: 'hop跳一下 spin转个圈 sway撒娇 walk走一走 walkfar走到另一边 fly御剑飞行 sword化身成剑 morph变个身 desk来张桌子 drive去兜风 goledge去窗台玩',
           },
         },
         required: ['action'],
@@ -380,7 +386,19 @@ function listWindows() {
   });
 }
 
-// 启动方向键监听：按一次方向键给桌宠窗口发一个 arrow-key 事件
+// 桌宠当前显示器上最前台的普通窗口（排除自己），active-window / input-context 共用
+async function activeWindow() {
+  const wins = await listWindows();
+  const area = petArea();
+  const w = wins.find((w) =>
+    w.pid !== process.pid && w.w >= 300 && w.h >= 200 &&
+    w.x < area.x + area.width && w.x + w.w > area.x && w.y < area.y + area.height && w.y + w.h > area.y);
+  if (!w) return null;
+  return { x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h), owner: w.owner };
+}
+
+// 启动全局键盘监听：方向键（"arrow" 行）给桌宠窗口发 arrow-key 事件；
+// 任何按键（"key" 行）只刷新 lastTypeAt，供 input-context 判断打字中
 // 没编译 tools/keys 或没有「输入监控」权限时静默降级（只检测晃鼠标），不影响其它功能
 function startKeyMonitor() {
   if (!fs.existsSync(KEYS_BIN)) return;
@@ -395,11 +413,31 @@ function startKeyMonitor() {
     buf += c;
     let i;
     while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim();
       buf = buf.slice(i + 1);
-      if (win) win.webContents.send('arrow-key');
+      if (line === 'key') lastTypeAt = Date.now();
+      else if (win) win.webContents.send('arrow-key'); // "arrow" 行（旧版 keys 只有这一种输出）
     }
   });
   if (child.stderr) child.stderr.on('data', (c) => console.log('[keys]', String(c).trim()));
+}
+
+// 读一次输入光标位置（屏幕坐标 {x,y,width,height}）；失败/超时/无输出都回 null，400ms 内走缓存
+function getCaret() {
+  if (caretCache && Date.now() - caretCache.t < 400) return Promise.resolve(caretCache.v);
+  return new Promise((resolve) => {
+    execFile(CARET_BIN, [], { timeout: 500 }, (err, stdout) => {
+      let v = null;
+      if (!err) {
+        try {
+          const c = JSON.parse(String(stdout).trim().split('\n')[0]);
+          if (typeof c.x === 'number' && typeof c.y === 'number') v = c;
+        } catch {}
+      }
+      caretCache = { t: Date.now(), v };
+      resolve(v);
+    });
+  });
 }
 
 function createWindow() {
@@ -628,7 +666,7 @@ function applyWindowSize() {
 }
 
 app.whenReady().then(async () => {
-  await Promise.all([ensureTool(WINDOWS_BIN), ensureTool(KEYS_BIN)]); // 首次启动先补齐编译产物
+  await Promise.all([ensureTool(WINDOWS_BIN), ensureTool(KEYS_BIN), ensureTool(CARET_BIN)]); // 首次启动先补齐编译产物
   createWindow();
   createOverlay();
   createBubble();
@@ -968,14 +1006,16 @@ app.whenReady().then(async () => {
   });
 
   // 当前活跃窗口（最前台的普通窗口）：撞墙模式拿它的左右边沿当墙；限桌宠当前屏
-  ipcMain.handle('active-window', async () => {
-    const wins = await listWindows();
-    const area = petArea();
-    const w = wins.find((w) =>
-      w.pid !== process.pid && w.w >= 300 && w.h >= 200 &&
-      w.x < area.x + area.width && w.x + w.w > area.x && w.y < area.y + area.height && w.y + w.h > area.y);
-    if (!w) return null;
-    return { x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h), owner: w.owner };
+  ipcMain.handle('active-window', () => activeWindow());
+
+  // 输入上下文：打字中标记 + 输入光标位置 + 活跃窗口，渲染层用来决定贴谁说话
+  ipcMain.handle('input-context', async () => {
+    const typing = Date.now() - lastTypeAt < 2500;
+    const [caret, active] = await Promise.all([
+      typing ? getCaret() : Promise.resolve(null), // 不在打字就不必查光标
+      activeWindow(),
+    ]);
+    return { typing, caret, active };
   });
 
   // 右键菜单：星盘径向菜单画在全屏覆盖层上，以点击时的鼠标位置为圆心锚定（不随人物移动）
