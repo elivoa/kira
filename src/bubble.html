@@ -13,10 +13,11 @@
     -webkit-user-select: none;
   }
   /* 气泡对话框：独立窗口，底边中点锚定人物头顶；缩放由 JS 控制，有下限保证可读 */
+  /* bottom 要装得下阴影：粘性光晕 6+22px × 最大缩放 1.5 ≈ 42px，不然被窗口底边切出直线 */
   #bubble {
     position: absolute;
     left: 50%;
-    bottom: 10px;
+    bottom: 44px;
     transform: translateX(-50%);
     transform-origin: 50% 100%;
     max-width: 480px;

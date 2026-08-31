@@ -495,7 +495,7 @@ function createOverlay() {
 
 // 气泡独立窗口：宽度不受人物窗口限制，底边中点锚定人物头顶
 const BUBBLE_W = 560;
-const BUBBLE_H = 220;
+const BUBBLE_H = 254; // 气泡 bottom 从 10 加到 44（装阴影），窗口同步加高 34 保住上方余量
 
 function createBubble() {
   bubbleWin = new BrowserWindow({
@@ -526,7 +526,7 @@ function placeBubble() {
   const b = win.getBounds();
   const a = petDisplay().workArea;
   const cx = b.x + bubbleAnchor.x;
-  const top = b.y + bubbleAnchor.y - 6;
+  const top = b.y + bubbleAnchor.y + 28; // 窗口底边下移 34（原 -6），抵消气泡 bottom 加大，尾巴尖屏幕位置不变
   const x = Math.round(Math.min(Math.max(cx - BUBBLE_W / 2, a.x), Math.max(a.x, a.x + a.width - BUBBLE_W)));
   const y = Math.round(Math.min(Math.max(top - BUBBLE_H, a.y), Math.max(a.y, a.y + a.height - BUBBLE_H)));
   const cur = bubbleWin.getBounds();
