@@ -595,6 +595,10 @@ function openNotebook(tab) {
     opts.height = Math.round(saved.height);
   }
   notebookWin = new BrowserWindow(opts);
+  // 桌宠/气泡/覆盖层窗口全是 skipTaskbar，Electron 会把整个 app 降成 UIElement 后台代理
+  //（没有 Dock 图标、Cmd+Tab 切不到、系统不当普通 app）。小本子打开期间亮出 Dock 图标，
+  // 让它成为一个能被系统识别的正常窗口；关掉后恢复纯托盘形态
+  if (process.platform === 'darwin') app.dock.show();
   notebookWin.loadFile(path.join(__dirname, 'notebook.html'));
   // 指定页签（如菜单「设置」直达配置页）：等加载完再发
   if (tab) notebookWin.webContents.once('did-finish-load', () => {
@@ -614,7 +618,10 @@ function openNotebook(tab) {
   notebookWin.on('move', debounceSaveBounds);
   notebookWin.on('resize', debounceSaveBounds);
   notebookWin.on('close', saveBounds); // 关闭前落定最终位置
-  notebookWin.on('closed', () => { notebookWin = null; });
+  notebookWin.on('closed', () => {
+    notebookWin = null;
+    if (process.platform === 'darwin') app.dock.hide();
+  });
 }
 
 // 桌宠当前所在的显示器：所有屏幕相关计算（夹取/活动范围/窗台/特效坐标）都以它为准，支持多显示器

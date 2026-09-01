@@ -2,6 +2,11 @@
 
 ## 2026-09-01
 
+### 小本子成为系统正常窗口
+
+- 打开小本子（Kira Note）时 `app.dock.show()`：app 从 UIElement 后台代理变回普通前台应用，有 Dock 图标、能 Cmd+Tab 切到、Mission Control/窗口列表可见；关掉后 `app.dock.hide()` 恢复纯托盘形态
+- 根因：桌宠/气泡/覆盖层三个窗口全是 `skipTaskbar: true`，Electron 会把整个 app 降为 UIElement（lsappinfo 实测验证），此前小本子即使开着也切不到
+
 ### 打包分发与自动更新
 
 - electron-builder 出 macOS 安装包（dmg + zip，Apple Silicon），`npm run dist` 本机出包、`npm run release` 直接发 GitHub Releases（地址在 `package.json` 的 `build.publish`）
