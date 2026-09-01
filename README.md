@@ -4,28 +4,34 @@
 
 ## 安装（普通用户）
 
-macOS（Apple Silicon）一条命令装好：
+发布仓库：https://github.com/elivoa/kira （内部 GitLab 仓库做开发，GitHub 只做发布镜像）
+
+macOS（仅 Apple Silicon，Intel Mac 暂不支持）一条命令装好：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/elivoa/kira/main/install.sh | bash
 ```
 
-装到 `/Applications` 并自动打开。装 `~/Applications`（免管理员密码、自动更新无感）：
+装到 `/Applications` 并自动打开。装 `~/Applications`（免管理员密码、自动更新无感，推荐）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/elivoa/kira/main/install.sh | bash -s -- --user
 ```
 
-装好之后**自动更新**：Kira 启动后会自己检查新版本，发现新版自动下载，气泡提示你重启换新版本；也可以随时在托盘菜单 / 小本子配置页手动「检查更新」。应用未做 Apple 签名，脚本已处理 Gatekeeper 隔离属性。
+装好之后**自动更新**：Kira 启动 30 秒后会自己检查新版本，发现新版自动后台下载（约 230MB），气泡提示你重启换新版本，确认后自动替换 .app 重启完成更新；也可以随时在托盘菜单 / 小本子配置页手动「检查更新」。应用未做 Apple 签名（签名证书 $99/年，故自写轻量更新器替代 electron-updater），脚本已处理 Gatekeeper 隔离属性。
 
 ## 发版（开发者）
 
 ```bash
-# 1. 升版本号（会改 package.json 并打 git tag）
+# 1. 升版本号（会改 package.json 并打 git tag；要求工作区干净，
+#    不干净时手动改 package.json / package-lock.json 的 version 再 commit）
 npm version patch   # 或 minor / major
 
 # 2. 打包并发布到 GitHub Releases（需要 gh auth login 或 export GH_TOKEN=...）
 npm run release
+
+# 3. push 代码到发布镜像（本地在 master，GitHub 侧是 main）
+git push github master:main
 ```
 
 `npm run release` 会先编译 tools 下的 swift 小工具，再用 electron-builder 打出 dmg + zip 并上传 release。更新检查地址与 `package.json` 的 `build.publish`（GitHub owner/repo）保持一致。只本机出包不发布用 `npm run dist`，产物在 `dist/`。
