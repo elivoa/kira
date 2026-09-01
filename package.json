@@ -1,6 +1,6 @@
 {
   "name": "summon-pet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "桌面宠物",
   "main": "src/main.js",
   "scripts": {
@@ -24,7 +24,9 @@
   "build": {
     "appId": "team.kira.pet",
     "productName": "Kira",
-    "directories": { "output": "dist" },
+    "directories": {
+      "output": "dist"
+    },
     "files": [
       "src/**/*",
       "assets/**/*",
@@ -38,7 +40,10 @@
     ],
     "mac": {
       "category": "public.app-category.entertainment",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "build/icon.png",
       "identity": null
     },
