@@ -36,7 +36,7 @@ contextBridge.exposeInMainWorld('pet', {
   peekDone: () => ipcRenderer.send('peek-done'),
   onPeek: (fn) => ipcRenderer.on('fx-peek', (_e, data) => fn(data)),
   onPeekEnd: (fn) => ipcRenderer.on('peek-end', () => fn()),
-  openNotebook: () => ipcRenderer.send('open-notebook'),
+  openNotebook: (tab) => ipcRenderer.send('open-notebook', tab),
   notebookSay: (text) => ipcRenderer.send('notebook-say', text),
   onNotebookSay: (fn) => ipcRenderer.on('notebook-say', (_e, text) => fn(text)),
   onNotebookTab: (fn) => ipcRenderer.on('notebook-tab', (_e, tab) => fn(tab)),
@@ -68,6 +68,15 @@ contextBridge.exposeInMainWorld('pet', {
   getFeishuConfig: () => ipcRenderer.invoke('get-feishu-config'),
   setFeishuConfig: (patch) => ipcRenderer.send('set-feishu-config', patch),
   getFeishuLog: () => ipcRenderer.invoke('get-feishu-log'),
+  feishuSend: (text) => ipcRenderer.invoke('feishu-send', text),
+  getFeishuHistory: () => ipcRenderer.invoke('feishu-history'),
+  feishuHandshake: () => ipcRenderer.invoke('feishu-handshake'),
+  // 归一化飞书消息（事件/轮询/小本子发言的回答）：{t, role, content, id, source}
+  onFeishuMsg: (fn) => {
+    const h = (_e, m) => fn(m);
+    ipcRenderer.on('feishu-msg', h);
+    return () => ipcRenderer.removeListener('feishu-msg', h);
+  },
   onFeishuStatus: (fn) => {
     const h = (_e, s) => fn(s);
     ipcRenderer.on('feishu-status', h);
@@ -78,6 +87,8 @@ contextBridge.exposeInMainWorld('pet', {
     ipcRenderer.on('feishu-log-new', h);
     return () => ipcRenderer.removeListener('feishu-log-new', h);
   },
+  // 飞书来消息（桌宠窗口冒泡提醒用）
+  onFeishuIncoming: (fn) => ipcRenderer.on('feishu-incoming', (_e, d) => fn(d)),
   decideAction: (ctx) => ipcRenderer.invoke('decide-action', ctx),
   onMenuAction: (fn) => ipcRenderer.on('menu-action', (_e, id) => fn(id)),
   onPowerState: (fn) => ipcRenderer.on('power-state', (_e, d) => fn(d)),

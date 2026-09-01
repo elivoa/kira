@@ -72,7 +72,12 @@ try { config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch {}
 function saveConfig() {
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    // 先写临时文件再改名：进程被强杀时不会留下 0 字节的半截配置（踩过，整个配置被截空）
+    const tmp = CONFIG_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
+    // 改名前把上一份好的配置留成 .bak，写坏/误清还有得救
+    try { if (fs.statSync(CONFIG_FILE).size > 2) fs.copyFileSync(CONFIG_FILE, CONFIG_FILE + '.bak'); } catch {}
+    fs.renameSync(tmp, CONFIG_FILE);
   } catch {}
 }
 
@@ -943,31 +948,66 @@ app.whenReady().then(async () => {
   });
 
   // 飞书机器人：配置存 config.feishu；消息经长连接进来后复用 kimiChat 回复，
-  // 所以飞书对话和小本子聊天是同一份历史/记忆
+  // 所以飞书对话和小本子聊天是同一份历史/记忆。
+  // 事件可能被同应用的其他后端消费，所以同步以主动拉为准：handshake 拿会话 id，
+  // listHistory 全量 + 30s 轮询增量；事件到了只当实时加速
+  const dispatchFeishuMsg = (m) => {
+    if (notebookWin) notebookWin.webContents.send('feishu-msg', m);
+    // 人物冒泡只提醒飞书侧来的回答；小本子自己发的回答就在眼前，不冒
+    if (m.role === 'assistant' && m.source !== 'notebook' && win) {
+      win.webContents.send('feishu-incoming', { text: m.content.slice(0, 60) });
+    }
+  };
   feishu.init({
     getConfig: () => config.feishu || {},
     kimiChat: (text) => kimiChat(text),
+    persistChatId: (id) => {
+      const f = config.feishu || (config.feishu = {});
+      f.lastChatId = id;
+      saveConfig();
+    },
     onStatus: (s) => { if (notebookWin) notebookWin.webContents.send('feishu-status', s); },
+    onMessage: dispatchFeishuMsg,
     onLog: (entry) => {
-      mainLog('交互', `飞书${entry.chatType === 'p2p' ? '私聊' : '群聊'}：${entry.userText.slice(0, 30)}`);
-      if (notebookWin) notebookWin.webContents.send('feishu-log-new', entry);
+      const tag = { p2p: '私聊', group: '群聊', notebook: '小本子' }[entry.chatType] || '飞书';
+      mainLog('交互', `飞书${tag}：${entry.userText.slice(0, 30)}`);
     },
   });
-  feishu.start();
+  // 飞书同步先整体隐藏（卡片正文 API 拿不到，体验不可用）：后台连接和轮询都不启动，
+  // 配置保留。恢复：FEISHU_LIVE 置 true，并恢复 notebook.html 两个飞书 cfg-sec 的
+  // display:none 和 notebook.js updateBotTab 的强制隐藏
+  const FEISHU_LIVE = false;
+  if (FEISHU_LIVE) {
+    feishu.start();
+    // 轮询兜底：事件被消费也能同步全部消息
+    setInterval(async () => {
+      try { (await feishu.pollNew()).forEach(dispatchFeishuMsg); } catch {}
+    }, 30000);
+  }
   ipcMain.handle('get-feishu-config', () => {
     const f = config.feishu || {};
-    return { appId: f.appId || '', appSecret: f.appSecret || '', enabled: !!f.enabled, ...feishu.getState() };
+    return { appId: f.appId || '', appSecret: f.appSecret || '', ownerEmail: f.ownerEmail || '', enabled: !!f.enabled, replyBot: !!f.replyBot, ...feishu.getState() };
   });
   ipcMain.on('set-feishu-config', (_e, patch) => {
     if (!patch || typeof patch !== 'object') return;
     const f = config.feishu || (config.feishu = {});
     if (typeof patch.appId === 'string') f.appId = patch.appId.trim();
     if (typeof patch.appSecret === 'string') f.appSecret = patch.appSecret.trim();
+    if (typeof patch.ownerEmail === 'string') f.ownerEmail = patch.ownerEmail.trim();
     if (typeof patch.enabled === 'boolean') f.enabled = patch.enabled;
+    if (typeof patch.replyBot === 'boolean') f.replyBot = patch.replyBot;
     saveConfig();
     feishu.restart();
   });
   ipcMain.handle('get-feishu-log', () => feishu.getState().mirror);
+  ipcMain.handle('feishu-handshake', () => feishu.handshake());
+  // 小本子机器人 tab：发言走飞书机器人通道回答（回答同步进飞书会话），历史直接拉飞书会话
+  ipcMain.handle('feishu-send', async (_e, text) => {
+    if (typeof text !== 'string' || !text.trim()) return { ok: false };
+    const reply = await feishu.handleNotebook(text.trim().slice(0, 2000));
+    return { ok: true, reply };
+  });
+  ipcMain.handle('feishu-history', () => feishu.listHistory());
 
   // 笔记本自绘边框：最小化和自定义拉伸
   ipcMain.on('nb-min', () => { if (notebookWin) notebookWin.minimize(); });
