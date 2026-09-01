@@ -715,10 +715,13 @@ function openMenu(x, y) {
     if (sel) activate(sel.item);
     else closeMenu();
   });
-  // 菜单展开时在空白处再点右键：换位置重新展开
+  // 菜单展开时右键：点在扇区环带上 = 确定（等价左键激活）；点在空白处 = 换位置重新展开
   backdrop.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    openMenu(e.clientX, e.clientY);
+    const st = menuState;
+    const sel = st && sectorAt(e.clientX - st.cx, e.clientY - st.cy);
+    if (sel) activate(sel.item);
+    else openMenu(e.clientX, e.clientY);
   });
   root.appendChild(backdrop);
 
@@ -816,6 +819,7 @@ function renderLevel(items, level) {
   st.hub.style.display = '';
   st.hub.textContent = level === 0 ? '✦' : '↩';
   st.hub.onclick = () => { if (level === 0) closeMenu(); else renderLevel(MENU_TREE, 0); };
+  st.hub.oncontextmenu = (e) => { e.preventDefault(); st.hub.onclick(); }; // 右键同样确定
   st.hub.onmouseenter = armMenuIdle;
 
   const r = items.length <= 4 ? 98 : items.length <= 6 ? 116 : 132;
@@ -845,6 +849,7 @@ function renderLevel(items, level) {
     it.dataset.dy = dy;
     it.innerHTML = `<button class="rm-btn"><span class="rm-icon" style="animation-delay:${i * 0.18}s">${item.icon}</span><span class="rm-label">${item.label}</span></button>`;
     it.querySelector('button').addEventListener('click', () => activate(item));
+    it.querySelector('button').addEventListener('contextmenu', (e) => { e.preventDefault(); activate(item); }); // 右键同样确定
     it.addEventListener('mouseenter', armMenuIdle); // 碰到就算有人碰
     st.root.appendChild(it);
     st.sectors.push({ el: it, angle: aDeg, item });
@@ -904,6 +909,7 @@ function renderListLevel(items, level) {
     it.dataset.dy = ccy - st.cy;
     it.innerHTML = `<button class="rm-pill"><span class="rm-icon">${item.icon}</span><span class="rm-label">${item.label}</span></button>`;
     it.querySelector('button').addEventListener('click', () => activate(item));
+    it.querySelector('button').addEventListener('contextmenu', (e) => { e.preventDefault(); activate(item); }); // 右键同样确定
     it.addEventListener('mouseenter', () => {
       armMenuIdle();
       st.root.querySelectorAll('.rm-item.pill.focus').forEach((e2) => e2.classList.remove('focus'));
