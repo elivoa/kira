@@ -305,11 +305,23 @@ function saySticky(text) {
   stickyActive = true;
   window.pet.bubbleSay({ text, sticky: true, ms: STICKY_SHOW_MS });
 }
+// 飞书来消息：粘性气泡展示她在飞书上的回答（不念对方说了什么），点泡泡翻开小本子的飞书 tab
+let feishuBubble = false;
+window.pet.onFeishuIncoming(({ text }) => {
+  feishuBubble = true;
+  saySticky(`飞书上回了：${text}`);
+});
 // 气泡在独立窗口里：点掉 = 看到了（记互动、这条搭话翻篇）；超时自己消失 = 没看到，稍后还会再拿出来
 window.pet.onBubbleDismissed(() => {
   stickyActive = false;
   lastInteract = performance.now() / 1000;
   pendingProactive = null;
+  if (feishuBubble) {
+    feishuBubble = false;
+    window.pet.openNotebook('bot');
+    logEvent('交互', '点开飞书消息提醒，回了小本子');
+    return;
+  }
   logEvent('交互', '看到了 Kira 的主动搭话');
 });
 window.pet.onBubbleHidden(() => {

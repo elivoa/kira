@@ -2,7 +2,47 @@
 
 一只住在你 Mac 桌面上的桌宠女仆 **Kira**（Electron 实现）。银白长卷星空裙，腰间挂着 K 卡牌法宝，有多种形态（姐姐 / Q版 / 法宝 / 睡觉 / 背对），会自己做动作、会跟你互动、还会用 Kimi 聊天。
 
-## 启动
+## 安装（普通用户）
+
+发布仓库：https://github.com/elivoa/kira （内部 GitLab 仓库做开发，GitHub 只做发布镜像）
+
+macOS（仅 Apple Silicon，Intel Mac 暂不支持）一条命令装好：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/elivoa/kira/main/install.sh | bash
+```
+
+装到 `/Applications` 并自动打开。装 `~/Applications`（免管理员密码、自动更新无感，推荐）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/elivoa/kira/main/install.sh | bash -s -- --user
+```
+
+装好之后**自动更新**：Kira 启动 30 秒后会自己检查新版本，发现新版自动后台下载（约 230MB），气泡提示你重启换新版本，确认后自动替换 .app 重启完成更新；也可以随时在托盘菜单 / 小本子配置页手动「检查更新」。应用未做 Apple 签名（签名证书 $99/年，故自写轻量更新器替代 electron-updater），脚本已处理 Gatekeeper 隔离属性。
+
+## 发版（开发者）
+
+```bash
+# 1. 升版本号（会改 package.json 并打 git tag；要求工作区干净，
+#    不干净时手动改 package.json / package-lock.json 的 version 再 commit）
+npm version patch   # 或 minor / major
+
+# 2. 打包并发布到 GitHub Releases（需要 gh auth login 或 export GH_TOKEN=...）
+npm run release
+
+# 3. push 代码到发布镜像（本地在 master，GitHub 侧是 main）
+git push github master:main
+```
+
+`npm run release` 会先编译 tools 下的 swift 小工具，再用 electron-builder 打出 dmg + zip 并上传 release。更新检查地址与 `package.json` 的 `build.publish`（GitHub owner/repo）保持一致。只本机出包不发布用 `npm run dist`，产物在 `dist/`。
+
+注意：electron-builder 上传后建的是**草稿** release，需要再发布一下用户才能看到、自动更新才能查到：
+
+```bash
+gh release edit v<版本号> --repo elivoa/kira --draft=false
+```
+
+## 启动（开发模式）
 
 ```bash
 # 1. 安装依赖

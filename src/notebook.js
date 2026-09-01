@@ -29,13 +29,14 @@ document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
     activeTab = btn.dataset.tab;
     document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
-    for (const key of ['chat', 'history', 'mr', 'log', 'config']) {
+    for (const key of ['chat', 'history', 'mr', 'bot', 'log', 'config']) {
       document.getElementById(`page-${key}`).classList.toggle('hidden', key !== activeTab);
     }
     inputrow.classList.toggle('hidden', activeTab === 'log' || activeTab === 'config' || activeTab === 'history');
     if (activeTab === 'log') loadLogs();
-    if (activeTab === 'config') loadChatConfig();
+    if (activeTab === 'config') { loadChatConfig(); loadFeishuConfig(); }
     if (activeTab === 'history') loadHistoryTab();
+    if (activeTab === 'bot') loadBotTab();
   });
 });
 
@@ -124,50 +125,67 @@ function submit(text) {
   } else if (activeTab === 'chat') {
     addMsg(chatMsgs, 'me', text);
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `和小本子聊天：${text.slice(0, 30)}` });
-    // 异步接 Kimi：token 经 chat-token 事件流式渲染；失败或没配 key 回退本地规则
-    const typing = addMsg(chatMsgs, 'Kira', '正在输入…');
-    typing.classList.add('typing'); // 等待期呼吸点动画，首个 token 到达即摘掉
-    const chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    let session = null;
-    const pinScroll = () => { chatMsgs.scrollTop = chatMsgs.scrollHeight; };
-    const offToken = window.pet.onChatToken(({ id, delta }) => {
-      if (id !== chatId) return;
+    askKira(chatMsgs, text);
+  } else if (activeTab === 'bot') {
+    addMsg(botMsgs, 'me', text);
+    window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子飞书 tab 发言：${text.slice(0, 30)}` });
+    // 走飞书机器人通道回答（回答同步进飞书会话），回答经 onFeishuLog 推回填进等待气泡
+    const typing = addMsg(botMsgs, 'Kira', '正在输入…');
+    typing.classList.add('typing');
+    botMsgs.scrollTop = botMsgs.scrollHeight;
+    window.pet.feishuSend(text).then((r) => {
+      if (r && r.ok) return;
+      typing.classList.remove('typing');
+      typing.innerHTML = '';
+      window.MarkdownStream.render(typing, '呜，没发出去…');
+    });
+  }
+}
+
+// 问 Kira 并流式渲染到指定消息列表：token 经 chat-token 事件推回；失败或没配 key 回退本地规则
+function askKira(list, text) {
+  const typing = addMsg(list, 'Kira', '正在输入…');
+  typing.classList.add('typing'); // 等待期呼吸点动画，首个 token 到达即摘掉
+  const chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let session = null;
+  const pinScroll = () => { list.scrollTop = list.scrollHeight; };
+  const offToken = window.pet.onChatToken(({ id, delta }) => {
+    if (id !== chatId) return;
+    if (!session) {
+      typing.classList.remove('typing');
+      typing.innerHTML = '';
+      session = window.MarkdownStream.create(typing, pinScroll);
+    }
+    session.append(delta);
+  });
+  const fallback = () => {
+    // 中途出错保留已流出的部分；没流出任何内容则回退本地规则
+    typing.classList.remove('typing');
+    if (session) session.finish();
+    else {
+      typing.innerHTML = '';
+      window.MarkdownStream.render(typing, chatAnswer(text));
+    }
+    pinScroll();
+  };
+  window.pet.chatSend(text, chatId).then((r) => {
+    offToken();
+    typing.classList.remove('typing');
+    if (r.ok && r.text != null) {
       if (!session) {
-        typing.classList.remove('typing');
         typing.innerHTML = '';
         session = window.MarkdownStream.create(typing, pinScroll);
       }
-      session.append(delta);
-    });
-    const fallback = () => {
-      // 中途出错保留已流出的部分；没流出任何内容则回退本地规则
-      typing.classList.remove('typing');
-      if (session) session.finish();
-      else {
-        typing.innerHTML = '';
-        window.MarkdownStream.render(typing, chatAnswer(text));
-      }
+      session.finish(r.text); // 以最终全文校准一次
+      window.pet.notebookSay('回你啦');
       pinScroll();
-    };
-    window.pet.chatSend(text, chatId).then((r) => {
-      offToken();
-      typing.classList.remove('typing');
-      if (r.ok && r.text != null) {
-        if (!session) {
-          typing.innerHTML = '';
-          session = window.MarkdownStream.create(typing, pinScroll);
-        }
-        session.finish(r.text); // 以最终全文校准一次
-        window.pet.notebookSay('回你啦');
-        pinScroll();
-      } else {
-        fallback();
-      }
-    }).catch(() => {
-      offToken();
+    } else {
       fallback();
-    });
-  }
+    }
+  }).catch(() => {
+    offToken();
+    fallback();
+  });
 }
 
 document.getElementById('send').addEventListener('click', () => submit(input.value));
@@ -422,6 +440,13 @@ document.getElementById('clearKey').addEventListener('click', () => {
 
 loadChatConfig(); // 打开本子就备好状态，不用等切页签
 
+// ---------- 配置页签（版本 / 检查更新） ----------
+window.pet.getVersion().then((v) => { document.getElementById('verText').textContent = `v${v}`; });
+document.getElementById('checkUpdate').addEventListener('click', () => {
+  window.pet.checkUpdate();
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '手动检查更新' });
+});
+
 // ---------- 配置页签（动作设置，从原设置窗口搬入） ----------
 // 数据走 getSettings/setActions，主进程统一持久化到 ~/.config/kira/config.json
 let actionSettings = {};
@@ -614,6 +639,155 @@ window.pet.getSettings().then((s) => {
   actionSettings = s || {};
   renderActions();
 });
+
+// ---------- 飞书：配置在「配置」页，连上后书脊多出以机器人命名的 tab ----------
+const fsAppId = document.getElementById('fsAppId');
+const fsAppSecret = document.getElementById('fsAppSecret');
+const fsOwnerEmail = document.getElementById('fsOwnerEmail');
+const fsEnabled = document.getElementById('fsEnabled');
+const fsReplyBot = document.getElementById('fsReplyBot');
+const fsStatus = document.getElementById('fsStatus');
+const fsChatStatus = document.getElementById('fsChatStatus');
+const botTab = document.getElementById('botTab');
+const botTabName = document.getElementById('botTabName');
+const botMsgs = document.getElementById('botMsgs');
+let feishuState = { status: 'off', error: '', botName: '' };
+let feishuConfigured = false;
+const renderedIds = new Set(); // 已上屏的飞书消息 id，轮询/事件/本地三通道防重
+
+const FS_STATUS_TEXT = { off: '未启用（按上方指引配置，打开开关）', connecting: '连接中…', online: '在线，私聊她或在群里 @她 试试', error: '连接出错，检查配置和上方指引的第 2~4 步' };
+
+// 飞书功能先隐藏：tab 永不显示（恢复见 main.js FEISHU_LIVE）
+function updateBotTab() {
+  botTab.classList.add('hidden');
+  if (activeTab === 'bot') document.querySelector('.tab[data-tab="chat"]').click();
+}
+
+function renderFsStatus() {
+  const online = feishuState.status === 'online';
+  fsStatus.classList.toggle('ok', online);
+  fsStatus.textContent = FS_STATUS_TEXT[feishuState.status] + (feishuState.error ? `：${feishuState.error}` : '');
+}
+
+function renderFsChatStatus(hasChat) {
+  fsChatStatus.classList.toggle('ok', !!hasChat);
+  fsChatStatus.textContent = hasChat ? '私聊会话已连接，飞书里的消息会全量同步进来' : '';
+}
+
+// 配置页：回显凭证/开关/状态；书脊 tab 的显隐和命名也在这统一刷
+function loadFeishuConfig() {
+  window.pet.getFeishuConfig().then((c) => {
+    if (document.activeElement !== fsAppId) fsAppId.value = c.appId || '';
+    if (document.activeElement !== fsAppSecret) fsAppSecret.value = c.appSecret || '';
+    if (document.activeElement !== fsOwnerEmail) fsOwnerEmail.value = c.ownerEmail || '';
+    fsEnabled.checked = !!c.enabled;
+    fsReplyBot.checked = !!c.replyBot;
+    feishuConfigured = !!(c.enabled && c.appId && c.appSecret);
+    feishuState = { status: c.status, error: c.error, botName: c.botName || '' };
+    renderFsStatus();
+    renderFsChatStatus(c.hasChat);
+    updateBotTab();
+  });
+}
+
+// 机器人 tab：历史直接拉飞书会话里的真实消息（展示完全 follow 飞书侧），
+// 拉不到时主进程会退回内存镜像
+function loadBotTab() {
+  window.pet.getFeishuHistory().then((list) => {
+    botMsgs.innerHTML = '';
+    renderedIds.clear();
+    if (!list.length) {
+      const d = document.createElement('div');
+      d.className = 'empty';
+      d.textContent = '还没有同步到消息；去配置页点「连接会话」，之后飞书里的对话都会出现在这里';
+      botMsgs.appendChild(d);
+      return;
+    }
+    for (const m of list) {
+      if (m.id) renderedIds.add(m.id);
+      addMsg(botMsgs, m.role === 'user' ? 'me' : 'Kira', m.content);
+    }
+    botMsgs.scrollTop = botMsgs.scrollHeight;
+  });
+}
+
+document.getElementById('fsSave').addEventListener('click', () => {
+  window.pet.setFeishuConfig({
+    appId: fsAppId.value.trim(),
+    appSecret: fsAppSecret.value.trim(),
+    ownerEmail: fsOwnerEmail.value.trim(),
+    enabled: fsEnabled.checked,
+    replyBot: fsReplyBot.checked,
+  });
+  loadFeishuConfig();
+  window.pet.notebookSay('飞书配置记好啦');
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '更新了飞书机器人配置' });
+});
+
+// 连接会话：机器人按邮箱给主人发一条握手消息，从返回里拿私聊 chat_id
+document.getElementById('fsHandshake').addEventListener('click', async () => {
+  fsChatStatus.classList.remove('ok');
+  fsChatStatus.textContent = '握手中…（机器人会在飞书里给你发一条消息）';
+  const r = await window.pet.feishuHandshake();
+  renderFsChatStatus(r && r.ok);
+  if (r && r.ok) loadBotTab();
+  else fsChatStatus.textContent = `连接失败：${(r && r.error) || '未知原因'}`;
+});
+
+document.getElementById('fsClear').addEventListener('click', () => {
+  window.pet.setFeishuConfig({ appId: '', appSecret: '', ownerEmail: '', enabled: false, replyBot: false });
+  fsAppId.value = '';
+  fsAppSecret.value = '';
+  fsOwnerEmail.value = '';
+  fsEnabled.checked = false;
+  fsReplyBot.checked = false;
+  loadFeishuConfig();
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '清除了飞书机器人配置' });
+});
+
+fsEnabled.addEventListener('change', () => {
+  window.pet.setFeishuConfig({ enabled: fsEnabled.checked });
+  loadFeishuConfig();
+});
+
+fsReplyBot.addEventListener('change', () => {
+  window.pet.setFeishuConfig({ replyBot: fsReplyBot.checked });
+  loadFeishuConfig();
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: fsReplyBot.checked ? '打开了接管飞书回复' : '关闭了接管飞书回复（只同步）' });
+});
+
+// 状态变化：刷状态行和书脊 tab（拿到机器人名字后 tab 会改名）
+window.pet.onFeishuStatus((s) => {
+  feishuState = s;
+  renderFsStatus();
+  updateBotTab();
+});
+
+// 归一化飞书消息（事件/轮询/小本子回答）：按 id 防重，时间序追加
+window.pet.onFeishuMsg((m) => {
+  if (activeTab !== 'bot') return;
+  if (m.id && renderedIds.has(m.id)) return;
+  if (m.id) renderedIds.add(m.id);
+  if (botMsgs.querySelector('.empty')) botMsgs.innerHTML = '';
+  if (m.role === 'user') {
+    addMsg(botMsgs, 'me', m.content);
+    return;
+  }
+  if (m.source === 'notebook') {
+    // 小本子发言的回答：问题已经显示过了，把回答填进等待气泡
+    const typing = botMsgs.querySelector('.bubble.typing');
+    if (typing) {
+      typing.classList.remove('typing');
+      typing.innerHTML = '';
+      window.MarkdownStream.render(typing, m.content);
+      botMsgs.scrollTop = botMsgs.scrollHeight;
+      return;
+    }
+  }
+  addMsg(botMsgs, 'Kira', m.content);
+});
+
+loadFeishuConfig(); // 打开本子就备好 tab 显隐/命名，不用等切页签
 
 // ---------- 开场白：有历史就渲染历史，没有就打招呼 ----------
 window.pet.chatHistory().then((history) => {

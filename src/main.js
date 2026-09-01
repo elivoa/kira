@@ -1,6 +1,8 @@
 // 桌宠主进程：透明无边框置顶窗口 + 窗口移动/菜单 IPC
 const { app, BrowserWindow, ipcMain, screen, powerMonitor, dialog, Tray, Menu, nativeImage } = require('electron');
 const { execFile } = require('child_process');
+const updater = require('./updater');
+const feishu = require('./feishu');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
@@ -19,22 +21,31 @@ function sizeK() { return settings._size || 1; }
 function winW() { return Math.round(BASE_W * sizeK()); }
 function winH() { return Math.round(BASE_H * sizeK()); }
 
+// tools 二进制位置：打包后内置在 app.asar.unpacked（只读），缺失时编译到 userData/tools
+const TOOLS_SRC_DIR = path.join(__dirname, '..', 'tools');
+const TOOLS_DIR = app.isPackaged ? path.join(process.resourcesPath, 'app.asar.unpacked', 'tools') : TOOLS_SRC_DIR;
+const TOOLS_BUILD_DIR = app.isPackaged ? path.join(app.getPath('userData'), 'tools') : TOOLS_SRC_DIR;
 // 枚举屏幕可见窗口的工具（CGWindowList，tools/windows.swift 编译而来）
-const WINDOWS_BIN = path.join(__dirname, '..', 'tools', 'windows');
+let WINDOWS_BIN = path.join(TOOLS_DIR, 'windows');
 // 方向键全局监听（CGEventTap，tools/keys.swift 编译而来）；需要「输入监控」权限，没权限会自行退出
-const KEYS_BIN = path.join(__dirname, '..', 'tools', 'keys');
+let KEYS_BIN = path.join(TOOLS_DIR, 'keys');
 // 读一次当前输入光标（AXUIElement，tools/caret.swift 编译而来）：一次性进程，stdout 一行 JSON
-const CARET_BIN = path.join(__dirname, '..', 'tools', 'caret');
+let CARET_BIN = path.join(TOOLS_DIR, 'caret');
 
-// 启动自检：这两个二进制是 gitignore 的本机编译产物，新机器上没有就现场编译（要 Xcode 命令行工具的 swiftc）
-function ensureTool(bin) {
+// 启动自检：这几个二进制是 gitignore 的本机编译产物，新机器上没有就现场编译（要 Xcode 命令行工具的 swiftc）
+// 返回实际可用的二进制路径（内置的优先，否则是 TOOLS_BUILD_DIR 下的编译产物）
+function ensureTool(name) {
   return new Promise((resolve) => {
-    if (fs.existsSync(bin)) return resolve();
-    const src = bin + '.swift';
-    execFile('swiftc', ['-O', src, '-o', bin], { timeout: 180000 }, (err) => {
-      if (err) mainLog('系统', `编译 ${path.basename(bin)} 失败，相关功能不可用（手动跑：swiftc -O tools/${path.basename(src)} -o tools/${path.basename(bin)}）`);
-      else mainLog('系统', `首次启动，自动编译了 tools/${path.basename(bin)}`);
-      resolve();
+    const bundled = path.join(TOOLS_DIR, name);
+    if (fs.existsSync(bundled)) return resolve(bundled);
+    const out = path.join(TOOLS_BUILD_DIR, name);
+    if (fs.existsSync(out)) return resolve(out);
+    fs.mkdirSync(TOOLS_BUILD_DIR, { recursive: true });
+    const src = path.join(TOOLS_SRC_DIR, name + '.swift');
+    execFile('swiftc', ['-O', src, '-o', out], { timeout: 180000 }, (err) => {
+      if (err) mainLog('系统', `编译 ${name} 失败，相关功能不可用（手动跑：swiftc -O tools/${name}.swift -o tools/${name}）`);
+      else mainLog('系统', `首次启动，自动编译了 tools/${name}`);
+      resolve(err ? bundled : out);
     });
   });
 }
@@ -61,7 +72,12 @@ try { config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch {}
 function saveConfig() {
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    // 先写临时文件再改名：进程被强杀时不会留下 0 字节的半截配置（踩过，整个配置被截空）
+    const tmp = CONFIG_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
+    // 改名前把上一份好的配置留成 .bak，写坏/误清还有得救
+    try { if (fs.statSync(CONFIG_FILE).size > 2) fs.copyFileSync(CONFIG_FILE, CONFIG_FILE + '.bak'); } catch {}
+    fs.renameSync(tmp, CONFIG_FILE);
   } catch {}
 }
 
@@ -670,7 +686,7 @@ function applyWindowSize() {
 }
 
 app.whenReady().then(async () => {
-  await Promise.all([ensureTool(WINDOWS_BIN), ensureTool(KEYS_BIN), ensureTool(CARET_BIN)]); // 首次启动先补齐编译产物
+  [WINDOWS_BIN, KEYS_BIN, CARET_BIN] = await Promise.all([ensureTool('windows'), ensureTool('keys'), ensureTool('caret')]); // 首次启动先补齐编译产物
   createWindow();
   createOverlay();
   createBubble();
@@ -693,12 +709,30 @@ app.whenReady().then(async () => {
   // 菜单栏托盘图标：快速打开 Kira Note / 聊天，或退出
   const tray = new Tray(nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray.png')));
   tray.setToolTip('Kira');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '打开 Kira Note', click: () => openNotebook() },
-    { label: '实时聊天', click: () => openNotebook('chat') },
-    { type: 'separator' },
-    { label: '退出', click: () => app.quit() },
-  ]));
+  const rebuildTray = (upState) => {
+    const items = [
+      { label: `Kira v${app.getVersion()}`, enabled: false },
+      { label: '打开 Kira Note', click: () => openNotebook() },
+      { label: '实时聊天', click: () => openNotebook('chat') },
+      { type: 'separator' },
+    ];
+    if (upState && upState.phase === 'ready') {
+      items.push({ label: `重启更新到 v${upState.version}`, click: () => updater.applyUpdate() });
+    } else {
+      items.push({ label: '检查更新…', click: () => updater.checkForUpdates(true) });
+    }
+    items.push({ type: 'separator' }, { label: '退出', click: () => app.quit() });
+    tray.setContextMenu(Menu.buildFromTemplate(items));
+  };
+  rebuildTray(null);
+  // 自动更新：启动 30s 后静默检查一次；发现新版会自动下载，完了气泡+弹窗问要不要重启
+  updater.init({
+    log: mainLog,
+    say: (t) => { if (win) win.webContents.send('notebook-say', t); },
+    onState: rebuildTray,
+  });
+  setTimeout(() => updater.checkForUpdates(false), 30000);
+  ipcMain.handle('check-update', () => updater.checkForUpdates(true));
 
   // 熄屏/锁屏/休眠时通知桌宠暂停自主动作，唤醒恢复
   let screenAsleep = false;
@@ -913,6 +947,68 @@ app.whenReady().then(async () => {
     saveConfig();
   });
 
+  // 飞书机器人：配置存 config.feishu；消息经长连接进来后复用 kimiChat 回复，
+  // 所以飞书对话和小本子聊天是同一份历史/记忆。
+  // 事件可能被同应用的其他后端消费，所以同步以主动拉为准：handshake 拿会话 id，
+  // listHistory 全量 + 30s 轮询增量；事件到了只当实时加速
+  const dispatchFeishuMsg = (m) => {
+    if (notebookWin) notebookWin.webContents.send('feishu-msg', m);
+    // 人物冒泡只提醒飞书侧来的回答；小本子自己发的回答就在眼前，不冒
+    if (m.role === 'assistant' && m.source !== 'notebook' && win) {
+      win.webContents.send('feishu-incoming', { text: m.content.slice(0, 60) });
+    }
+  };
+  feishu.init({
+    getConfig: () => config.feishu || {},
+    kimiChat: (text) => kimiChat(text),
+    persistChatId: (id) => {
+      const f = config.feishu || (config.feishu = {});
+      f.lastChatId = id;
+      saveConfig();
+    },
+    onStatus: (s) => { if (notebookWin) notebookWin.webContents.send('feishu-status', s); },
+    onMessage: dispatchFeishuMsg,
+    onLog: (entry) => {
+      const tag = { p2p: '私聊', group: '群聊', notebook: '小本子' }[entry.chatType] || '飞书';
+      mainLog('交互', `飞书${tag}：${entry.userText.slice(0, 30)}`);
+    },
+  });
+  // 飞书同步先整体隐藏（卡片正文 API 拿不到，体验不可用）：后台连接和轮询都不启动，
+  // 配置保留。恢复：FEISHU_LIVE 置 true，并恢复 notebook.html 两个飞书 cfg-sec 的
+  // display:none 和 notebook.js updateBotTab 的强制隐藏
+  const FEISHU_LIVE = false;
+  if (FEISHU_LIVE) {
+    feishu.start();
+    // 轮询兜底：事件被消费也能同步全部消息
+    setInterval(async () => {
+      try { (await feishu.pollNew()).forEach(dispatchFeishuMsg); } catch {}
+    }, 30000);
+  }
+  ipcMain.handle('get-feishu-config', () => {
+    const f = config.feishu || {};
+    return { appId: f.appId || '', appSecret: f.appSecret || '', ownerEmail: f.ownerEmail || '', enabled: !!f.enabled, replyBot: !!f.replyBot, ...feishu.getState() };
+  });
+  ipcMain.on('set-feishu-config', (_e, patch) => {
+    if (!patch || typeof patch !== 'object') return;
+    const f = config.feishu || (config.feishu = {});
+    if (typeof patch.appId === 'string') f.appId = patch.appId.trim();
+    if (typeof patch.appSecret === 'string') f.appSecret = patch.appSecret.trim();
+    if (typeof patch.ownerEmail === 'string') f.ownerEmail = patch.ownerEmail.trim();
+    if (typeof patch.enabled === 'boolean') f.enabled = patch.enabled;
+    if (typeof patch.replyBot === 'boolean') f.replyBot = patch.replyBot;
+    saveConfig();
+    feishu.restart();
+  });
+  ipcMain.handle('get-feishu-log', () => feishu.getState().mirror);
+  ipcMain.handle('feishu-handshake', () => feishu.handshake());
+  // 小本子机器人 tab：发言走飞书机器人通道回答（回答同步进飞书会话），历史直接拉飞书会话
+  ipcMain.handle('feishu-send', async (_e, text) => {
+    if (typeof text !== 'string' || !text.trim()) return { ok: false };
+    const reply = await feishu.handleNotebook(text.trim().slice(0, 2000));
+    return { ok: true, reply };
+  });
+  ipcMain.handle('feishu-history', () => feishu.listHistory());
+
   // 笔记本自绘边框：最小化和自定义拉伸
   ipcMain.on('nb-min', () => { if (notebookWin) notebookWin.minimize(); });
   let nbResize = null;
@@ -964,6 +1060,7 @@ app.whenReady().then(async () => {
 
   // 动作开关设置
   ipcMain.handle('get-settings', () => settings);
+  ipcMain.handle('get-version', () => app.getVersion());
   ipcMain.on('set-actions', (_e, patch) => {
     Object.assign(settings, patch);
     saveConfig();
