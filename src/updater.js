@@ -144,6 +144,8 @@ async function applyUpdate() {
       'else',
       `  osascript -e 'do shell script "rm -rf \\"${target}.old\\" && mv \\"${target}\\" \\"${target}.old\\" && cp -R \\"${newApp}\\" \\"${target}\\" && xattr -dr com.apple.quarantine \\"${target}\\"" with administrator privileges'`,
       'fi',
+      // 替换成功后清掉旧版备份（失败了留着 .old 还能手动回滚，所以只在 cp 成功时清）
+      `[ -d "${target}" ] && rm -rf "${target}.old"`,
       `open "${target}"`,
     ].join('\n');
     const scriptPath = path.join(extractDir, 'apply.sh');

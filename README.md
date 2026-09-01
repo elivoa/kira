@@ -30,6 +30,12 @@ npm run release
 
 `npm run release` 会先编译 tools 下的 swift 小工具，再用 electron-builder 打出 dmg + zip 并上传 release。更新检查地址与 `package.json` 的 `build.publish`（GitHub owner/repo）保持一致。只本机出包不发布用 `npm run dist`，产物在 `dist/`。
 
+注意：electron-builder 上传后建的是**草稿** release，需要再发布一下用户才能看到、自动更新才能查到：
+
+```bash
+gh release edit v<版本号> --repo elivoa/kira --draft=false
+```
+
 ## 启动（开发模式）
 
 ```bash
