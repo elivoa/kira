@@ -46,6 +46,12 @@ contextBridge.exposeInMainWorld('pet', {
   mischiefDone: () => ipcRenderer.send('mischief-done'),
   onMischief: (fn) => ipcRenderer.on('fx-mischief', (_e, data) => fn(data)),
   onMischiefEnd: (fn) => ipcRenderer.on('mischief-end', () => fn()),
+  // 攀爬安全绳：桌宠侧报腰间坐标，覆盖层侧收坐标画绳/收绳
+  ropeStart: (d) => ipcRenderer.send('rope-start', d),
+  ropeMove: (d) => ipcRenderer.send('rope-move', d),
+  ropeEnd: () => ipcRenderer.send('rope-end'),
+  onRope: (fn) => ipcRenderer.on('rope-update', (_e, d) => fn(d)),
+  onRopeEnd: (fn) => ipcRenderer.on('rope-clear', () => fn()),
   nbMin: () => ipcRenderer.send('nb-min'),
   nbResizeStart: () => ipcRenderer.send('nb-resize-start'),
   nbResizeMove: () => ipcRenderer.send('nb-resize-move'),

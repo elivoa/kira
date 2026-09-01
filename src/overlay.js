@@ -188,10 +188,25 @@ function flySword(homeX, homeY) {
     }
   }
 
-  function frame(now) {
+  let done = false;
+  // 到达/兜底收尾只走一次：闪光，通知桌宠变回来
+  function arrive() {
+    if (done) return;
+    done = true;
+    clearInterval(watchdog);
+    el('circle', { cx: homeX, cy: homeY, r: 46, fill: '#fff', opacity: 0.9, class: 'fx-pop' }, layer);
+    setTimeout(() => layer.remove(), 500);
+    window.pet.swordDone();
+  }
+
+  function tick(now) {
+    if (done) return;
     const dt = Math.min((now - last) / 1000, 0.033);
     last = now;
     const ms = now - t0;
+
+    // 硬兜底：任何路径都不能让剑永远飞（坐标出 NaN、回不了家等），到点强制回来
+    if (ms > 20000) { arrive(); return; }
 
     if (ms < FLY_MS) {
       x += vx * dt; y += vy * dt;
@@ -201,21 +216,18 @@ function flySword(homeX, homeY) {
       if (y < 60) { y = 60; vy = Math.abs(vy); spark(x, y); }
       else if (y > innerHeight - 60) { y = innerHeight - 60; vy = -Math.abs(vy); spark(x, y); }
     } else {
-      // 返航：朝出发点加速转向
+      // 返航：朝出发点加速转向。速度随距离衰减——恒定 1700px/s 时转弯半径 ≈283px，
+      // 比 50px 的到达圈大得多，角度不对就会绕家转圈永远回不来（已踩坑）；
+      // 减速后转弯半径 = v/6 随距离缩小，螺旋进家门（近处 v=240 → 半径 40 < 50）
       const dx = homeX - x, dy = homeY - y;
       const dist = Math.hypot(dx, dy);
-      if (dist < 50) {
-        // 到达：闪光，通知桌宠变回来
-        el('circle', { cx: homeX, cy: homeY, r: 46, fill: '#fff', opacity: 0.9, class: 'fx-pop' }, layer);
-        setTimeout(() => layer.remove(), 500);
-        window.pet.swordDone();
-        return;
-      }
+      if (dist < 50) { arrive(); return; }
+      const v = Math.min(SPEED, Math.max(dist * 4, 240));
       const w = Math.min(dt * 6, 1);
-      vx += (dx / dist * SPEED - vx) * w;
-      vy += (dy / dist * SPEED - vy) * w;
-      const sp = Math.hypot(vx, vy);
-      vx = vx / sp * SPEED; vy = vy / sp * SPEED;
+      vx += (dx / dist * v - vx) * w;
+      vy += (dy / dist * v - vy) * w;
+      const sp = Math.hypot(vx, vy) || 1;
+      vx = vx / sp * v; vy = vy / sp * v;
       x += vx * dt; y += vy * dt;
     }
 
@@ -225,9 +237,19 @@ function flySword(homeX, homeY) {
     // 剑尖朝运动方向（素材剑尖朝左，+180 对齐速度方向）
     const ang = Math.atan2(vy, vx) * 180 / Math.PI + 180;
     sword.setAttribute('transform', `translate(${x},${y}) rotate(${ang})`);
-    requestAnimationFrame(frame);
+  }
+
+  function frame(now) {
+    // 兜底：帧循环任何异常都自动收尾，绝不让桌宠卡在 swordwait
+    try { tick(now); } catch (e) { arrive(); return; }
+    if (!done) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+  // rAF 停摆（窗口被判定遮挡等）时的推进兜底：位移全按墙钟结算，重复调用无害
+  const watchdog = setInterval(() => {
+    if (done) return;
+    try { tick(performance.now()); } catch (e) { arrive(); }
+  }, 400);
 }
 
 window.pet.onSword(({ x, y }) => flySword(x, y));
@@ -292,10 +314,26 @@ function driveCar(homeX) {
     }, layer).textContent = '滴滴';
   }
 
-  function frame(now) {
+  let done = false;
+  let driveDoneSent = false;
+  const sendDone = () => { if (!driveDoneSent) { driveDoneSent = true; window.pet.driveDone(); } };
+  // 收尾只走一次：保证桌宠一定收到 driveDone，绝不卡在 drivewait
+  function finish() {
+    if (done) return;
+    done = true;
+    clearInterval(watchdog);
+    sendDone();
+    layer.remove();
+  }
+
+  function tick(now) {
+    if (done) return;
     const dt = Math.min((now - last) / 1000, 0.033);
     last = now;
     const ms = now - t0;
+
+    // 硬兜底：到点强制收（rAF 停摆之外的异常路径也覆盖）
+    if (ms > 25000) { finish(); return; }
 
     if (sub === 'enter') {
       v = Math.min(v + 1600 * dt, 1000);
@@ -324,7 +362,7 @@ function driveCar(homeX) {
       if (Math.abs(dist) < 30) {
         sub = 'exit';
         car.show(0); // 放下她：切回正常驾驶帧
-        window.pet.driveDone();
+        sendDone();
       } else {
         x += dir * v * dt;
       }
@@ -332,15 +370,24 @@ function driveCar(homeX) {
       // 放下她之后加速离场
       v = Math.min(v + 2200 * dt, 1500);
       x += dir * v * dt;
-      if (x < -520 || x > innerWidth + 520) { layer.remove(); return; }
+      if (x < -520 || x > innerWidth + 520) { finish(); return; }
     }
 
     // 悬挂颠簸 + 翻转朝向（车头方向 = 前进方向，原图朝左）
     const bob = sub === 'pickup' && v < 300 ? 0 : 2.5 * Math.sin(now / 55);
     car.setAttribute('transform', `translate(${x},${roadY + bob}) scale(${-dir},1)`);
-    requestAnimationFrame(frame);
+  }
+
+  function frame(now) {
+    try { tick(now); } catch (e) { finish(); return; }
+    if (!done) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+  // rAF 停摆兜底：位移全按墙钟结算，定时器重复调用无害
+  const watchdog = setInterval(() => {
+    if (done) return;
+    try { tick(performance.now()); } catch (e) { finish(); }
+  }, 400);
 }
 
 window.pet.onDrive(({ x }) => driveCar(x));
@@ -614,6 +661,83 @@ function mischief(startX, startY) {
 }
 
 window.pet.onMischief(({ x, y }) => mischief(x, y));
+
+// ---------- 攀爬安全绳 ----------
+// 捣乱那根软绳的变种：同一套 verlet 链条 + smoothPath，但没有笔记本，且两端都钉住——
+// 下端钉在起爬点，上端拴在她腰上跟着爬。桌宠侧节流报腰间坐标，这边只管画。
+const CLIMB_ROPE_N = 14;
+let climbRope = null;
+
+function ropeUpdate(d) {
+  if (d.start || !climbRope) {
+    if (climbRope) climbRope.layer.remove();
+    const layer = el('g', {});
+    const path = el('path', { fill: 'none', stroke: '#6b5a3a', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, layer);
+    // 两端的绳结：画个小圆点，更像「拴住了」
+    const knotA = el('circle', { r: 3.5, fill: '#6b5a3a' }, layer);
+    const knotW = el('circle', { r: 3.5, fill: '#6b5a3a' }, layer);
+    climbRope = { layer, path, knotA, knotW, ax: d.ax, ay: d.ay, wx: d.wx, wy: d.wy, pts: null, last: performance.now() };
+    requestAnimationFrame(ropeFrame);
+    return;
+  }
+  climbRope.wx = d.wx;
+  climbRope.wy = d.wy;
+}
+
+function ropeClear() {
+  if (!climbRope) return;
+  const r = climbRope;
+  climbRope = null;
+  r.layer.style.transition = 'opacity .4s';
+  r.layer.style.opacity = 0;
+  setTimeout(() => r.layer.remove(), 450);
+}
+
+function ropeFrame(now) {
+  const r = climbRope;
+  if (!r) return;
+  const dt = Math.min((now - r.last) / 1000, 0.033);
+  r.last = now;
+  // 绳长比两端直线距离略长，垂出自然弧度；她越爬越高，绳子跟着放长
+  const dist = Math.hypot(r.wx - r.ax, r.wy - r.ay);
+  const seg = (dist * 1.08 + 36) / CLIMB_ROPE_N;
+  if (!r.pts) {
+    r.pts = Array.from({ length: CLIMB_ROPE_N + 1 }, (_, i) => {
+      const x = r.ax + (r.wx - r.ax) * i / CLIMB_ROPE_N;
+      const y = r.ay + (r.wy - r.ay) * i / CLIMB_ROPE_N;
+      return { x, y, px: x, py: y };
+    });
+  }
+  // verlet 积分（跳过两个钉死的端点），再逐段做长度约束
+  for (let i = 1; i < CLIMB_ROPE_N; i++) {
+    const p = r.pts[i];
+    const vx = (p.x - p.px) * 0.92, vy = (p.y - p.py) * 0.92;
+    p.px = p.x; p.py = p.y;
+    p.x += vx;
+    p.y += vy + 1600 * dt * dt;
+  }
+  for (let iter = 0; iter < 3; iter++) {
+    r.pts[0].x = r.ax; r.pts[0].y = r.ay;
+    r.pts[CLIMB_ROPE_N].x = r.wx; r.pts[CLIMB_ROPE_N].y = r.wy;
+    for (let i = 0; i < CLIMB_ROPE_N; i++) {
+      const a = r.pts[i], b = r.pts[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d2 = Math.hypot(dx, dy) || 1;
+      const fix = (d2 - seg) / d2;
+      // 端点段只动内侧点（端点钉死），中间段对半分
+      if (i === 0) { b.x -= dx * fix; b.y -= dy * fix; }
+      else if (i === CLIMB_ROPE_N - 1) { a.x += dx * fix; a.y += dy * fix; }
+      else { a.x += dx * fix / 2; a.y += dy * fix / 2; b.x -= dx * fix / 2; b.y -= dy * fix / 2; }
+    }
+  }
+  r.path.setAttribute('d', smoothPath(r.pts));
+  r.knotA.setAttribute('cx', r.ax); r.knotA.setAttribute('cy', r.ay);
+  r.knotW.setAttribute('cx', r.wx); r.knotW.setAttribute('cy', r.wy);
+  requestAnimationFrame(ropeFrame);
+}
+
+window.pet.onRope(ropeUpdate);
+window.pet.onRopeEnd(ropeClear);
 
 // ---------- 星盘右键菜单 ----------
 // 以右键点击时的鼠标位置为圆心展开圆形菜单（锚定屏幕坐标，人物走开菜单不动）。

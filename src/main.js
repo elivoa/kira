@@ -477,6 +477,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false, // 被遮挡时也要照常跑 rAF 状态机，不然整只宠冻住
     },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
@@ -505,6 +506,9 @@ function createOverlay() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 全屏透明窗在 macOS 上容易被判定为「被遮挡」而停掉 rAF——特效帧循环全挂 rAF 上，
+      // 一停就永远卡死（剑飞一半冻住、回不来的根因）
+      backgroundThrottling: false,
     },
   });
   overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -1059,6 +1063,25 @@ app.whenReady().then(async () => {
   });
   ipcMain.on('mischief-done', () => {
     if (win) win.webContents.send('mischief-end');
+  });
+  // 攀爬安全绳：桌宠报屏幕绝对坐标，换算成覆盖层坐标转发（纯特效，覆盖层保持穿透）
+  ipcMain.on('rope-start', (_e, d) => {
+    if (!win || !overlay) return;
+    syncOverlay();
+    const area = petArea();
+    overlay.webContents.send('rope-update', {
+      start: true,
+      ax: d.ax - area.x, ay: d.ay - area.y,
+      wx: d.wx - area.x, wy: d.wy - area.y,
+    });
+  });
+  ipcMain.on('rope-move', (_e, d) => {
+    if (!win || !overlay) return;
+    const area = petArea();
+    overlay.webContents.send('rope-update', { wx: d.wx - area.x, wy: d.wy - area.y });
+  });
+  ipcMain.on('rope-end', () => {
+    if (overlay) overlay.webContents.send('rope-clear');
   });
   // 覆盖层的点击捕获开关（捣乱时本子区域拦截点击用）
   ipcMain.on('ov-ignore', (_e, flag) => {

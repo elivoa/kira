@@ -292,6 +292,8 @@ function enter(next, dur = 0) {
   // 桌子（来张桌子/工作模式）只在 desk/work 链内存在：菜单之外的切换路径（自主 idleRandom、
   // 大模型决策 DISPATCH、拖拽打断等）没有 resetDesk，桌子+放大立绘会叠到新动作上（已踩坑）
   if (!String(next).startsWith('desk') && !String(next).startsWith('work') && document.getElementById('desk')) resetDesk();
+  // 攀爬安全绳只在 climbup 期间存在：到顶/爬不动/被拖走/菜单切动作等任何离开路径都收绳
+  if (next !== 'climbup' && climb && climb.rope) { climb.rope = false; window.pet.ropeEnd(); }
 }
 
 function say(text, ms = 1800) {
@@ -729,7 +731,7 @@ function doSleep(dur = null) {
   setSleepScene(SLEEP1_SRC);
   sleepImg.style.opacity = 1;
   setSpriteVeiled(true);
-  flipT = rand(6, 9);
+  flipT = rand(15, 25);
   enter('sleepin', 0.9);
   say('哈啊~ 困了', 1600);
 }
@@ -1050,6 +1052,11 @@ async function doClimb() {
 // 换立绘（爬完要切回当前形态正面图）
 function swapSprite(src) {
   if (sprite.dataset.cur !== src) { sprite.dataset.cur = src; sprite.src = src; }
+}
+
+// 攀爬时的腰间位置（屏幕绝对坐标）：安全绳上端拴在这儿
+function climbWaist() {
+  return [climb.px + winW() / 2, climb.py + winH() * 0.55];
 }
 
 // ---------- 暴走模式 ----------
@@ -2527,7 +2534,8 @@ function frame(now) {
       // 趴睡场景淡入盖过立绘（CSS transition 完成过渡）
       if (stateT >= stateDur) {
         zzzT = 1.2;
-        enter('sleeping', pendingSleepDur ?? rand(14, 22));
+        // 一直睡：不设时长，只靠交互叫醒（连点 8 下/使劲晃/菜单）
+        enter('sleeping', pendingSleepDur ?? 1e9);
         pendingSleepDur = null;
       }
       break;
@@ -2549,7 +2557,7 @@ function frame(now) {
       }
       flipT -= dt;
       if (flipT <= 0) {
-        flipT = rand(6, 9);
+        flipT = rand(15, 25);
         if (Math.random() < 0.5) cycleSleepPose();
       }
       if (stateT >= stateDur) doWake();
@@ -2842,6 +2850,13 @@ function frame(now) {
         // 到位：换上攀爬第一帧，朝墙（左沿帧图朝右，右沿镜像）
         facing = climb.useLeft ? 1 : -1;
         swapSprite(CLIMB_SRC[0]);
+        // 30% 概率拴根安全绳：下端钉在起爬点，上端拴腰间跟着爬（复用捣乱那根软绳）
+        climb.rope = Math.random() < 0.3;
+        climb.ropeT = 0;
+        if (climb.rope) {
+          const [wx, wy] = climbWaist();
+          window.pet.ropeStart({ ax: wx, ay: wy, wx, wy });
+        }
         enter('climbup');
       } else {
         const mx = dx / dist * step, my = dy / dist * step;
@@ -2875,6 +2890,15 @@ function frame(now) {
       }
       rot = 0; // 上爬不摇摆，手/脚贴沿不晃
       ty = Math.sin(stateT * 5) * 1.5; // 只留一点点上下呼吸感
+      // 拴着安全绳：节流上报腰间位置，覆盖层的绳子跟着长
+      if (climb.rope) {
+        climb.ropeT += dt;
+        if (climb.ropeT >= 0.07) {
+          climb.ropeT = 0;
+          const [wx, wy] = climbWaist();
+          window.pet.ropeMove({ wx, wy });
+        }
+      }
       // 到顶沿收尾（复用同一段逻辑）
       const topOut = (stuck) => {
         swapSprite(FORMS[form].front);
@@ -3136,6 +3160,8 @@ function frame(now) {
     }
     case 'swordwait': {
       // 本体是剑，在覆盖层上飞，窗口里先空着
+      // 覆盖层失联兜底（窗口崩溃/重载、IPC 丢失）：30s 没回来自己变回来，绝不永远隐身
+      if (stateT > 30) { sprite.style.visibility = 'visible'; enter('swordback', 0.5); }
       break;
     }
     case 'swordback': {
@@ -3161,7 +3187,8 @@ function frame(now) {
       break;
     }
     case 'drivewait': {
-      // 在覆盖层上兜风，窗口里先空着
+      // 在覆盖层上兜风，窗口里先空着；覆盖层失联兜底同 swordwait
+      if (stateT > 30) { sprite.style.visibility = 'visible'; enter('driveback', 0.5); }
       break;
     }
     case 'mischiefform': {
