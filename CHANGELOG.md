@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-01
+
+### 打包分发与自动更新
+
+- electron-builder 出 macOS 安装包（dmg + zip，Apple Silicon），`npm run dist` 本机出包、`npm run release` 直接发 GitHub Releases（地址在 `package.json` 的 `build.publish`）
+- `install.sh` 一键安装：`curl | bash` 下载最新 release 的 dmg 装到 /Applications 并去 Gatekeeper 隔离（应用未签名）；`--user` 装 ~/Applications 免管理员
+- 自写轻量更新器 `src/updater.js`：启动 30s 后静默查 latest-mac.yml，发现新版后台下载 zip，气泡 + 弹窗确认后 detached shell 脚本等进程退出替换 .app 重启——不走 electron-updater 是因为它强制 Apple Developer ID 签名（$99/年），未签名应用更新不落盘
+- 托盘菜单显示版本号 + 检查更新入口（有就绪更新时变为「重启更新到 vX」）；小本子配置页加版本号 + 检查更新按钮
+- 打包适配：tools 三个 swift 二进制（windows/keys/caret）打进 asar.unpacked 随包分发；缺失时回退编译到 userData/tools（原逻辑写 asar 内只读路径必败）；启动编译由 `npm run build-tools` 统一负责
+- 应用图标：chibi 设定图裁头部生成 build/icon.png
+
 ## 2026-08-31
 
 ### 走路序列帧换新素材

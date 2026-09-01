@@ -29,13 +29,14 @@ document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
     activeTab = btn.dataset.tab;
     document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
-    for (const key of ['chat', 'history', 'mr', 'log', 'config']) {
+    for (const key of ['chat', 'history', 'mr', 'feishu', 'log', 'config']) {
       document.getElementById(`page-${key}`).classList.toggle('hidden', key !== activeTab);
     }
-    inputrow.classList.toggle('hidden', activeTab === 'log' || activeTab === 'config' || activeTab === 'history');
+    inputrow.classList.toggle('hidden', activeTab === 'log' || activeTab === 'config' || activeTab === 'history' || activeTab === 'feishu');
     if (activeTab === 'log') loadLogs();
     if (activeTab === 'config') loadChatConfig();
     if (activeTab === 'history') loadHistoryTab();
+    if (activeTab === 'feishu') loadFeishu();
   });
 });
 
@@ -422,6 +423,13 @@ document.getElementById('clearKey').addEventListener('click', () => {
 
 loadChatConfig(); // 打开本子就备好状态，不用等切页签
 
+// ---------- 配置页签（版本 / 检查更新） ----------
+window.pet.getVersion().then((v) => { document.getElementById('verText').textContent = `v${v}`; });
+document.getElementById('checkUpdate').addEventListener('click', () => {
+  window.pet.checkUpdate();
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '手动检查更新' });
+});
+
 // ---------- 配置页签（动作设置，从原设置窗口搬入） ----------
 // 数据走 getSettings/setActions，主进程统一持久化到 ~/.config/kira/config.json
 let actionSettings = {};
@@ -613,6 +621,82 @@ function renderActions() {
 window.pet.getSettings().then((s) => {
   actionSettings = s || {};
   renderActions();
+});
+
+// ---------- 飞书 tab ----------
+const fsAppId = document.getElementById('fsAppId');
+const fsAppSecret = document.getElementById('fsAppSecret');
+const fsEnabled = document.getElementById('fsEnabled');
+const fsStatus = document.getElementById('fsStatus');
+const fsMsgs = document.getElementById('fsMsgs');
+let feishuState = { status: 'off', error: '' };
+
+const FS_STATUS_TEXT = { off: '未启用（填好 App ID / Secret 并打开开关）', connecting: '连接中…', online: '在线，私聊她或在群里 @她 试试', error: '连接出错' };
+
+function renderFsStatus() {
+  fsStatus.classList.toggle('ok', feishuState.status === 'online');
+  fsStatus.textContent = FS_STATUS_TEXT[feishuState.status] + (feishuState.error ? `：${feishuState.error}` : '');
+}
+
+// 一条镜像 = 一条「我」的问题 + 一条 Kira 的回答，标注来自私聊还是群聊
+function addFsMirror(m) {
+  addMsg(fsMsgs, 'me', `${m.chatType === 'p2p' ? '私聊' : '群聊'} · ${m.userText}`);
+  addMsg(fsMsgs, 'Kira', m.replyText);
+}
+
+function renderFsLog(list) {
+  fsMsgs.innerHTML = '';
+  if (!list.length) {
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = '还没有飞书对话，去飞书上找她聊聊吧';
+    fsMsgs.appendChild(d);
+    return;
+  }
+  for (const m of list) addFsMirror(m); // 时间正序
+}
+
+function loadFeishu() {
+  window.pet.getFeishuConfig().then((c) => {
+    if (document.activeElement !== fsAppId) fsAppId.value = c.appId || '';
+    if (document.activeElement !== fsAppSecret) fsAppSecret.value = c.appSecret || '';
+    fsEnabled.checked = !!c.enabled;
+    feishuState = { status: c.status, error: c.error };
+    renderFsStatus();
+  });
+  window.pet.getFeishuLog().then(renderFsLog);
+}
+
+document.getElementById('fsSave').addEventListener('click', () => {
+  window.pet.setFeishuConfig({ appId: fsAppId.value.trim(), appSecret: fsAppSecret.value.trim(), enabled: fsEnabled.checked });
+  loadFeishu();
+  window.pet.notebookSay('飞书配置记好啦');
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '更新了飞书机器人配置' });
+});
+
+document.getElementById('fsClear').addEventListener('click', () => {
+  window.pet.setFeishuConfig({ appId: '', appSecret: '', enabled: false });
+  fsAppId.value = '';
+  fsAppSecret.value = '';
+  fsEnabled.checked = false;
+  loadFeishu();
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '清除了飞书机器人配置' });
+});
+
+fsEnabled.addEventListener('change', () => {
+  window.pet.setFeishuConfig({ enabled: fsEnabled.checked });
+  loadFeishu();
+});
+
+// 连接状态变化 / 新对话：只在飞书 tab 打开时增量更新，其它时候等切过去重拉
+window.pet.onFeishuStatus((s) => {
+  feishuState = s;
+  if (activeTab === 'feishu') renderFsStatus();
+});
+window.pet.onFeishuLog((m) => {
+  if (activeTab !== 'feishu') return;
+  if (fsMsgs.querySelector('.empty')) fsMsgs.innerHTML = '';
+  addFsMirror(m);
 });
 
 // ---------- 开场白：有历史就渲染历史，没有就打招呼 ----------

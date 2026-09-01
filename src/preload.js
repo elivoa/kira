@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('pet', {
   throwPoop: () => ipcRenderer.send('poop'),
   onPoop: (fn) => ipcRenderer.on('fx-poop', (_e, data) => fn(data)),
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  getVersion: () => ipcRenderer.invoke('get-version'),
+  checkUpdate: () => ipcRenderer.invoke('check-update'),
   setActions: (patch) => ipcRenderer.send('set-actions', patch),
   onSettings: (fn) => ipcRenderer.on('settings-changed', (_e, s) => fn(s)),
   getStats: () => ipcRenderer.invoke('get-stats'),
@@ -62,6 +64,20 @@ contextBridge.exposeInMainWorld('pet', {
   getHistoryDay: (key) => ipcRenderer.invoke('history-day', key),
   getChatConfig: () => ipcRenderer.invoke('get-chat-config'),
   setChatConfig: (patch) => ipcRenderer.send('set-chat-config', patch),
+  // 飞书机器人
+  getFeishuConfig: () => ipcRenderer.invoke('get-feishu-config'),
+  setFeishuConfig: (patch) => ipcRenderer.send('set-feishu-config', patch),
+  getFeishuLog: () => ipcRenderer.invoke('get-feishu-log'),
+  onFeishuStatus: (fn) => {
+    const h = (_e, s) => fn(s);
+    ipcRenderer.on('feishu-status', h);
+    return () => ipcRenderer.removeListener('feishu-status', h);
+  },
+  onFeishuLog: (fn) => {
+    const h = (_e, d) => fn(d);
+    ipcRenderer.on('feishu-log-new', h);
+    return () => ipcRenderer.removeListener('feishu-log-new', h);
+  },
   decideAction: (ctx) => ipcRenderer.invoke('decide-action', ctx),
   onMenuAction: (fn) => ipcRenderer.on('menu-action', (_e, id) => fn(id)),
   onPowerState: (fn) => ipcRenderer.on('power-state', (_e, d) => fn(d)),
