@@ -5,7 +5,10 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "cutout": "node tools/cutout.js"
+    "cutout": "node tools/cutout.js",
+    "build-tools": "swiftc -O tools/windows.swift -o tools/windows && swiftc -O tools/keys.swift -o tools/keys && swiftc -O tools/caret.swift -o tools/caret",
+    "dist": "npm run build-tools && electron-builder",
+    "release": "npm run build-tools && electron-builder --publish always"
   },
   "license": "MIT",
   "dependencies": {
@@ -15,6 +18,39 @@
     "pngjs": "^7.0.0"
   },
   "devDependencies": {
-    "electron": "^43.4.1"
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "team.kira.pet",
+    "productName": "Kira",
+    "directories": { "output": "dist" },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "tools/{windows,keys,caret}",
+      "!assets/source.png",
+      "!assets/chibi_source.png",
+      "!assets/head_big.png"
+    ],
+    "asarUnpack": [
+      "tools/{windows,keys,caret}"
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "target": ["dmg", "zip"],
+      "icon": "build/icon.png",
+      "identity": null
+    },
+    "dmg": {
+      "title": "Kira"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "elivoa",
+        "repo": "kira"
+      }
+    ]
   }
 }
