@@ -1750,6 +1750,50 @@ const DISPATCH = {
   peek: doPeek, brock: doBrock, peekbig: doPeekBig, knock: doKnock, climb: doClimb, point: doPoint,
 };
 
+// ---------- 动作扩展桥接（src/ext/，契约见 ext/README.md） ----------
+// core.js 未加载时（walk_test 等测试页）退化为空表：default 分支/心跳/DISPATCH 合并全部空转
+const EXT_ACTIONS = window.EXT_ACTIONS || (window.EXT_ACTIONS = {});
+
+// 扩展 tick 的变换传出对象：主循环每帧重置，tick 返回 true 后抄进当帧局部量统一应用
+const EXT_TF = { tx: 0, ty: 0, rot: 0, rotY: 0, sx: 1, sy: 1, skew: 0 };
+
+// 扩展动作的上下文：只暴露能力，内部变量一律给 getter/setter（tf 是唯一共享可写对象）
+const EXT_CTX = {
+  enter, say, logEvent, addStat, swapSprite, fxBurst, fxText, fxEl,
+  rand, pick, walkAnimAdvance, nextIdleWait,
+  stats,
+  tf: EXT_TF,
+  moveBy: (dx, dy) => window.pet.moveBy(dx, dy),
+  getPos: () => window.pet.getPos(),
+  getStage: () => window.pet.getStage(),
+  getCursor: () => window.pet.getCursor(),
+  activeWindow: () => window.pet.activeWindow(),
+  inputContext: () => window.pet.inputContext(),
+  onArrowKey: (fn) => window.pet.onArrowKey(fn),
+  fxStart: (kind, data) => window.pet.fxStart(kind, data),
+  onFxDone: (fn) => window.pet.onFxExtDone(fn),
+  get state() { return state; },
+  get stateT() { return stateT; },
+  get stateDur() { return stateDur; },
+  get form() { return form; },
+  get idleWait() { return idleWait; },
+  set idleWait(v) { idleWait = v; },
+  get lastInteract() { return lastInteract; },
+};
+
+// 与 applyEffect 同逻辑，读扩展 def 上的 effect（不进 EFFECTS 主表，也不参与 canAfford 预检）
+function applyEffectExt(id) {
+  const e = (EXT_ACTIONS[id] && EXT_ACTIONS[id].effect) || {};
+  for (const k in e) addStat(k, e[k]);
+}
+
+// 扩展动作并入主循环：台词进 LINES，DISPATCH 走统一入口（菜单/大模型决策/随机池即刻可见）
+for (const id in EXT_ACTIONS) {
+  const def = EXT_ACTIONS[id];
+  if (def.lines) LINES[id] = def.lines;
+  DISPATCH[id] = () => { applyEffectExt(id); def.start(EXT_CTX); };
+}
+
 // 心情好更爱玩开心动作，心情差不想玩
 const HAPPY_ACTIONS = new Set(['sway', 'qsway', 'qbounce', 'spin', 'hop']);
 
@@ -1776,7 +1820,8 @@ async function askBrain() {
   const pool = [];
   for (const id in ACTIONS) {
     const a = ACTIONS[id];
-    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id)) continue;
+    // DISPATCH 无实现的（ext 文件未落地的新动作）不进池，否则选中即 TypeError
+    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id) || !DISPATCH[id]) continue;
     pool.push({ id, name: a.name, intrusive: !!a.intrusive });
   }
   if (!pool.length) return null;
@@ -1861,7 +1906,8 @@ async function idleRandomOnce() {
   const pool = [];
   for (const id in ACTIONS) {
     const a = ACTIONS[id];
-    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id)) continue;
+    // DISPATCH 无实现的（ext 文件未落地的新动作）不进池，否则选中即 TypeError
+    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id) || !DISPATCH[id]) continue;
     const w = actionWeight(id);
     pool.push([id, w]);
     total += w;
@@ -1940,6 +1986,12 @@ setInterval(() => {
       lastProactive = nowSec;
       maybeProactiveChat();
     }
+  }
+  // 扩展动作的条件触发监控（深夜催睡/提醒喝水/打字打call 等）：挂数值心跳，每秒左右一次
+  for (const id in EXT_ACTIONS) {
+    const ex = EXT_ACTIONS[id];
+    if (!ex.monitor) continue;
+    try { ex.monitor(EXT_CTX); } catch (e) {}
   }
   // 避让检查：打字中不挡输入区，平时不长期压着前台窗口
   evadeTick().catch(() => {});
@@ -3296,6 +3348,25 @@ function frame(now) {
         applySpriteHeight();
         enter('idle');
         idleWait = nextIdleWait(3, 6);
+      }
+      break;
+    }
+    default: {
+      // 扩展动作的自定义状态：第一个认领（tick 返回 true）的扩展接管这一帧，变换经 EXT_TF 传出。
+      // tick 抛错兜底回 idle——绝不让状态机卡死在某个扩展状态上（与 flySword 的兜底同理）
+      for (const id in EXT_ACTIONS) {
+        const ex = EXT_ACTIONS[id];
+        if (!ex.tick) continue;
+        EXT_TF.tx = 0; EXT_TF.ty = 0; EXT_TF.rot = 0; EXT_TF.rotY = 0;
+        EXT_TF.sx = 1; EXT_TF.sy = 1; EXT_TF.skew = 0;
+        let handled = false;
+        try { handled = ex.tick(state, dt, t, EXT_CTX); }
+        catch (e) { logEvent('系统', `扩展动作「${id}」tick 异常，已回待机`); enter('idle'); break; }
+        if (handled) {
+          tx = EXT_TF.tx; ty = EXT_TF.ty; rot = EXT_TF.rot; rotY = EXT_TF.rotY;
+          sx = EXT_TF.sx; sy = EXT_TF.sy; skew = EXT_TF.skew;
+          break;
+        }
       }
       break;
     }

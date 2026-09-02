@@ -46,6 +46,12 @@ contextBridge.exposeInMainWorld('pet', {
   mischiefDone: () => ipcRenderer.send('mischief-done'),
   onMischief: (fn) => ipcRenderer.on('fx-mischief', (_e, data) => fn(data)),
   onMischiefEnd: (fn) => ipcRenderer.on('mischief-end', () => fn()),
+  // 扩展特效通用通道：以后新 overlay 特效只走 fx-ext，不再加专用 IPC。
+  // data.x/data.y 约定为屏幕绝对坐标，主进程换算成覆盖层坐标后转发
+  fxStart: (kind, data) => ipcRenderer.send('fx-ext', kind, data),
+  onFxExt: (fn) => ipcRenderer.on('fx-ext', (_e, kind, data) => fn(kind, data)),
+  fxDone: (kind) => ipcRenderer.send('fx-ext-done', kind),
+  onFxExtDone: (fn) => ipcRenderer.on('fx-ext-done', (_e, kind) => fn(kind)),
   // 攀爬安全绳：桌宠侧报腰间坐标，覆盖层侧收坐标画绳/收绳
   ropeStart: (d) => ipcRenderer.send('rope-start', d),
   ropeMove: (d) => ipcRenderer.send('rope-move', d),

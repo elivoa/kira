@@ -739,6 +739,16 @@ function ropeFrame(now) {
 window.pet.onRope(ropeUpdate);
 window.pet.onRopeEnd(ropeClear);
 
+// ---------- 扩展特效注册表 ----------
+// ext/ov_<id>.js 用 registerOvFx(kind, fn) 挂特效；桌宠侧 fxStart(kind, data) 经主进程转发到这里。
+// 特效结束由特效自己调 window.pet.fxDone(kind)，桌宠动作才能收尾
+const EXT_FX = {};
+function registerOvFx(kind, fn) { EXT_FX[kind] = fn; }
+window.registerOvFx = registerOvFx;
+window.pet.onFxExt((kind, data) => {
+  if (EXT_FX[kind]) EXT_FX[kind](data);
+});
+
 // ---------- 星盘右键菜单 ----------
 // 以右键点击时的鼠标位置为圆心展开圆形菜单（锚定屏幕坐标，人物走开菜单不动）。
 // 一级为分类 + 小本子/设置直选项，「取消」固定在正下方；中心枢纽顶层 ✦ 关闭、子层 ↩ 返回。
@@ -781,6 +791,41 @@ const MENU_TREE = [
     { id: 'poop', icon: '💩', label: '你讨厌！' },
     { id: 'desk', icon: '🪑', label: '来张桌子' },
   ] },
+  { id: 'act2', icon: '🎪', label: '杂耍', children: [
+    { id: 'juggle', icon: '🤹', label: '抛接球' },
+    { id: 'magic', icon: '🎩', label: '变魔术' },
+    { id: 'yoyo', icon: '🪀', label: '溜溜球' },
+    { id: 'dance', icon: '🕺', label: '蹦迪' },
+    { id: 'trampoline', icon: '🤸', label: '蹦床' },
+    { id: 'roll', icon: '🍥', label: '打滚' },
+    { id: 'slide', icon: '🛝', label: '滑滑梯' },
+    { id: 'exercise', icon: '🏋️', label: '做早操' },
+    { id: 'stretch', icon: '🙆', label: '伸懒腰' },
+    { id: 'photo', icon: '📸', label: '自拍' },
+  ] },
+  { id: 'act3', icon: '🏞️', label: '出门', children: [
+    { id: 'follow', icon: '🐕', label: '跟屁虫' },
+    { id: 'sit', icon: '🧎', label: '坐下陪你' },
+    { id: 'kite', icon: '🪁', label: '放风筝' },
+    { id: 'umbrellawalk', icon: '☔', label: '打伞散步' },
+    { id: 'umbrellafly', icon: '🌂', label: '雨伞飞天' },
+    { id: 'stargaze', icon: '🌟', label: '数星星' },
+    { id: 'snow', icon: '❄️', label: '接雪花' },
+    { id: 'lantern', icon: '🏮', label: '放灯笼' },
+    { id: 'swing', icon: '🎠', label: '荡秋千' },
+    { id: 'fish', icon: '🎣', label: '钓鱼' },
+  ] },
+  { id: 'act4', icon: '🎮', label: '游戏', children: [
+    { id: 'hide', icon: '🫣', label: '捉迷藏' },
+    { id: 'rps', icon: '✊', label: '石头剪刀布' },
+    { id: 'arrowdodge', icon: '⌨️', label: '方向键逗宠' },
+    { id: 'tightrope', icon: '🎪', label: '走钢丝' },
+    { id: 'sleepwalk', icon: '💤', label: '梦游' },
+    { id: 'meditate', icon: '🧘', label: '打坐' },
+    { id: 'balloon', icon: '🎈', label: '气球漂流' },
+    { id: 'confetti', icon: '🎉', label: '撒花' },
+    { id: 'tomato', icon: '🍅', label: '番茄钟' },
+  ] },
   { id: 'sys', icon: '🃏', label: '法宝', children: [
     { id: 'seal', icon: '🃏', label: '收进法宝' },
     { id: 'stats', icon: '📊', label: '看看状态' },
@@ -812,7 +857,7 @@ function closeMenu(notify = true) {
     it.style.opacity = '0';
     it.style.transform = `translate(${-parseFloat(it.dataset.dx)}px, ${-parseFloat(it.dataset.dy)}px) scale(0)`;
   });
-  root.querySelectorAll('.rm-hub, .rm-ring, .rm-backdrop, .rm-sector').forEach((e2) => {
+  root.querySelectorAll('.rm-hub, .rm-ring, .rm-backdrop, .rm-sector, .rm-dim').forEach((e2) => {
     e2.style.transition = 'opacity .22s';
     e2.style.opacity = '0';
   });
@@ -822,7 +867,7 @@ function closeMenu(notify = true) {
 
 function openMenu(x, y) {
   closeMenu(false); // 已有菜单先静默关掉，由本次重新锚定
-  const M = 185; // 最大外半径 + 余量，防贴边
+  const M = MENU_TREE.length > 8 ? 210 : 185; // 最大外半径 + 余量，防贴边（一级超过 8 项时圆盘半径更大）
   const cx = Math.min(Math.max(x, M), innerWidth - M);
   const cy = Math.min(Math.max(y, M), innerHeight - M);
   const root = document.createElement('div');
@@ -866,6 +911,13 @@ function openMenu(x, y) {
   hub.style.top = `${cy}px`;
   root.appendChild(hub);
 
+  // 压暗盘：垫在菜单项下面、装饰环上面，把身后的立绘压暗
+  const dim = document.createElement('div');
+  dim.className = 'rm-dim';
+  dim.style.left = `${cx}px`;
+  dim.style.top = `${cy}px`;
+  root.appendChild(dim);
+
   // 扇区高亮光楔：指向当前聚焦项，层级压在菜单项下面
   const sector = document.createElement('div');
   sector.className = 'rm-sector';
@@ -873,7 +925,7 @@ function openMenu(x, y) {
   sector.style.top = `${cy}px`;
   root.appendChild(sector);
 
-  menuState = { cx, cy, root, hub, ring1, ring2, sector, sectors: [], sectorHalf: 0, focusSel: null, farR: 0, level: 0 };
+  menuState = { cx, cy, root, hub, ring1, ring2, dim, sector, sectors: [], sectorHalf: 0, focusSel: null, farR: 0, level: 0 };
   root.addEventListener('mousemove', onMenuHover);
   armMenuIdle();
   renderLevel(MENU_TREE, 0);
@@ -914,7 +966,7 @@ function setMenuFocus(sel) {
     sel.el.classList.add('focus');
     const h = st.sectorHalf;
     // conic-gradient 0deg 在正上方、顺时针为正，换算菜单角度（0°=右、y 向下）
-    st.sector.style.background = `conic-gradient(from ${sel.angle + 90 - h}deg, rgba(185, 168, 255, 0.13) 0deg ${h * 2}deg, transparent ${h * 2}deg 360deg)`;
+    st.sector.style.background = `conic-gradient(from ${sel.angle + 90 - h}deg, rgba(255, 190, 120, 0.25) 0deg ${h * 2}deg, transparent ${h * 2}deg 360deg)`;
     st.sector.style.opacity = '1';
   } else {
     st.sector.style.opacity = '0';
@@ -937,8 +989,9 @@ function renderLevel(items, level) {
   }
   armMenuIdle(); // 每次切换层级也重置闲置计时
 
-  // 大分组（>8 项）摆圆盘太挤：改纵向胶囊列表，一行一个，向两边扩展
-  if (items.length > 8) return renderListLevel(items, level);
+  // 大分组（>8 项）摆圆盘太挤：改网格列表，一行一个，向两边扩展。
+  // 一级菜单永远摆圆盘（星盘的一圈效果是灵魂，项数再多也均布圆周）
+  if (items.length > 8 && level > 0) return renderListLevel(items, level);
 
   st.hub.style.display = '';
   st.hub.textContent = level === 0 ? '✦' : '↩';
@@ -946,11 +999,12 @@ function renderLevel(items, level) {
   st.hub.oncontextmenu = (e) => { e.preventDefault(); st.hub.onclick(); }; // 右键同样确定
   st.hub.onmouseenter = armMenuIdle;
 
-  const r = items.length <= 4 ? 98 : items.length <= 6 ? 116 : 132;
+  const r = items.length <= 4 ? 98 : items.length <= 6 ? 116 : items.length <= 8 ? 132 : 152;
   st.farR = r + 90; // 超出这个距离才取消扇区高亮
   st.ring1.style.width = st.ring1.style.height = `${r * 2 + 74}px`;
   st.ring2.style.width = st.ring2.style.height = `${r * 2 + 40}px`;
   st.sector.style.width = st.sector.style.height = `${r * 2 + 92}px`;
+  st.dim.style.width = st.dim.style.height = `${r * 2 + 150}px`;
 
   // 均布圆周；末项是「取消」时整体旋转，让取消固定在正下方（90°）
   const hasClose = items[items.length - 1].id === '_close';
@@ -1011,10 +1065,11 @@ function renderListLevel(items, level) {
   const gridH = nRows * CELL_H + (nRows - 1) * GAP_Y;
   const gx = Math.min(Math.max(st.cx, gridW / 2 + 20), innerWidth - gridW / 2 - 20);
   const startY = Math.min(Math.max(st.cy - gridH / 2, 16), Math.max(16, innerHeight - gridH - 16));
-  // 装饰环/扇区在网格模式下没有意义，藏掉
+  // 装饰环/扇区/压暗盘在网格模式下没有意义，藏掉
   st.ring1.style.width = st.ring1.style.height = '0px';
   st.ring2.style.width = st.ring2.style.height = '0px';
   st.sector.style.width = st.sector.style.height = '0px';
+  st.dim.style.width = st.dim.style.height = '0px';
   st.farR = 0;
 
   cells.forEach((item, i) => {

@@ -484,7 +484,8 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // 默认点击穿透，悬到角色身上时渲染层会切回接管
   win.setIgnoreMouseEvents(true, { forward: true });
-  win.loadFile(path.join(__dirname, 'index.html'));
+  // KIRA_TEST_PAGE：验收测试页开关（如 ext_test.html），替代默认桌宠页
+  win.loadFile(path.join(__dirname, process.env.KIRA_TEST_PAGE || 'index.html'));
 }
 
 // 全屏透明覆盖层：画屎痕等需要脱离桌宠窗口的特效，点击穿透
@@ -1082,6 +1083,20 @@ app.whenReady().then(async () => {
   });
   ipcMain.on('rope-end', () => {
     if (overlay) overlay.webContents.send('rope-clear');
+  });
+  // 扩展特效通用中转：以后新 overlay 特效只走 fx-ext，不再加专用 IPC。
+  // 约定的屏幕绝对坐标字段（data.x/data.y）减工作区原点，转发覆盖层；特效结束回报桌宠收尾
+  ipcMain.on('fx-ext', (_e, kind, data) => {
+    if (!win || !overlay) return;
+    syncOverlay();
+    const area = petArea();
+    const d = data ? { ...data } : {};
+    if (typeof d.x === 'number') d.x -= area.x;
+    if (typeof d.y === 'number') d.y -= area.y;
+    overlay.webContents.send('fx-ext', kind, d);
+  });
+  ipcMain.on('fx-ext-done', (_e, kind) => {
+    if (win) win.webContents.send('fx-ext-done', kind);
   });
   // 覆盖层的点击捕获开关（捣乱时本子区域拦截点击用）
   ipcMain.on('ov-ignore', (_e, flag) => {

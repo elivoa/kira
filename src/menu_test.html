@@ -18,12 +18,12 @@
   .rm-backdrop { position: absolute; inset: 0; pointer-events: auto; }
   .rm-ring {
     position: absolute;
-    border: 1px dashed rgba(168, 158, 226, 0.26);
+    border: 1px dashed rgba(224, 184, 142, 0.4);
     border-radius: 50%;
     pointer-events: none;
     transform: translate(-50%, -50%);
   }
-  .rm-ring.r2 { border-color: rgba(190, 178, 255, 0.2); }
+  .rm-ring.r2 { border-color: rgba(224, 184, 142, 0.3); }
   .rm-sector {
     position: absolute;
     border-radius: 50%;
@@ -31,6 +31,13 @@
     transform: translate(-50%, -50%);
     opacity: 0;
     transition: opacity 0.15s ease;
+  }
+  .rm-dim {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(255, 248, 236, 0.1) 0%, rgba(255, 248, 236, 0.05) 62%, transparent 78%);
   }
   @keyframes rmSpin { to { transform: translate(-50%, -50%) rotate(360deg); } }
   @keyframes rmSpinR { to { transform: translate(-50%, -50%) rotate(-360deg); } }
@@ -44,21 +51,21 @@
     transition: transform 0.3s cubic-bezier(0.18, 1.35, 0.36, 1), opacity 0.22s ease;
   }
   .rm-btn, .rm-pill, .rm-hub {
-    background: rgba(20, 18, 40, 0.62);
+    background: rgba(255, 251, 243, 0.92);
     backdrop-filter: blur(16px) saturate(1.25);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    color: #e9ebf6;
+    border: 1px solid rgba(214, 186, 150, 0.6);
+    box-shadow: 0 8px 22px rgba(120, 90, 50, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    color: #5b5344;
     font-family: "PingFang SC", sans-serif;
     cursor: pointer;
     transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
   }
   .rm-btn:hover, .rm-pill:hover,
   .rm-item.focus .rm-btn, .rm-item.pill.focus .rm-pill {
-    background: rgba(52, 44, 100, 0.72);
-    border-color: rgba(182, 168, 255, 0.55);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 16px rgba(150, 128, 255, 0.32),
-      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    background: rgba(255, 227, 186, 0.96);
+    border-color: rgba(224, 164, 96, 0.8);
+    box-shadow: 0 10px 26px rgba(120, 90, 50, 0.3), 0 0 16px rgba(255, 178, 107, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
     transform: scale(1.07);
   }
   .rm-btn {
@@ -73,7 +80,7 @@
   }
   @keyframes rmBob { from { transform: translateY(-1px); } to { transform: translateY(1.5px); } }
   .rm-icon { font-size: 21px; line-height: 1; animation: rmBob 2.4s ease-in-out infinite alternate; }
-  .rm-label { font-size: 12px; font-weight: 500; letter-spacing: 1px; margin-top: 4px; color: #cfd3e8; }
+  .rm-label { font-size: 12px; font-weight: 500; letter-spacing: 1px; margin-top: 4px; color: #6b6353; }
   .rm-item.pill {
     width: 168px;
     height: 38px;
@@ -88,10 +95,10 @@
     border-radius: 11px;
   }
   .rm-pill .rm-icon { font-size: 18px; line-height: 1; animation: none; flex: none; }
-  .rm-pill .rm-label { font-size: 13.5px; font-weight: 500; letter-spacing: 0.5px; margin: 0; color: #dde1f0; }
+  .rm-pill .rm-label { font-size: 13.5px; font-weight: 500; letter-spacing: 0.5px; margin: 0; color: #5b5344; }
   .rm-item.pill.backrow .rm-pill {
-    background: rgba(30, 28, 54, 0.55);
-    color: #a9adc6;
+    background: rgba(255, 251, 243, 0.72);
+    color: #9a917e;
   }
   .rm-hub {
     position: absolute;
@@ -109,13 +116,13 @@
     transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
   }
   .rm-hub:hover {
-    background: rgba(52, 44, 100, 0.72);
-    border-color: rgba(182, 168, 255, 0.55);
+    background: rgba(255, 227, 186, 0.96);
+    border-color: rgba(224, 164, 96, 0.8);
     transform: translate(-50%, -50%) scale(1.07);
   }
   @keyframes rmPulse {
-    from { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), 0 0 8px rgba(150, 128, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
-    to { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), 0 0 18px rgba(150, 128, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    from { box-shadow: 0 8px 22px rgba(120, 90, 50, 0.25), 0 0 8px rgba(255, 178, 107, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.65); }
+    to { box-shadow: 0 8px 22px rgba(120, 90, 50, 0.25), 0 0 18px rgba(255, 178, 107, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.65); }
   }
 </style>
 </head>
@@ -131,6 +138,8 @@ window.pet = {
   menuClosed() {}, ovIgnore() {},
   getSettings() { return Promise.resolve({}); },
   onSettings() {},
+  onFxExt() {}, onFxExtDone() {}, fxDone() {},
+  onRope() {}, onRopeEnd() {},
 };
 </script>
 <script src="overlay.js"></script>

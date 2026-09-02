@@ -17,12 +17,12 @@
   .rm-backdrop { position: absolute; inset: 0; pointer-events: auto; }
   .rm-ring {
     position: absolute;
-    border: 1px dashed rgba(168, 158, 226, 0.26);
+    border: 1px dashed rgba(224, 184, 142, 0.4);
     border-radius: 50%;
     pointer-events: none;
     transform: translate(-50%, -50%);
   }
-  .rm-ring.r2 { border-color: rgba(190, 178, 255, 0.2); }
+  .rm-ring.r2 { border-color: rgba(224, 184, 142, 0.3); }
   /* 扇区高亮光楔：随聚焦项指向旋转，淡淡一层 */
   .rm-sector {
     position: absolute;
@@ -31,6 +31,14 @@
     transform: translate(-50%, -50%);
     opacity: 0;
     transition: opacity 0.15s ease;
+  }
+  /* 菜单背后的压暗盘：菜单常开在她自己身上，立绘太亮会吃掉按钮对比度 */
+  .rm-dim {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(255, 248, 236, 0.1) 0%, rgba(255, 248, 236, 0.05) 62%, transparent 78%);
   }
   @keyframes rmSpin { to { transform: translate(-50%, -50%) rotate(360deg); } }
   @keyframes rmSpinR { to { transform: translate(-50%, -50%) rotate(-360deg); } }
@@ -43,23 +51,23 @@
     pointer-events: auto;
     transition: transform 0.3s cubic-bezier(0.18, 1.35, 0.36, 1), opacity 0.22s ease;
   }
-  /* 玻璃面：深色半透明 + 1px 细边 + 顶部内高光，取代粗边渐变紫 */
+  /* 玻璃面：深色近不透明 + 1px 细边 + 顶部内高光（背后是立绘，透明度高了看不清字） */
   .rm-btn, .rm-pill, .rm-hub {
-    background: rgba(20, 18, 40, 0.62);
+    background: rgba(255, 251, 243, 0.92);
     backdrop-filter: blur(16px) saturate(1.25);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    color: #e9ebf6;
+    border: 1px solid rgba(214, 186, 150, 0.6);
+    box-shadow: 0 8px 22px rgba(120, 90, 50, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    color: #5b5344;
     font-family: "PingFang SC", sans-serif;
     cursor: pointer;
     transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
   }
   .rm-btn:hover, .rm-pill:hover,
   .rm-item.focus .rm-btn, .rm-item.pill.focus .rm-pill {
-    background: rgba(52, 44, 100, 0.72);
-    border-color: rgba(182, 168, 255, 0.55);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 16px rgba(150, 128, 255, 0.32),
-      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    background: rgba(255, 227, 186, 0.96);
+    border-color: rgba(224, 164, 96, 0.8);
+    box-shadow: 0 10px 26px rgba(120, 90, 50, 0.3), 0 0 16px rgba(255, 178, 107, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
     transform: scale(1.07);
   }
   .rm-btn {
@@ -74,7 +82,7 @@
   }
   @keyframes rmBob { from { transform: translateY(-1px); } to { transform: translateY(1.5px); } }
   .rm-icon { font-size: 21px; line-height: 1; animation: rmBob 2.4s ease-in-out infinite alternate; }
-  .rm-label { font-size: 12px; font-weight: 500; letter-spacing: 1px; margin-top: 4px; color: #cfd3e8; }
+  .rm-label { font-size: 12px; font-weight: 500; letter-spacing: 1px; margin-top: 4px; color: #6b6353; }
   /* 大分组的多列网格（替代单列长胶囊）：最多 7 行一列，居中展开 */
   .rm-item.pill {
     width: 168px;
@@ -90,11 +98,11 @@
     border-radius: 11px;
   }
   .rm-pill .rm-icon { font-size: 18px; line-height: 1; animation: none; flex: none; }
-  .rm-pill .rm-label { font-size: 13.5px; font-weight: 500; letter-spacing: 0.5px; margin: 0; color: #dde1f0; }
+  .rm-pill .rm-label { font-size: 13.5px; font-weight: 500; letter-spacing: 0.5px; margin: 0; color: #5b5344; }
   /* 网格首格的返回：更素一档 */
   .rm-item.pill.backrow .rm-pill {
-    background: rgba(30, 28, 54, 0.55);
-    color: #a9adc6;
+    background: rgba(255, 251, 243, 0.72);
+    color: #9a917e;
   }
   .rm-hub {
     position: absolute;
@@ -112,13 +120,13 @@
     transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
   }
   .rm-hub:hover {
-    background: rgba(52, 44, 100, 0.72);
-    border-color: rgba(182, 168, 255, 0.55);
+    background: rgba(255, 227, 186, 0.96);
+    border-color: rgba(224, 164, 96, 0.8);
     transform: translate(-50%, -50%) scale(1.07);
   }
   @keyframes rmPulse {
-    from { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), 0 0 8px rgba(150, 128, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
-    to { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4), 0 0 18px rgba(150, 128, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+    from { box-shadow: 0 8px 22px rgba(120, 90, 50, 0.25), 0 0 8px rgba(255, 178, 107, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.65); }
+    to { box-shadow: 0 8px 22px rgba(120, 90, 50, 0.25), 0 0 18px rgba(255, 178, 107, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.65); }
   }
   /* 啪叽拟声词 */
   .fx-pop {
@@ -137,5 +145,38 @@
   <svg id="ov"></svg>
   <div id="menuLayer"></div>
   <script src="overlay.js"></script>
+  <!-- 扩展 overlay 特效：ov_<id>.js 调 registerOvFx 注册，须在 overlay.js 之后（文件可不存在，404 不影响运行） -->
+  <script src="ext/ov_follow.js"></script>
+  <script src="ext/ov_sit.js"></script>
+  <script src="ext/ov_sleepwalk.js"></script>
+  <script src="ext/ov_stretch.js"></script>
+  <script src="ext/ov_juggle.js"></script>
+  <script src="ext/ov_magic.js"></script>
+  <script src="ext/ov_yoyo.js"></script>
+  <script src="ext/ov_balloon.js"></script>
+  <script src="ext/ov_roll.js"></script>
+  <script src="ext/ov_trampoline.js"></script>
+  <script src="ext/ov_slide.js"></script>
+  <script src="ext/ov_dance.js"></script>
+  <script src="ext/ov_kite.js"></script>
+  <script src="ext/ov_umbrellawalk.js"></script>
+  <script src="ext/ov_umbrellafly.js"></script>
+  <script src="ext/ov_stargaze.js"></script>
+  <script src="ext/ov_confetti.js"></script>
+  <script src="ext/ov_snow.js"></script>
+  <script src="ext/ov_lantern.js"></script>
+  <script src="ext/ov_photo.js"></script>
+  <script src="ext/ov_hide.js"></script>
+  <script src="ext/ov_rps.js"></script>
+  <script src="ext/ov_arrowdodge.js"></script>
+  <script src="ext/ov_tightrope.js"></script>
+  <script src="ext/ov_nightsleep.js"></script>
+  <script src="ext/ov_water.js"></script>
+  <script src="ext/ov_tomato.js"></script>
+  <script src="ext/ov_cheer.js"></script>
+  <script src="ext/ov_swing.js"></script>
+  <script src="ext/ov_meditate.js"></script>
+  <script src="ext/ov_fish.js"></script>
+  <script src="ext/ov_exercise.js"></script>
 </body>
 </html>
