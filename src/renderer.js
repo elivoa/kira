@@ -743,6 +743,7 @@ function doSleep(dur = null) {
 }
 
 function doWake() {
+  pendingSleepDur = null; // 清掉菜单哄睡存下的时长：sleepin 阶段被打断时别漏给下一次自主入睡
   sleepTop.style.transform = ''; // 停掉呼吸再伸懒腰
   swapSleepPose(SLEEP3_SRC);
   enter('sleepout', 0.9);
