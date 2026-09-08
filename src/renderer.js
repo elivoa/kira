@@ -246,6 +246,7 @@ const LINES = {
   ledge: ['上去看看！', '站高高~', '这边风景好~'],
   gohome: ['回去咯', '玩够了，回家~', '该回去了'],
   evade: ['不挡你啦~', '我挪挪~', '给你让个地儿~'],
+  nbEvade: ['哦哦我这就走', '挡到了挡到了', '在写字呀，那我让让~', '唔唔，不挡本本', '我溜我溜~'],
   dash: ['暴走！', '冲鸭！', '让开让开！'],
   dashSide: ['跑起来！', '哒哒哒哒', '跟上我！'],
   fly: ['御剑飞行！', '起飞咯~', '看我能飞多高'],
@@ -795,7 +796,7 @@ function doWalk(dir) {
   walkDir = dir || (Math.random() < 0.5 ? -1 : 1);
   walkEdge = null;
   Promise.all([window.pet.getStage(), window.pet.getPos()]).then(([st, [px]]) => {
-    walkEdge = { tx: walkDir > 0 ? st.maxX : st.minX, px };
+    walkEdge = { tx: nbClampTx(walkDir > 0 ? st.maxX : st.minX, px, st), px };
   }).catch(() => {});
   if (form === 'normal') {
     // 姐姐形态用走路序列帧散步：先翻牌转成走路当前帧，帧图朝左，facing = -walkDir 保证镜像方向正确
@@ -814,7 +815,7 @@ async function doWalkFar() {
   const st = await window.pet.getStage();
   const [px] = await window.pet.getPos();
   walkDir = px > (st.minX + st.maxX) / 2 ? -1 : 1; // 朝更远的一端
-  farwalk = { tx: walkDir > 0 ? st.maxX : st.minX, px };
+  farwalk = { tx: nbClampTx(walkDir > 0 ? st.maxX : st.minX, px, st), px };
   if (form === 'normal') {
     facing = -walkDir;
     enter('walkfarin', 0.32);
@@ -1595,12 +1596,27 @@ async function evadeTick() {
 async function evadeCheck() {
   const nowSec = performance.now() / 1000;
   if (nowSec - lastEvade < EVADE_COOLDOWN) return;
-  if (state !== 'idle' && state !== 'walk') return; // 其它动作状态（敲窗/爬墙/睡觉/被拖拽等）不打扰
+  if (state !== 'idle' && state !== 'walk' && state !== 'walkfar') return; // 其它动作状态（敲窗/爬墙/睡觉/被拖拽等）不打扰
+  if (nbTyping && Date.now() - nbLastBeat > NB_BEAT_TIMEOUT) nbTyping = false; // 心跳断了：本子多半已关，自行恢复
+  const [px, py] = await window.pet.getPos();
+  const pet = { x: px, y: py, w: winW(), h: winH() };
+  // typingguard：小本本输入中，整个本子窗口（含外扩）都是危险区，挡了立刻嘟囔着走开
+  const nbDanger = nbDangerRect();
+  if (nbDanger) {
+    if (rectsOverlap(pet, nbDanger)) {
+      // pickEvadeTarget 吃的是 active-window 的 {x,y,w,h} 形状，notebookBounds 是 Electron 的 width/height，先归一
+      const nbActive = { x: nbBounds.x, y: nbBounds.y, w: nbBounds.width, h: nbBounds.height };
+      const target = await pickEvadeTarget({ active: nbActive, caret: null }, px);
+      if (target) {
+        logEvent('自主', '你在小本子里输入，嘟嘟囔囔让开了');
+        doEvade(target, px, py, pick(LINES.nbEvade));
+      }
+    }
+    return; // typing 期间只避本子，下面的全局打字检测和软避让都歇着
+  }
   let ctx;
   try { ctx = await getInputContext(); } catch { return; }
   if (!ctx) return;
-  const [px, py] = await window.pet.getPos();
-  const pet = { x: px, y: py, w: winW(), h: winH() };
   if (ctx.typing) {
     softHits = 0;
     // 危险区：光标矩形四向外扩；拿不到光标用前台窗口矩形
@@ -1653,7 +1669,7 @@ async function pickEvadeTarget(ctx, px) {
   return { x, y: ty };
 }
 
-function doEvade(target, px, py) {
+function doEvade(target, px, py, line) {
   lastEvade = performance.now() / 1000;
   evading = { tx: target.x, ty: target.y, px, py };
   const dir = target.x >= px ? 1 : -1;
@@ -1661,8 +1677,68 @@ function doEvade(target, px, py) {
   // 姐姐形态翻牌换走路帧走过去，其它形态直接镜像走
   if (form === 'normal') { facing = -dir; enter('evadein', 0.32); }
   else { facing = dir; enter('evade'); }
-  say(pick(LINES.evade), 1500);
+  say(line || pick(LINES.evade), 1500);
 }
+
+// ---------- 打字避让（typingguard）：小本本输入时绝不挡本本 ----------
+// typing 状态由 notebook.js 经 notebook-say 通道（哨兵前缀 JSON）推来；
+// 本子窗口位置读 settings.notebookBounds（主进程在本子移动/缩放/关闭时持久化），typing 中每 8 秒重拉
+const NB_TYPING_PREFIX = '__nb_typing__:';
+const NB_BEAT_TIMEOUT = 10000; // 心跳超时：本子关了/崩了自行恢复正常
+let nbTyping = false;
+let nbBounds = null;  // 本子窗口屏幕坐标 {x, y, width, height}
+let nbLastBeat = 0;
+let nbBoundsT = 0;
+
+function nbOnTypingMsg(payload) {
+  let m;
+  try { m = JSON.parse(payload); } catch { return; }
+  nbLastBeat = Date.now();
+  if (!m.on) { nbTyping = false; return; }
+  const wasOff = !nbTyping;
+  nbTyping = true;
+  if (wasOff || Date.now() - nbBoundsT > 8000) nbRefreshBounds();
+  if (wasOff) evadeTick().catch(() => {}); // 已经开始输入：她已经挡在本子上的话马上走开
+}
+
+async function nbRefreshBounds() {
+  nbBoundsT = Date.now();
+  try {
+    const s = await window.pet.getSettings();
+    const b = s && s.notebookBounds;
+    nbBounds = b && typeof b.x === 'number' ? b : null;
+  } catch {}
+}
+
+// 本子危险矩形（四向外扩）：水平/垂直任一不相交就不用避
+function nbDangerRect() {
+  if (!nbTyping || !nbBounds) return null;
+  const m = 36;
+  return { x: nbBounds.x - m, y: nbBounds.y - m, w: nbBounds.width + m * 2, h: nbBounds.height + m * 2 };
+}
+
+// 地面行走轴上的禁入区间：窗口左上角 x 落在 [min, max] 内就会压到本子；本子不在地面高度返回 null
+function nbWalkSpan(st) {
+  const d = nbDangerRect();
+  if (!d) return null;
+  if (st.floorY + winH() <= d.y || st.floorY >= d.y + d.h) return null;
+  return { min: d.x - winW(), max: d.x + d.w };
+}
+
+// 行走目标 x 的禁入夹取：目标落进本子区间、或整段路径要横穿本子，都改成停在区间外一侧
+function nbClampTx(tx, px, st) {
+  const span = nbWalkSpan(st);
+  if (!span) return tx;
+  const lo = Math.max(st.minX, span.min - 4), hi = Math.min(st.maxX, span.max + 4);
+  if (px <= span.min && tx > span.min) return lo;
+  if (px >= span.max && tx < span.max) return hi;
+  if (tx > span.min && tx < span.max) return px < (span.min + span.max) / 2 ? lo : hi; // 她在区间内：往近的一侧走出去
+  return tx;
+}
+
+// typing 期间不进随机池的动作：会横穿/压到本子区域的位移动作（菜单手动触发不拦）
+const NB_POOL_BLOCK = new Set(['walkfar', 'dash', 'fly', 'drive', 'goledge', 'climb', 'knock', 'wallbang', 'mischief', 'flutefly']);
+function nbPoolOk(id) { return !nbTyping || !NB_POOL_BLOCK.has(id); }
 
 // ---------- 日志（自主动作 / 交互 / 系统事件） ----------
 function logEvent(type, text) {
@@ -1857,7 +1933,7 @@ async function askBrain() {
   for (const id in ACTIONS) {
     const a = ACTIONS[id];
     // DISPATCH 无实现的（ext 文件未落地的新动作）不进池，否则选中即 TypeError
-    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id) || !DISPATCH[id]) continue;
+    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id) || !DISPATCH[id] || !nbPoolOk(id)) continue;
     pool.push({ id, name: a.name, intrusive: !!a.intrusive });
   }
   if (!pool.length) return null;
@@ -1944,7 +2020,7 @@ async function idleRandomOnce() {
   for (const id in ACTIONS) {
     const a = ACTIONS[id];
     // DISPATCH 无实现的（ext 文件未落地的新动作）不进池，否则选中即 TypeError
-    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id) || !DISPATCH[id]) continue;
+    if (!a.auto || !a.forms.includes(form) || !enabled(id) || !canAfford(id) || !DISPATCH[id] || !nbPoolOk(id)) continue;
     const w = actionWeight(id);
     pool.push([id, w]);
     total += w;
@@ -3439,8 +3515,14 @@ function easeInOut(k) {
   return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
 }
 
-// 笔记本带话：气泡提示
-window.pet.onNotebookSay((text) => say(text, 1500));
+// 笔记本带话：气泡提示；typingguard 控制消息（哨兵前缀 JSON）不上屏，转给打字避让
+window.pet.onNotebookSay((text) => {
+  if (typeof text === 'string' && text.startsWith(NB_TYPING_PREFIX)) {
+    nbOnTypingMsg(text.slice(NB_TYPING_PREFIX.length));
+    return;
+  }
+  say(text, 1500);
+});
 
 logEvent('系统', 'Kira 起床啦');
 requestAnimationFrame(frame);
