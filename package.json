@@ -1,6 +1,6 @@
 {
   "name": "summon-pet",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "桌面宠物",
   "main": "src/main.js",
   "scripts": {
