@@ -158,7 +158,7 @@
   .bubble.md p:last-child, .bubble.md .md-block:last-child > :last-child { margin-bottom: 0; }
   .bubble.md h1, .bubble.md h2, .bubble.md h3, .bubble.md h4 { margin: 6px 0; font-size: 15px; }
   .bubble.md ul, .bubble.md ol { margin: 0 0 8px; padding-left: 20px; }
-  .bubble.md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid #3b3933; color: #9d998f; }
+  .bubble.md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid #3b3933; color: #44423c; }
   .bubble.md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: #2f2e29; color: #e7e5de; border-radius: 4px; padding: 1px 4px; }
   .bubble.md pre { background: #2f2e29; color: #e7e5de; border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
   .bubble.md pre code { background: none; padding: 0; }
@@ -289,6 +289,8 @@
   .filter-btn.on { background: #dddad1; color: #1b1a17; }
   .filter-btn:hover { filter: brightness(1.12); }
   .empty { color: #7e7b72; text-align: center; margin-top: 60px; }
+  /* 机器人 tab 的到顶标记：沿用 empty 配色，但不要占位符的大上边距 */
+  .empty.bot-top-done { margin-top: 6px; }
   /* 历史页：日期 banner */
   .date-banner {
     display: flex;
