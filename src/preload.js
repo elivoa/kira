@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('pet', {
   kiraBubbleDismiss: () => ipcRenderer.send('kira-bubble-dismiss'),
   kiraBubbleOpen: () => ipcRenderer.send('kira-bubble-open'),
   kiraBubbleIgnore: (flag) => ipcRenderer.send('kb-ignore', flag),
+  kbOpenLink: (href) => ipcRenderer.send('kb-open-link', href),
   // 归一化飞书消息（事件/轮询/小本子发言的回答）：{t, role, content, id, source}
   onFeishuMsg: (fn) => {
     const h = (_e, m) => fn(m);
