@@ -571,7 +571,8 @@ function createKiraBubble() {
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: false,
-    focusable: false,
+    // 要能吃键盘焦点（Esc 关闭泡泡）；show 时才 focus，平时不抢
+    focusable: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -601,6 +602,8 @@ function showKiraBubble(text) {
   anchorKiraBubble(); // 只有第一次会真正锚定
   kiraBubbleWin.webContents.send('kira-bubble-show', { text });
   if (!kiraBubbleWin.isVisible()) kiraBubbleWin.showInactive();
+  // 把键盘焦点给泡泡，Esc 才关得掉；泡泡里没有输入框，误落的按键无害。失焦不处理（不自动关）
+  kiraBubbleWin.focus();
 }
 
 // 按桌宠上报的头顶锚点（窗口局部坐标）换算屏幕位置，夹在当前显示器工作区内

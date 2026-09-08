@@ -1,5 +1,5 @@
 // kira 消息泡泡渲染层：markdown 渲染走 MarkdownStream 静态渲染（markdown-it 配置与 KaTeX MATH_OPTIONS 同本本）、
-// 链接点击走系统浏览器（不算关闭）、单击关闭（选中文字不算）、双击或右下角 💬 打开 kira tab、
+// 链接点击走系统浏览器（不算关闭）、Esc 或右上角 ✕ 关闭、双击或右下角 💬 打开 kira tab、
 // 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（框边缘拖，文字不拖）
 const kb = document.getElementById('kb');
 const kbText = document.getElementById('kbText');
@@ -7,18 +7,21 @@ const kbClose = document.getElementById('kbClose');
 const kbOpen = document.getElementById('kbOpen');
 
 let shown = false;
-let closeTimer = null;
 
 window.pet.onKiraBubbleShow(({ text }) => {
-  // 新消息到达时取消待执行的单击关闭，否则旧定时器会在 shown===true 时把新泡泡误关
-  clearTimeout(closeTimer);
-  closeTimer = null;
   window.MarkdownStream.render(kbText, text || '');
   kb.classList.add('show');
   shown = true;
 });
 
-// 链接点击：capture 阶段拦下并 stopPropagation，事件到不了 kb 的单击关闭；交给主进程开系统浏览器。
+function dismiss() {
+  if (!shown) return;
+  shown = false;
+  kb.classList.remove('show');
+  window.pet.kiraBubbleDismiss();
+}
+
+// 链接点击：capture 阶段拦下并 stopPropagation；交给主进程开系统浏览器。
 // 同 href 300ms 去重：双击序列是 click→click→dblclick，两次 click 都会走到这，不去重会开两个相同标签
 let lastHref = null;
 let lastTime = 0;
@@ -36,46 +39,27 @@ document.addEventListener('click', (e) => {
   window.pet.kbOpenLink(href);
 }, true);
 
-// 单击关闭：~250ms 去抖——双击序列是 click→click→dblclick，立即关闭会吃掉 dblclick，
-// 让双击打开 kira 永远不可达；dblclick 到达时取消这个定时器。点了但选中文字不算关闭（那是想复制）
-kb.addEventListener('click', () => {
-  if (!shown) return;
-  if (window.getSelection().toString()) return;
-  clearTimeout(closeTimer);
-  closeTimer = setTimeout(() => {
-    closeTimer = null;
-    if (!shown) return;
-    shown = false;
-    kb.classList.remove('show');
-    window.pet.kiraBubbleDismiss();
-  }, 250);
+// Esc 关闭：窗口 focusable，show 时主进程会把焦点给它
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') dismiss();
 });
 
-// 右上角 ✕ 关闭按钮：stopPropagation 防冒泡到 kb 的单击关闭重复触发
-kbClose.addEventListener('click', (e) => {
-  e.stopPropagation();
-  if (!shown) return;
-  shown = false;
-  kb.classList.remove('show');
-  window.pet.kiraBubbleDismiss();
-});
+// 右上角 ✕ 关闭按钮
+kbClose.addEventListener('click', () => dismiss());
 
-// 右下角 💬 按钮：打开小本子的 kira tab（同时关掉泡泡）；stopPropagation 防触发 kb 的单击关闭，
+// 右下角 💬 按钮：打开小本子的 kira tab（同时关掉泡泡）；
 // shown 守卫挡住双击序列的第二次 click，避免重复打开
-kbOpen.addEventListener('click', (e) => {
-  e.stopPropagation();
+kbOpen.addEventListener('click', () => {
   if (!shown) return;
   shown = false;
   kb.classList.remove('show');
   window.pet.kiraBubbleOpen();
 });
 
-// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或按钮上不算。
-// 取消单击关闭的去抖定时器，否则 250ms 后泡泡会被误关
+// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或按钮上不算
 kb.addEventListener('dblclick', (e) => {
   if (e.target.closest('a') || e.target.closest('button')) return;
-  clearTimeout(closeTimer);
-  closeTimer = null;
+  if (!shown) return;
   shown = false;
   kb.classList.remove('show');
   window.pet.kiraBubbleOpen();
