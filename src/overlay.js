@@ -869,6 +869,7 @@ const MENU_TREE = [
 
 let menuState = null; // { cx, cy, root, hub, ring1, ring2, sector, sectors, sectorHalf, focusSel, farR, level }
 let menuIdleTimer = null;
+let holdTrack = null; // 右键按住开菜单的跟手跟踪（见 startHoldTrack）
 
 // 10s 没人碰菜单就自动退出；悬停/点击任何菜单项都会重置计时
 function armMenuIdle() {
@@ -879,6 +880,7 @@ function armMenuIdle() {
 // 关闭菜单：所有项缩回圆心后移除；notify 时通知主进程恢复覆盖层穿透
 function closeMenu(notify = true) {
   if (!menuState) return;
+  stopHoldTrack();
   clearTimeout(menuIdleTimer);
   menuIdleTimer = null;
   const { root } = menuState;
@@ -935,6 +937,7 @@ function openMenu(x, y) {
   // 点击扇区环带 = 直接激活该项（不必精确点球）；点在菜单外才关
   backdrop.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    if (holdTrack) holdTrack.state = 'done'; // 已有新按压，按住跟踪作废
     const st = menuState;
     const sel = st && sectorAt(e.clientX - st.cx, e.clientY - st.cy);
     if (sel) activate(sel.item);
@@ -943,6 +946,7 @@ function openMenu(x, y) {
   // 菜单展开时右键按下：空白处换位置重新展开（扇形上的激活留给松手，标记菜单式交互）
   backdrop.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    if (holdTrack) holdTrack.state = 'done';
     const st = menuState;
     const sel = st && sectorAt(e.clientX - st.cx, e.clientY - st.cy);
     if (!sel) openMenu(e.clientX, e.clientY);
@@ -950,6 +954,7 @@ function openMenu(x, y) {
   // 按住右键拖拽、松手选中：松手时扇形在环带上就激活；在圆心小圆里松手不算点击
   backdrop.addEventListener('mouseup', (e) => {
     if (e.button !== 2) return;
+    if (holdTrack) holdTrack.state = 'done';
     const st = menuState;
     if (!st) return;
     const d = Math.hypot(e.clientX - st.cx, e.clientY - st.cy);
@@ -993,6 +998,7 @@ function openMenu(x, y) {
   menuState = { cx, cy, root, hub, ring1, ring2, dim, sector, sectors: [], sectorHalf: 0, focusSel: null, farR: 0, level: 0 };
   root.addEventListener('mousemove', onMenuHover);
   armMenuIdle();
+  startHoldTrack(); // 本次若是右键按住开菜单，启用轮询跟手
   renderLevel(MENU_TREE, 0);
 }
 
@@ -1019,7 +1025,72 @@ function onMenuHover(e) {
   const st = menuState;
   if (!st || !st.sectors.length) return;
   armMenuIdle(); // 在扇区里移动也算有人碰
+  const ht = holdTrack;
+  if (ht && ht.state !== 'done') {
+    if (e.buttons & 2) {
+      ht.state = 'done'; // 按住中事件也能到达（按压点在覆盖层上）：原生事件够用，停掉轮询
+    } else if (ht.state === 'hold') {
+      // 按住拖动的松手瞬间：光标还停在按住时高亮的扇区上 = 选中它；
+      // 在圆心死区/远处松手时 focusSel 为 null，天然符合「不算点击」。
+      // 新鲜度检查：距最后一次轮询到移动已超静止兜底时长，不算松手（防延迟误激活）
+      ht.state = 'done';
+      const sel = sectorAt(e.clientX - st.cx, e.clientY - st.cy);
+      const fresh = performance.now() - ht.lastMoveAt <= 800;
+      if (fresh && st.focusSel && sel === st.focusSel) { activate(sel.item); return; }
+    } else {
+      ht.state = 'done'; // 事件正常流入，是单击开场而非按住
+    }
+  }
   setMenuFocus(sectorAt(e.clientX - st.cx, e.clientY - st.cy));
+}
+
+// 右键按住开菜单的跟手跟踪。
+// 根因：星盘由桌宠窗口的 contextmenu 触发，macOS 把一次按压的整条拖拽事件流
+// （mousemove/mouseup）都路由给 mousedown 所在的窗口——右键不松手拖动时事件全进了
+// 桌宠窗口，覆盖层一个都收不到，所以高亮不跟手。这里改为轮询光标位置：
+// 光标动过却持续收不到真实 mousemove = 右键还按着（事件被桌宠窗口吃掉），
+// 用轮询坐标驱动高亮；之后第一个「右键已松」的 mousemove 即松手瞬间（见 onMenuHover）。
+function startHoldTrack() {
+  stopHoldTrack();
+  if (typeof window.pet.getCursor !== 'function') return; // 测试页 stub 没有该通道
+  const ht = { state: 'watch', movedAt: 0, lastMoveAt: 0, lx: null, ly: null, ax: null, ay: null, timer: 0 };
+  holdTrack = ht;
+  ht.timer = setInterval(() => {
+    if (!menuState || holdTrack !== ht || ht.state === 'done') { stopHoldTrack(); return; }
+    window.pet.getCursor().then((pt) => {
+      const st = menuState;
+      if (!st || holdTrack !== ht || ht.state === 'done') return;
+      const lx = pt.x - window.screenX; // 屏幕绝对坐标 → 覆盖层本地坐标
+      const ly = pt.y - window.screenY;
+      if (ht.lx === null) { ht.lx = lx; ht.ly = ly; return; } // 首拍只建基准，不算移动
+      const moved = lx !== ht.lx || ly !== ht.ly;
+      ht.lx = lx;
+      ht.ly = ly;
+      if (moved) ht.lastMoveAt = performance.now();
+      if (ht.state === 'watch') {
+        if (moved && !ht.movedAt) ht.movedAt = performance.now();
+        // 光标动过却持续 ~150ms 收不到真实 mousemove，才认定右键仍按住：
+        // 排除普通单击后事件尚未流入的窗口期，避免把正常悬停误判成按住
+        if (!ht.movedAt || performance.now() - ht.movedAt <= 150) return;
+        ht.state = 'hold';
+      }
+      // 静止兜底：光标 800ms 没动也没事件流入，视作这次按住已不了了之（比如在压着的
+      // 桌宠窗口上松了手），结束跟踪——否则 hold 会一直活着，之后的第一次普通
+      // mousemove 会被误当松手，且 sel===focusSel 几乎必中 = 延迟误激活
+      if (performance.now() - ht.lastMoveAt > 800) { ht.state = 'done'; return; }
+      if (!moved && ht.ax === lx && ht.ay === ly) return; // 已按该位置刷过高亮
+      ht.ax = lx;
+      ht.ay = ly;
+      armMenuIdle(); // 按住拖动也算有人碰
+      setMenuFocus(sectorAt(lx - st.cx, ly - st.cy));
+    }).catch(() => {}); // 窗口销毁竞态时 getCursor 会拒，静默即可
+  }, 40);
+}
+
+function stopHoldTrack() {
+  if (!holdTrack) return;
+  clearInterval(holdTrack.timer);
+  holdTrack = null;
 }
 
 function setMenuFocus(sel) {
