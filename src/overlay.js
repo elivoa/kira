@@ -1031,10 +1031,12 @@ function onMenuHover(e) {
       ht.state = 'done'; // 按住中事件也能到达（按压点在覆盖层上）：原生事件够用，停掉轮询
     } else if (ht.state === 'hold') {
       // 按住拖动的松手瞬间：光标还停在按住时高亮的扇区上 = 选中它；
-      // 在圆心死区/远处松手时 focusSel 为 null，天然符合「不算点击」
+      // 在圆心死区/远处松手时 focusSel 为 null，天然符合「不算点击」。
+      // 新鲜度检查：距最后一次轮询到移动已超静止兜底时长，不算松手（防延迟误激活）
       ht.state = 'done';
       const sel = sectorAt(e.clientX - st.cx, e.clientY - st.cy);
-      if (st.focusSel && sel === st.focusSel) { activate(sel.item); return; }
+      const fresh = performance.now() - ht.lastMoveAt <= 800;
+      if (fresh && st.focusSel && sel === st.focusSel) { activate(sel.item); return; }
     } else {
       ht.state = 'done'; // 事件正常流入，是单击开场而非按住
     }
@@ -1051,7 +1053,7 @@ function onMenuHover(e) {
 function startHoldTrack() {
   stopHoldTrack();
   if (typeof window.pet.getCursor !== 'function') return; // 测试页 stub 没有该通道
-  const ht = { state: 'watch', movedAt: 0, lx: null, ly: null, ax: null, ay: null, timer: 0 };
+  const ht = { state: 'watch', movedAt: 0, lastMoveAt: 0, lx: null, ly: null, ax: null, ay: null, timer: 0 };
   holdTrack = ht;
   ht.timer = setInterval(() => {
     if (!menuState || holdTrack !== ht || ht.state === 'done') { stopHoldTrack(); return; }
@@ -1064,6 +1066,7 @@ function startHoldTrack() {
       const moved = lx !== ht.lx || ly !== ht.ly;
       ht.lx = lx;
       ht.ly = ly;
+      if (moved) ht.lastMoveAt = performance.now();
       if (ht.state === 'watch') {
         if (moved && !ht.movedAt) ht.movedAt = performance.now();
         // 光标动过却持续 ~150ms 收不到真实 mousemove，才认定右键仍按住：
@@ -1071,12 +1074,16 @@ function startHoldTrack() {
         if (!ht.movedAt || performance.now() - ht.movedAt <= 150) return;
         ht.state = 'hold';
       }
+      // 静止兜底：光标 800ms 没动也没事件流入，视作这次按住已不了了之（比如在压着的
+      // 桌宠窗口上松了手），结束跟踪——否则 hold 会一直活着，之后的第一次普通
+      // mousemove 会被误当松手，且 sel===focusSel 几乎必中 = 延迟误激活
+      if (performance.now() - ht.lastMoveAt > 800) { ht.state = 'done'; return; }
       if (!moved && ht.ax === lx && ht.ay === ly) return; // 已按该位置刷过高亮
       ht.ax = lx;
       ht.ay = ly;
       armMenuIdle(); // 按住拖动也算有人碰
       setMenuFocus(sectorAt(lx - st.cx, ly - st.cy));
-    });
+    }).catch(() => {}); // 窗口销毁竞态时 getCursor 会拒，静默即可
   }, 40);
 }
 
