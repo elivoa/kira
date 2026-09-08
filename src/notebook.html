@@ -11,7 +11,7 @@
     display: flex;
     flex-direction: column;
     font: 14px/1.6 "PingFang SC", sans-serif;
-    color: #dfe3f2;
+    color: #e0deda;
     background: transparent;
     overflow: hidden;
   }
@@ -23,7 +23,7 @@
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
-    border: 1px solid rgba(180, 188, 220, 0.32);
+    border: 1px solid rgba(196, 192, 182, 0.30);
   }
   .titlebar {
     flex: none;
@@ -32,9 +32,9 @@
     align-items: center;
     gap: 8px;
     padding: 0 12px;
-    background: linear-gradient(180deg, #20222c, #14151c);
-    border-bottom: 1px solid #2c2e3a;
-    color: #dfe3f2;
+    background: linear-gradient(180deg, #232220, #161514);
+    border-bottom: 1px solid #2c2b28;
+    color: #e0deda;
     font-weight: 600;
     font-size: 13px;
     -webkit-app-region: drag;
@@ -57,21 +57,21 @@
     flex: 1;
     display: flex;
     min-height: 0;
-    background: #171821;
+    background: #191917;
   }
-  /* 左侧书脊 + 侧页签（黑壳 + 银色金属边） */
+  /* 左侧书脊 + 侧页签（黑壳 + 金属边） */
   .spine {
     width: 112px;
     flex: none;
-    background: linear-gradient(180deg, #1c1d26, #14151c 60%, #101117);
-    border-right: 1px solid #2a2c38;
+    background: linear-gradient(180deg, #1d1c1a, #161514 60%, #121110);
+    border-right: 1px solid #2b2a26;
     display: flex;
     flex-direction: column;
     padding-top: 14px;
     user-select: none;
   }
   .brand {
-    color: rgba(223, 227, 242, 0.85);
+    color: rgba(224, 222, 216, 0.85);
     font-weight: 700;
     font-size: 13px;
     padding: 0 12px 12px;
@@ -83,28 +83,28 @@
     padding: 10px 8px 10px 12px;
     margin: 3px 0 3px 10px;
     border-radius: 9px 0 0 9px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #c5cada;
+    background: rgba(255, 255, 255, 0.07);
+    color: #c6c3bb;
     cursor: pointer;
   }
-  .tab:hover { background: rgba(255, 255, 255, 0.16); }
+  .tab:hover { background: rgba(255, 255, 255, 0.14); }
   .tab.hidden { display: none; }
   #botTab { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tab.active {
-    background: linear-gradient(180deg, #e6e9f5, #c3c9da);
-    color: #17181f;
+    background: linear-gradient(180deg, #eae8e2, #cdcbc3);
+    color: #1b1a17;
     font-weight: 600;
     box-shadow: -3px 2px 6px rgba(0, 0, 0, 0.4);
   }
-  /* 右侧内容：黑纸面 + 银灰横线 + 银蓝边线 */
+  /* 右侧内容：深色纸面 + 灰色横线 + 灰色边线 */
   .main {
     flex: 1;
     display: flex;
     flex-direction: column;
     min-width: 0;
     background:
-      linear-gradient(to right, transparent 22px, rgba(160, 172, 210, 0.22) 22px, rgba(160, 172, 210, 0.22) 24px, transparent 24px),
-      repeating-linear-gradient(to bottom, #171821 0, #171821 30px, #262836 30px, #262836 31px);
+      linear-gradient(to right, transparent 22px, rgba(168, 164, 154, 0.20) 22px, rgba(168, 164, 154, 0.20) 24px, transparent 24px),
+      repeating-linear-gradient(to bottom, #191917 0, #191917 30px, #262521 30px, #262521 31px);
   }
   .page {
     flex: 1;
@@ -127,7 +127,7 @@
   .msg .avatar {
     width: 32px; height: 32px;
     border-radius: 50%;
-    background: #2a2c38;
+    background: #2b2a26;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
     flex: none;
     object-fit: cover;
@@ -135,22 +135,22 @@
   .bubble {
     padding: 8px 13px;
     border-radius: 12px;
-    background: #242631;
-    border: 1px solid #313441;
-    color: #e8eaf4;
+    background: #252422;
+    border: 1px solid #34332d;
+    color: #e7e5de;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
     word-break: break-all;
     white-space: pre-wrap;
   }
   .msg.Kira .bubble {
-    background: linear-gradient(180deg, #c3c9de, #a8b0cc);
-    border-color: #8f97b8;
-    color: #23263a;
+    background: linear-gradient(180deg, #cfccc4, #b3afa5);
+    border-color: #948f83;
+    color: #24231e;
   }
   .msg.me .bubble {
-    background: #242631;
-    border-color: #313441;
-    color: #e8eaf4;
+    background: #252422;
+    border-color: #34332d;
+    color: #e7e5de;
   }
   /* markdown 渲染气泡（Kira 的回答） */
   .bubble.md { white-space: normal; line-height: 1.6; }
@@ -158,13 +158,13 @@
   .bubble.md p:last-child, .bubble.md .md-block:last-child > :last-child { margin-bottom: 0; }
   .bubble.md h1, .bubble.md h2, .bubble.md h3, .bubble.md h4 { margin: 6px 0; font-size: 15px; }
   .bubble.md ul, .bubble.md ol { margin: 0 0 8px; padding-left: 20px; }
-  .bubble.md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid #3c4052; color: #9aa0b8; }
-  .bubble.md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: #2e303e; border-radius: 4px; padding: 1px 4px; }
-  .bubble.md pre { background: #2e303e; border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
+  .bubble.md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid #3b3933; color: #9d998f; }
+  .bubble.md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: #2f2e29; color: #e7e5de; border-radius: 4px; padding: 1px 4px; }
+  .bubble.md pre { background: #2f2e29; color: #e7e5de; border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
   .bubble.md pre code { background: none; padding: 0; }
   .bubble.md table { border-collapse: collapse; margin: 0 0 8px; font-size: 12px; }
-  .bubble.md th, .bubble.md td { border: 1px solid #3c4052; padding: 3px 8px; }
-  .bubble.md hr { border: none; border-top: 1px dashed #3c4052; margin: 8px 0; }
+  .bubble.md th, .bubble.md td { border: 1px solid #3b3933; padding: 3px 8px; }
+  .bubble.md hr { border: none; border-top: 1px dashed #3b3933; margin: 8px 0; }
   .bubble.md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
   /* 「正在输入…」等待动画：点打在段落内部同行（直接挂 bubble 上会匿名成块换行），
      固定宽度内联盒，点的增减不换行、气泡不跳 */
@@ -180,49 +180,52 @@
     50% { content: '  · ·'; }
     75% { content: '  · · ·'; }
   }
+  /* 命令气泡用深底：等宽浅字压在 kira 浅气泡上读不清 */
   .msg.Kira .bubble.cmd {
     font-family: "SF Mono", Menlo, monospace;
     font-size: 12px;
-    color: #d8dce8;
+    background: #252422;
+    border-color: #34332d;
+    color: #d8d5cc;
     cursor: pointer;
   }
-  .msg.Kira .bubble.cmd:hover { background: #2c2e3c; }
+  .msg.Kira .bubble.cmd:hover { background: #2d2c27; }
   .msg.Kira .bubble.cmd::after {
     content: '点击复制';
     display: block;
     font-size: 10px;
-    color: #6d7288;
+    color: #76736a;
     margin-top: 2px;
   }
   .inputrow {
     display: flex;
     gap: 8px;
     padding: 10px 14px 12px 36px;
-    border-top: 1px dashed #343744;
+    border-top: 1px dashed #36342e;
   }
   .inputrow.hidden { display: none; }
   #input {
     flex: 1;
-    border: 1px solid #3a3d4e;
+    border: 1px solid #3b3933;
     border-radius: 10px;
     padding: 8px 12px;
     font: 13px "PingFang SC", sans-serif;
     outline: none;
-    background: #101116;
-    color: #e8eaf4;
+    background: #131211;
+    color: #e7e5de;
   }
-  #input:focus { border-color: #aab0c4; }
-  #input::placeholder { color: #6d7288; }
+  #input:focus { border-color: #aaa69b; }
+  #input::placeholder { color: #76736a; }
   #send {
     border: none;
-    background: #d9dceb;
-    color: #17181f;
+    background: #dddad1;
+    color: #1b1a17;
     font: 13px "PingFang SC", sans-serif;
     padding: 0 18px;
     border-radius: 10px;
     cursor: pointer;
   }
-  #send:hover { background: #b7bdd0; }
+  #send:hover { background: #c2beb2; }
   /* 日志页 */
   .logbar {
     display: flex;
@@ -232,8 +235,8 @@
   }
   #clearLog {
     border: none;
-    background: #2a2c3a;
-    color: #c5cada;
+    background: #2b2a25;
+    color: #c6c3bb;
     font: 12px "PingFang SC", sans-serif;
     padding: 4px 12px;
     border-radius: 8px;
@@ -248,26 +251,26 @@
     display: flex;
     align-items: baseline;
     gap: 8px;
-    background: #242631;
+    background: #252422;
     border-radius: 10px;
     padding: 6px 10px;
     font-size: 12px;
-    color: #d5d8e6;
+    color: #d6d3ca;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   }
-  .time { color: #7d8098; font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
+  .time { color: #7e7b72; font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
   .type { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 6px; color: #fff; }
-  .type-自主 { background: #6f65b8; }
-  .type-智能 { background: #3f9060; }
-  .type-交互 { background: #b05075; }
-  .type-系统 { background: #6d7085; }
-  .type-大模型 { background: linear-gradient(135deg, #8f83d8, #5f55b0); }
+  .type-自主 { background: #7d7699; }
+  .type-智能 { background: #5c8a6c; }
+  .type-交互 { background: #9e6478; }
+  .type-系统 { background: #716f66; }
+  .type-大模型 { background: linear-gradient(135deg, #9a90b8, #6a6288); }
   /* 同类合并条数徽标 */
   .cnt {
     flex: none;
     font-size: 10px;
-    color: #aab0c4;
-    background: #2a2c3a;
+    color: #aaa69b;
+    background: #2b2a25;
     border-radius: 8px;
     padding: 1px 7px;
     font-weight: 600;
@@ -276,16 +279,16 @@
   /* 日志页筛选开关 */
   .filter-btn {
     border: none;
-    background: #2a2c3a;
-    color: #c5cada;
+    background: #2b2a25;
+    color: #c6c3bb;
     font: 12px "PingFang SC", sans-serif;
     padding: 4px 12px;
     border-radius: 8px;
     cursor: pointer;
   }
-  .filter-btn.on { background: #d9dceb; color: #17181f; }
+  .filter-btn.on { background: #dddad1; color: #1b1a17; }
   .filter-btn:hover { filter: brightness(1.12); }
-  .empty { color: #7d8098; text-align: center; margin-top: 60px; }
+  .empty { color: #7e7b72; text-align: center; margin-top: 60px; }
   /* 历史页：日期 banner */
   .date-banner {
     display: flex;
@@ -293,11 +296,11 @@
     gap: 10px;
     margin: 8px 0 2px;
   }
-  .date-banner::before, .date-banner::after { content: ''; flex: 1; border-top: 1px dashed #343744; }
+  .date-banner::before, .date-banner::after { content: ''; flex: 1; border-top: 1px dashed #36342e; }
   .date-banner span {
     font-size: 11px;
-    color: #9aa0b8;
-    background: #22242f;
+    color: #9d998f;
+    background: #23221e;
     padding: 2px 12px;
     border-radius: 10px;
     flex: none;
@@ -326,14 +329,14 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #454a5e;
-    box-shadow: 0 0 4px rgba(140, 150, 200, 0.4);
+    background: #474540;
+    box-shadow: 0 0 4px rgba(150, 146, 136, 0.35);
     transition: all 0.18s;
     flex: none;
   }
-  .tm-item.active .tm-dot { background: #aab0c4; transform: scale(1.5); box-shadow: 0 0 8px rgba(170, 176, 196, 0.8); }
-  .tm-item:hover .tm-dot { transform: scale(1.5); background: #aab0c4; }
-  .tm-date { font-size: 10px; color: #7d8098; margin-right: 5px; font-variant-numeric: tabular-nums; }
+  .tm-item.active .tm-dot { background: #aaa69b; transform: scale(1.5); box-shadow: 0 0 8px rgba(170, 166, 155, 0.7); }
+  .tm-item:hover .tm-dot { transform: scale(1.5); background: #aaa69b; }
+  .tm-date { font-size: 10px; color: #7e7b72; margin-right: 5px; font-variant-numeric: tabular-nums; }
   /* hover 才展开的信息卡 */
   .tm-card {
     position: absolute;
@@ -341,8 +344,8 @@
     top: 50%;
     transform: translateY(-50%) scale(0.9);
     width: 180px;
-    background: #242631;
-    border: 1px solid #343744;
+    background: #252422;
+    border: 1px solid #36342e;
     border-radius: 10px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
     padding: 8px 10px;
@@ -351,13 +354,13 @@
     transition: all 0.15s;
   }
   .tm-item:hover .tm-card { opacity: 1; transform: translateY(-50%) scale(1); }
-  .tm-card .d { font-weight: 600; font-size: 12px; color: #e8eaf4; }
-  .tm-card .c { font-size: 11px; color: #7d8098; margin-top: 2px; }
-  .tm-card .p { font-size: 11px; color: #9aa0b8; margin-top: 4px; line-height: 1.4; word-break: break-all; }
+  .tm-card .d { font-weight: 600; font-size: 12px; color: #e7e5de; }
+  .tm-card .c { font-size: 11px; color: #7e7b72; margin-top: 2px; }
+  .tm-card .p { font-size: 11px; color: #9d998f; margin-top: 4px; line-height: 1.4; word-break: break-all; }
   /* 配置页 */
   .cfg { flex: 1; overflow-y: auto; padding: 14px 16px 14px 36px; display: flex; flex-direction: column; gap: 10px; }
   .cfg-sec {
-    background: #242631;
+    background: #252422;
     border-radius: 12px;
     padding: 12px 14px;
     display: flex;
@@ -366,23 +369,23 @@
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   }
   .cfg-title { font-weight: 700; }
-  .cfg-tip { font-size: 12px; color: #8a8fa3; }
+  .cfg-tip { font-size: 12px; color: #8c887d; }
   .cfg input {
-    border: 1px solid #3a3d4e;
+    border: 1px solid #3b3933;
     border-radius: 10px;
     padding: 8px 12px;
     font: 13px "PingFang SC", sans-serif;
     outline: none;
-    background: #101116;
-    color: #e8eaf4;
+    background: #131211;
+    color: #e7e5de;
   }
-  .cfg input:focus { border-color: #aab0c4; }
+  .cfg input:focus { border-color: #aaa69b; }
   .cfg input[type="range"] { border: none; padding: 0; }
   .cfg-btns { display: flex; gap: 8px; }
   .cfg-btn {
     border: none;
-    background: #d9dceb;
-    color: #17181f;
+    background: #dddad1;
+    color: #1b1a17;
     font: 13px "PingFang SC", sans-serif;
     padding: 6px 18px;
     border-radius: 10px;
@@ -390,13 +393,13 @@
   }
   /* 调试动作页：全部动作平铺成按钮墙，点一个演一个 */
   .dbg { padding: 14px 16px 14px 36px; overflow-y: auto; height: 100%; box-sizing: border-box; }
-  .dbg-group { font: 600 12px "PingFang SC", sans-serif; color: #9a9fb8; margin: 10px 2px 6px; letter-spacing: 1px; }
+  .dbg-group { font: 600 12px "PingFang SC", sans-serif; color: #9b978c; margin: 10px 2px 6px; letter-spacing: 1px; }
   .dbg-group:first-child { margin-top: 2px; }
   .dbg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
   .dbg-btn {
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.08);
-    color: #e8eaf4;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.07);
+    color: #e7e5de;
     font: 13px "PingFang SC", sans-serif;
     padding: 8px 6px 6px;
     border-radius: 10px;
@@ -406,14 +409,14 @@
     align-items: center;
     gap: 2px;
   }
-  .dbg-btn:hover { background: rgba(255, 255, 255, 0.18); }
-  .dbg-btn .i { font-size: 10px; color: #8a8fa8; }
+  .dbg-btn:hover { background: rgba(255, 255, 255, 0.15); }
+  .dbg-btn .i { font-size: 10px; color: #8c887d; }
   .dbg-btn.off { opacity: 0.38; }
-  .dbg-btn.fire { background: #d9dceb; color: #17181f; }
-  .cfg-btn:hover { background: #b7bdd0; }
-  .cfg-btn.ghost { background: #2a2c3a; color: #c5cada; }
-  .cfg-btn.ghost:hover { background: #343744; }
-  .cfg-status { font-size: 12px; color: #8a8fa3; }
+  .dbg-btn.fire { background: #dddad1; color: #1b1a17; }
+  .cfg-btn:hover { background: #c2beb2; }
+  .cfg-btn.ghost { background: #2b2a25; color: #c6c3bb; }
+  .cfg-btn.ghost:hover { background: #36342e; }
+  .cfg-status { font-size: 12px; color: #8c887d; }
   .cfg-status.ok { color: #4faa70; }
   /* 配置页动作开关（沿用原设置页分组） */
   .cfg-subgroup {
@@ -422,9 +425,9 @@
     justify-content: space-between;
     margin: 8px 0 2px;
     padding: 4px 0;
-    border-top: 1px dashed #343744;
+    border-top: 1px dashed #36342e;
     font-weight: 600;
-    color: #aab0c4;
+    color: #aaa69b;
   }
   .cfg-subgroup .warn { color: #d07090; font-size: 12px; font-weight: 400; margin-left: 6px; }
   .cfg-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0 5px 12px; }
@@ -432,7 +435,7 @@
   .sw input { display: none; }
   .sw i {
     position: absolute; inset: 0;
-    background: #343743; border-radius: 10px;
+    background: #37352f; border-radius: 10px;
     transition: background .15s;
   }
   .sw i::after {
@@ -443,7 +446,7 @@
     transition: transform .15s;
     box-shadow: 0 1px 3px rgba(0,0,0,.2);
   }
-  .sw input:checked + i { background: #aab6e0; }
+  .sw input:checked + i { background: #a3a08f; }
   .sw input:checked + i::after { transform: translateX(16px); }
   /* 右下角拉伸手柄 */
   #resizeHandle {
@@ -455,10 +458,10 @@
     cursor: nwse-resize;
     -webkit-app-region: no-drag;
     background:
-      linear-gradient(135deg, transparent 50%, rgba(180, 188, 220, 0.55) 50%,
-        rgba(180, 188, 220, 0.55) 60%, transparent 60%,
-        transparent 70%, rgba(180, 188, 220, 0.55) 70%,
-        rgba(180, 188, 220, 0.55) 80%, transparent 80%);
+      linear-gradient(135deg, transparent 50%, rgba(190, 186, 175, 0.5) 50%,
+        rgba(190, 186, 175, 0.5) 60%, transparent 60%,
+        transparent 70%, rgba(190, 186, 175, 0.5) 70%,
+        rgba(190, 186, 175, 0.5) 80%, transparent 80%);
   }
 </style>
   <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
