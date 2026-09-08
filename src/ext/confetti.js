@@ -2,6 +2,8 @@
 // 纸屑撒完 overlay 回报 fxDone('confetti') 提前收尾；8s 没收到回报由 tick 兜底强制收。
 (() => {
   let extCtx = null;
+  let fxSeq = 0; // 会话令牌自增
+  let mySeq = 0; // 当前场次的令牌
 
   function finish() {
     const ctx = extCtx;
@@ -17,11 +19,14 @@
     start(ctx) {
       if (!extCtx) { // 回执只订阅一次，EXT_CTX 是单例
         extCtx = ctx;
-        ctx.onFxDone((kind) => { if (kind === 'confetti') finish(); });
+        ctx.onFxDone((kind, receiptSeq) => {
+          if (kind === 'confetti' && (receiptSeq === undefined || receiptSeq === mySeq)) finish();
+        });
       }
+      mySeq = ++fxSeq;
       ctx.say(ctx.pick(LINES.confetti), 1600);
       ctx.fxText('🎉', 170, 280, 40);
-      ctx.fxStart('confetti');
+      ctx.fxStart('confetti', { seq: mySeq });
       ctx.enter('confetti.jump', 8); // 兜底时长：正常 3~4s 由 fxDone 提前收尾
     },
     tick(state, dt, t, ctx) {

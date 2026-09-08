@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+  }
+  /* kira 消息泡泡：与主动搭话粘性气泡同款（星空紫渐变 + 呼吸光晕），无边框圆角 + 尾巴 */
+  #kb {
+    position: absolute;
+    left: 50%;
+    bottom: 44px; /* 装粘性光晕（6+22px × 缩放上限，防窗口底边切直线） */
+    transform: translateX(-50%);
+    max-width: 480px;
+    padding: 12px 20px 14px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #8f83d8, #7d6fd0);
+    color: #fff;
+    font: 500 15px/1.6 "PingFang SC", sans-serif;
+    opacity: 0;
+    transition: opacity .18s ease;
+    pointer-events: none;
+    animation: stickyGlow 2s ease-in-out infinite alternate;
+    /* 框的边缘是拖拽区；文字本身不拖（可选中） */
+    -webkit-app-region: drag;
+  }
+  #kb.show { opacity: 1; pointer-events: auto; }
+  @keyframes stickyGlow {
+    from { box-shadow: 0 6px 20px rgba(109, 93, 196, 0.45), 0 0 6px rgba(185, 168, 255, 0.45); }
+    to { box-shadow: 0 6px 22px rgba(109, 93, 196, 0.6), 0 0 16px rgba(185, 168, 255, 0.85); }
+  }
+  #kb::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -6px;
+    margin-left: -6px;
+    border: 6px solid transparent;
+    border-top-color: #7d6fd0;
+    border-bottom: 0;
+  }
+  /* 文字可选中；双击直达 kira tab，单击（没选中文字时）关闭 */
+  #kbText {
+    -webkit-app-region: no-drag;
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  #kbText.md p { margin: 0 0 6px; }
+  #kbText.md p:last-child { margin-bottom: 0; }
+  #kbText.md h1, #kbText.md h2, #kbText.md h3, #kbText.md h4 { margin: 4px 0; font-size: 16px; }
+  #kbText.md ul, #kbText.md ol { margin: 0 0 6px; padding-left: 18px; }
+  #kbText.md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: rgba(0,0,0,.25); border-radius: 4px; padding: 1px 4px; }
+  #kbText.md pre { background: rgba(0,0,0,.25); border-radius: 8px; padding: 6px 9px; margin: 0 0 6px; overflow-x: auto; }
+  #kbText.md pre code { background: none; padding: 0; }
+  #kbText.md blockquote { margin: 0 0 6px; padding-left: 9px; border-left: 3px solid rgba(255,255,255,.4); opacity: .85; }
+  #kbText.md table { border-collapse: collapse; margin: 0 0 6px; font-size: 12px; }
+  #kbText.md th, #kbText.md td { border: 1px solid rgba(255,255,255,.35); padding: 3px 7px; }
+  .kb-hint { display: block; font-size: 12px; font-weight: 400; opacity: 0.8; margin-top: 4px; -webkit-app-region: drag; user-select: none; }
+</style>
+</head>
+<body>
+  <div id="kb">
+    <div id="kbText" class="md"></div>
+    <span class="kb-hint">✦ 单击关闭 · 双击打开 kira</span>
+  </div>
+  <script src="../node_modules/markdown-it/dist/browser/markdown-it.umd.min.js"></script>
+  <script src="kira_bubble.js"></script>
+</body>
+</html>

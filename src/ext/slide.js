@@ -15,6 +15,7 @@ function slideFront(form) {
 }
 
 let slideSt = null; // { ready, st, phase, t, px, py, gx, gy, sx, sy, ex, ey, goDur, slideDur, lean, dustT, goX, goY }
+let slideWd = null; // 打断看门狗
 
 registerAction({
   id: 'slide',
@@ -24,6 +25,13 @@ registerAction({
     ctx.say(ctx.pick(LINES.slide), 1600);
     slideSt = { ready: false };
     ctx.enter('slide', 13); // 13s 硬超时兜底
+    // 打断看门狗：菜单/大模型切动作不会换回立绘（拖拽路径内核会换），攀爬帧不能赖着
+    clearInterval(slideWd);
+    slideWd = setInterval(() => {
+      if (ctx.state === 'slide') return;
+      clearInterval(slideWd); slideWd = null;
+      if (slideSt) { slideSt = null; ctx.swapSprite(slideFront(ctx.form)); }
+    }, 300);
     Promise.all([ctx.getStage(), ctx.getPos(), ctx.activeWindow()]).then(([st, [px, py], aw]) => {
       if (ctx.state !== 'slide' || !slideSt) return; // 初始化期间被打断，放弃
       const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -60,6 +68,7 @@ registerAction({
     if (state !== 'slide') return false;
     const done = () => {
       slideSt = null;
+      clearInterval(slideWd); slideWd = null;
       ctx.swapSprite(slideFront(ctx.form));
       ctx.enter('idle');
       ctx.idleWait = ctx.nextIdleWait(3, 6);

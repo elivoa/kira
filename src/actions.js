@@ -6,7 +6,6 @@ const ACTIONS = {
   walk:    { name: '走一走',   forms: ['normal', 'chibi', 'back'], intrusive: false, w: 22, auto: true },
   walkfar: { name: '走到另一边', forms: ['normal', 'chibi', 'back'], intrusive: false, w: 6,  auto: true },
   hop:     { name: '跳一下',   forms: ['normal', 'back'],    intrusive: false, w: 10, auto: true },
-  spin:    { name: '转个圈',   forms: ['normal', 'chibi', 'back'], intrusive: false, w: 9,  auto: true },
   sway:    { name: '撒个娇',   forms: ['normal'],            intrusive: false, w: 10, auto: true },
   point:   { name: '指人发火', forms: ['normal'],            intrusive: false, w: 5,  auto: true },
   qbounce: { name: '蹦蹦跳',   forms: ['chibi'],             intrusive: false, w: 16, auto: true },

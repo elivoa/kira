@@ -2,10 +2,12 @@
 const ov = document.getElementById('ov');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// 桌宠整体缩放系数（settings._size）：覆盖层里的人物/道具图也要跟着变大变小
+// 桌宠整体缩放系数（settings._size × 屏幕基数 _screenK）：覆盖层里的人物/道具图也要跟着变大变小
 let ovlK = 1;
-window.pet.getSettings().then((s) => { ovlK = (s && s._size) || 1; });
-window.pet.onSettings((s) => { ovlK = (s && s._size) || 1; });
+let cachedSize = 1; // settings._size 缓存（菜单「大小」当前档位标星用）
+const readK = (s) => ((s && s._size) || 1) * ((s && s._screenK) || 1);
+window.pet.getSettings().then((s) => { ovlK = readK(s); cachedSize = (s && s._size) || 1; });
+window.pet.onSettings((s) => { ovlK = readK(s); cachedSize = (s && s._size) || 1; });
 
 function resize() {
   ov.setAttribute('viewBox', `0 0 ${innerWidth} ${innerHeight}`);
@@ -140,11 +142,11 @@ function ensureSwordDefs() {
   el('stop', { offset: '100%', 'stop-color': '#dfe4f4' }, g);
 }
 
-// 真剑素材（assets/sword_blade.png：音符银刃 + 藏青柄 + K 坠彩虹穗），剑尖朝左，基准宽 190
+// 真剑素材（assets/fly_sword.png：音符银刃 + 藏青柄 + K 坠彩虹穗，内容已裁到 bbox），剑尖朝左，基准宽 190
 function makeSword() {
   const g = el('g', {});
-  const W = 190, H = W * 648 / 1447;
-  el('image', { href: '../assets/sword_blade.png', x: -W / 2, y: -H / 2, width: W, height: H }, g);
+  const W = 190, H = W * 436 / 1449;
+  el('image', { href: '../assets/fly_sword.png', x: -W / 2, y: -H / 2, width: W, height: H }, g);
   return g;
 }
 
@@ -407,8 +409,8 @@ window.pet.onPeek(({ side, y }) => {
 });
 
 function peekFace(side, y) {
-  // 大脸高度随整体缩放（不超过屏高 90%）
-  const H = Math.min(Math.round(innerHeight * 0.55 * ovlK), Math.round(innerHeight * 0.9));
+  // 大脸高度钉死屏高 70%（≥2/3）：这是全屏特效，不跟人物缩放（ovlK）缩
+  const H = Math.round(innerHeight * 0.7);
   const img = new Image();
   img.src = '../assets/head_big.png';
   img.onload = () => {
@@ -743,10 +745,16 @@ window.pet.onRopeEnd(ropeClear);
 // ext/ov_<id>.js 用 registerOvFx(kind, fn) 挂特效；桌宠侧 fxStart(kind, data) 经主进程转发到这里。
 // 特效结束由特效自己调 window.pet.fxDone(kind)，桌宠动作才能收尾
 const EXT_FX = {};
-function registerOvFx(kind, fn) { EXT_FX[kind] = fn; }
+function registerOvFx(kind, fn) {
+  if (EXT_FX[kind]) console.warn(`[ext] overlay 特效「${kind}」被重复注册，后者覆盖前者`);
+  EXT_FX[kind] = fn;
+}
 window.registerOvFx = registerOvFx;
 window.pet.onFxExt((kind, data) => {
-  if (EXT_FX[kind]) EXT_FX[kind](data);
+  const fn = EXT_FX[kind];
+  // 没注册 handler（ov_ 文件缺失）时立即回执：桌宠侧在等 fxDone 收尾，不能干等到兜底
+  if (!fn) { window.pet.fxDone(kind); return; }
+  try { fn(data); } catch (e) { window.pet.fxDone(kind); }
 });
 
 // ---------- 星盘右键菜单 ----------
@@ -760,7 +768,6 @@ const MENU_TREE = [
     { id: 'walk', icon: '🐾', label: '走一走' },
     { id: 'walkfar', icon: '🚶‍♀️', label: '走到另一边' },
     { id: 'hop', icon: '🐇', label: '跳一下' },
-    { id: 'spin', icon: '🌀', label: '转个圈' },
     { id: 'sway', icon: '💗', label: '撒个娇' },
     { id: 'point', icon: '👉', label: '指人发火' },
     { id: 'leave', icon: '👋', label: '走了走了' },
@@ -832,7 +839,17 @@ const MENU_TREE = [
     { id: 'quit', icon: '🚪', label: '退出' },
   ] },
   { id: 'notebook', icon: '📖', label: '小本子' },
-  { id: 'settings', icon: '⚙️', label: '设置' },
+  { id: 'settings', icon: '⚙️', label: '设置', children: [
+    { id: 'size', icon: '📏', label: '大小', children: [
+      { id: 'size:0.6', icon: '🤏', label: '迷你' },
+      { id: 'size:0.8', icon: '🐣', label: '偏小' },
+      { id: 'size:1', icon: '🧍', label: '标准' },
+      { id: 'size:1.25', icon: '🐱', label: '偏大' },
+      { id: 'size:1.5', icon: '🦣', label: '巨大' },
+    ] },
+    { id: 'debug', icon: '🐾', label: '调试动作' },
+    { id: 'settings', icon: '⚙️', label: '设置' },
+  ] },
   { id: '_close', icon: '✕', label: '取消' },
 ];
 
@@ -861,12 +878,37 @@ function closeMenu(notify = true) {
     e2.style.transition = 'opacity .22s';
     e2.style.opacity = '0';
   });
-  setTimeout(() => root.remove(), 260);
+  setTimeout(() => root.remove(), 160);
   if (notify) window.pet.menuClosed();
 }
 
+// 给「大小」分类的当前档位打 ✓：最接近 settings._size 的档位标星（用缓存值，同步不等 IPC）
+function markCurrentSize() {
+  const cat = MENU_TREE.flatMap((c) => [c, ...(c.children || [])]).find((c) => c.id === 'size');
+  if (!cat) return;
+  const v = cachedSize || 1;
+  let best = cat.children[0];
+  for (const item of cat.children) {
+    if (Math.abs(parseFloat(item.id.slice(5)) - v) < Math.abs(parseFloat(best.id.slice(5)) - v)) best = item;
+  }
+  for (const item of cat.children) {
+    item.label = item.label.replace(/ ✓$/, '') + (item === best ? ' ✓' : '');
+  }
+}
+
+// kira 配置缓存：主菜单的「Kira」入口只在配置好（unlocked + enabled）时出现
+let kiraConfigured = false;
+function refreshKiraConfigured() {
+  window.pet.getYomiConfig().then((c) => {
+    kiraConfigured = !!(c && c.unlocked && c.enabled && c.wsUrl);
+  });
+}
+refreshKiraConfigured();
+
 function openMenu(x, y) {
   closeMenu(false); // 已有菜单先静默关掉，由本次重新锚定
+  markCurrentSize(); // 给「大小」分类的当前档位打上 ✓（菜单项是静态树，每次开前重标）
+  refreshKiraConfigured(); // 顺手刷 kira 入口显隐（下次开菜单生效）
   const M = MENU_TREE.length > 8 ? 210 : 185; // 最大外半径 + 余量，防贴边（一级超过 8 项时圆盘半径更大）
   const cx = Math.min(Math.max(x, M), innerWidth - M);
   const cy = Math.min(Math.max(y, M), innerHeight - M);
@@ -884,13 +926,22 @@ function openMenu(x, y) {
     if (sel) activate(sel.item);
     else closeMenu();
   });
-  // 菜单展开时右键：点在扇区环带上 = 确定（等价左键激活）；点在空白处 = 换位置重新展开
+  // 菜单展开时右键按下：空白处换位置重新展开（扇形上的激活留给松手，标记菜单式交互）
   backdrop.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const st = menuState;
     const sel = st && sectorAt(e.clientX - st.cx, e.clientY - st.cy);
+    if (!sel) openMenu(e.clientX, e.clientY);
+  });
+  // 按住右键拖拽、松手选中：松手时扇形在环带上就激活；在圆心小圆里松手不算点击
+  backdrop.addEventListener('mouseup', (e) => {
+    if (e.button !== 2) return;
+    const st = menuState;
+    if (!st) return;
+    const d = Math.hypot(e.clientX - st.cx, e.clientY - st.cy);
+    if (d < 26) return; // 圆心小圆里松手：取消语义，不算点击
+    const sel = sectorAt(e.clientX - st.cx, e.clientY - st.cy);
     if (sel) activate(sel.item);
-    else openMenu(e.clientX, e.clientY);
   });
   root.appendChild(backdrop);
 
@@ -911,7 +962,7 @@ function openMenu(x, y) {
   hub.style.top = `${cy}px`;
   root.appendChild(hub);
 
-  // 压暗盘：垫在菜单项下面、装饰环上面，把身后的立绘压暗
+  // 背景薄纱：垫在菜单项下面、装饰环上面，极淡一层统一菜单区域的底色
   const dim = document.createElement('div');
   dim.className = 'rm-dim';
   dim.style.left = `${cx}px`;
@@ -980,6 +1031,12 @@ function renderLevel(items, level) {
   st.focusSel = null;
   st.sectors = [];
   st.sector.style.opacity = '0';
+  // 主层：配置了 kira 的话，在「小本子」前面插入 Kira 入口（动态项，不进静态树）
+  if (level === 0 && kiraConfigured) {
+    items = [...items];
+    const idx = items.findIndex((i) => i.id === 'notebook');
+    items.splice(idx >= 0 ? idx : items.length - 1, 0, { id: 'kira', icon: '🤖', label: 'Kira' });
+  }
   // 旧项缩回圆心后移除
   for (const it of st.root.querySelectorAll('.rm-item')) {
     it.style.transitionDelay = '0ms';
@@ -1005,6 +1062,8 @@ function renderLevel(items, level) {
   st.ring2.style.width = st.ring2.style.height = `${r * 2 + 40}px`;
   st.sector.style.width = st.sector.style.height = `${r * 2 + 92}px`;
   st.dim.style.width = st.dim.style.height = `${r * 2 + 150}px`;
+  // 网格模式里用 visibility 藏掉的装饰件，回圆盘模式要恢复
+  for (const e of [st.ring1, st.ring2, st.sector, st.dim]) e.style.visibility = '';
 
   // 均布圆周；末项是「取消」时整体旋转，让取消固定在正下方（90°）
   const hasClose = items[items.length - 1].id === '_close';
@@ -1033,7 +1092,7 @@ function renderLevel(items, level) {
     st.sectors.push({ el: it, angle: aDeg, item });
     // 错峰从圆心飞出
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      it.style.transitionDelay = `${i * 40}ms`;
+      it.style.transitionDelay = `${i * 14}ms`;
       it.style.opacity = '1';
       it.style.transform = 'translate(0px, 0px) scale(1)';
     }));
@@ -1065,11 +1124,8 @@ function renderListLevel(items, level) {
   const gridH = nRows * CELL_H + (nRows - 1) * GAP_Y;
   const gx = Math.min(Math.max(st.cx, gridW / 2 + 20), innerWidth - gridW / 2 - 20);
   const startY = Math.min(Math.max(st.cy - gridH / 2, 16), Math.max(16, innerHeight - gridH - 16));
-  // 装饰环/扇区/压暗盘在网格模式下没有意义，藏掉
-  st.ring1.style.width = st.ring1.style.height = '0px';
-  st.ring2.style.width = st.ring2.style.height = '0px';
-  st.sector.style.width = st.sector.style.height = '0px';
-  st.dim.style.width = st.dim.style.height = '0px';
+  // 装饰环/扇区/压暗盘在网格模式下没有意义，藏掉（用 visibility：0px 会留下 1px 边框点）
+  for (const e of [st.ring1, st.ring2, st.sector, st.dim]) e.style.visibility = 'hidden';
   st.farR = 0;
 
   cells.forEach((item, i) => {
@@ -1097,7 +1153,7 @@ function renderListLevel(items, level) {
     st.root.appendChild(it);
     // 错峰从圆心飞出
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      it.style.transitionDelay = `${i * 22}ms`;
+      it.style.transitionDelay = `${i * 10}ms`;
       it.style.opacity = '1';
       it.style.transform = 'translate(0px, 0px) scale(1)';
     }));

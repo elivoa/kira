@@ -3,13 +3,14 @@ const { app, BrowserWindow, ipcMain, screen, powerMonitor, dialog, Tray, Menu, n
 const { execFile } = require('child_process');
 const updater = require('./updater');
 const feishu = require('./feishu');
+const yomi = require('./yomi');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const path = require('path');
 
 // 窗口基础尺寸：比立绘（512 高）大一圈，给跳跃/旋转/乱飞等会探出身体的动作留余量
-// settings._size 是整体缩放系数（配置页滑块），实际窗口尺寸 = 基础尺寸 × 系数
+// 实际窗口尺寸 = 基础尺寸 × 屏幕自适应基数（人物不超屏 1/5，见 refreshScreenK）× settings._size 滑块
 // 注意：特效/道具坐标都标定在 340×620 逻辑画幅上（底部居中对齐窗口），改尺寸不用动它们
 const BASE_W = 460;
 const BASE_H = 740;
@@ -17,7 +18,15 @@ const BASE_H = 740;
 // winH() 仍是「内容高度」（脚底 = 窗口底往上 SHADOW_PAD），所有贴底/夹取公式语义不变；
 // 只有真正设置窗口像素高度的地方要 + SHADOW_PAD。阴影像素不随 _size 缩放，所以是固定值
 const SHADOW_PAD = 24;
-function sizeK() { return settings._size || 1; }
+// 屏幕自适应基数：人物（340×512 逻辑画幅）高/宽不超过所在屏工作区的 1/5，取较小的约束——
+// 大屏大、小屏小。窗口创建/applyWindowSize 时刷新缓存（跨屏拖拽途中不重算，避免窗口尺寸抖动）
+let screenKCache = null;
+function refreshScreenK() {
+  const a = win ? petArea() : screen.getPrimaryDisplay().workArea;
+  screenKCache = Math.min(a.height / 5 / 512, a.width / 5 / 340);
+}
+// 实际缩放 = 屏幕基数 × settings._size（配置页滑块仍是用户微调）
+function sizeK() { return (screenKCache || 1) * (settings._size || 1); }
 function winW() { return Math.round(BASE_W * sizeK()); }
 function winH() { return Math.round(BASE_H * sizeK()); }
 
@@ -178,8 +187,8 @@ const CHAT_TOOLS = [
         properties: {
           action: {
             type: 'string',
-            enum: ['hop', 'spin', 'sway', 'walk', 'walkfar', 'fly', 'sword', 'morph', 'desk', 'drive', 'goledge'],
-            description: 'hop跳一下 spin转个圈 sway撒娇 walk走一走 walkfar走到另一边 fly御剑飞行 sword化身成剑 morph变个身 desk来张桌子 drive去兜风 goledge去窗台玩',
+            enum: ['hop', 'sway', 'walk', 'walkfar', 'fly', 'sword', 'morph', 'desk', 'drive', 'goledge'],
+            description: 'hop跳一下 sway撒娇 walk走一走 walkfar走到另一边 fly御剑飞行 sword化身成剑 morph变个身 desk来张桌子 drive去兜风 goledge去窗台玩',
           },
         },
         required: ['action'],
@@ -462,6 +471,7 @@ function getCaret() {
 
 function createWindow() {
   const area = screen.getPrimaryDisplay().workAreaSize;
+  refreshScreenK();
   win = new BrowserWindow({
     width: winW(),
     height: winH() + SHADOW_PAD,
@@ -543,6 +553,54 @@ function createBubble() {
   bubbleWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   bubbleWin.setIgnoreMouseEvents(true, { forward: true });
   bubbleWin.loadFile(path.join(__dirname, 'bubble.html'));
+}
+
+// ---------- kira 消息泡泡（独立窗口，UI 同主动搭话粘性气泡） ----------
+// 与气泡窗的区别：初始位置定在人物头顶后就不再跟随人物移动；框边缘可拖动；内容可选中；双击直达 kira tab
+const KB_W = 560, KB_H = 480;
+let kiraBubbleWin = null;
+let kbAnchored = false; // 初始位置定过没有（定过就锁死，不再跟着人物动）
+
+function createKiraBubble() {
+  kiraBubbleWin = new BrowserWindow({
+    width: KB_W,
+    height: KB_H,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  kiraBubbleWin.setAlwaysOnTop(true, 'screen-saver');
+  kiraBubbleWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  kiraBubbleWin.setIgnoreMouseEvents(true, { forward: true });
+  kiraBubbleWin.loadFile(path.join(__dirname, 'kira_bubble.html'));
+}
+
+// 初始位置：人物头顶上方居中，夹在人物所在屏工作区内；只定这一次，之后人物怎么动都不影响它
+function anchorKiraBubble() {
+  if (kbAnchored || !kiraBubbleWin || !win) return;
+  const b = win.getBounds();
+  const a = petDisplay().workArea;
+  const x = Math.round(Math.min(Math.max(b.x + b.width / 2 - KB_W / 2, a.x), Math.max(a.x, a.x + a.width - KB_W)));
+  const y = Math.round(Math.max(b.y - KB_H - 8, a.y));
+  kiraBubbleWin.setBounds({ x, y, width: KB_W, height: KB_H });
+  kbAnchored = true;
+}
+
+function showKiraBubble(text) {
+  if (!kiraBubbleWin) return;
+  anchorKiraBubble(); // 只有第一次会真正锚定
+  kiraBubbleWin.webContents.send('kira-bubble-show', { text });
+  if (!kiraBubbleWin.isVisible()) kiraBubbleWin.showInactive();
 }
 
 // 按桌宠上报的头顶锚点（窗口局部坐标）换算屏幕位置，夹在当前显示器工作区内
@@ -690,6 +748,7 @@ function clampToDrag(x, y, cursor) {
 // 整体缩放变化时重设窗口尺寸，保持右下角锚定并夹回屏幕
 function applyWindowSize() {
   if (!win) return;
+  refreshScreenK();
   const b = win.getBounds();
   const w = winW(), h = winH() + SHADOW_PAD;
   win.setBounds({ x: Math.round(b.x + b.width - w), y: Math.round(b.y + b.height - h), width: w, height: h });
@@ -697,11 +756,43 @@ function applyWindowSize() {
   win.setPosition(p.x, p.y);
 }
 
+// 跨屏 resize 的「duang duang」弹性动画：阻尼振荡 ~0.75s（两三次回弹）从旧尺寸弹到新尺寸。
+// 窗口和渲染层同步弹（_screenK 每帧广播），锚定方式与 applyWindowSize 一致（右下），收尾无跳变
+let resizeAnim = null;
+function animateWindowResize() {
+  if (!win) return;
+  if (resizeAnim) clearInterval(resizeAnim);
+  const fromK = win.getBounds().width / BASE_W;
+  refreshScreenK();
+  const toK = sizeK();
+  if (Math.abs(toK - fromK) < 0.01) { applyWindowSize(); return; }
+  const userK = settings._size || 1;
+  const t0 = Date.now();
+  resizeAnim = setInterval(() => {
+    if (!win) { clearInterval(resizeAnim); resizeAnim = null; return; }
+    const t = (Date.now() - t0) / 750;
+    if (t >= 1) {
+      clearInterval(resizeAnim);
+      resizeAnim = null;
+      applyWindowSize(); // 坐实精确尺寸
+      win.webContents.send('settings-changed', { ...settings, _screenK: screenKCache || 1 });
+      return;
+    }
+    // 振幅指数衰减的余弦：k 绕 toK 弹两三次后收拢
+    const k = toK + (fromK - toK) * Math.exp(-6 * t) * Math.cos(12 * t);
+    const b = win.getBounds();
+    const w = Math.round(BASE_W * k), h = Math.round(BASE_H * k) + SHADOW_PAD;
+    win.setBounds({ x: Math.round(b.x + b.width - w), y: Math.round(b.y + b.height - h), width: w, height: h });
+    win.webContents.send('settings-changed', { ...settings, _screenK: k / userK });
+  }, 33);
+}
+
 app.whenReady().then(async () => {
   [WINDOWS_BIN, KEYS_BIN, CARET_BIN] = await Promise.all([ensureTool('windows'), ensureTool('keys'), ensureTool('caret')]); // 首次启动先补齐编译产物
   createWindow();
   createOverlay();
   createBubble();
+  createKiraBubble();
   win.on('move', placeBubble); // 拖拽/自主走动时气泡窗口跟着走
 
   // 显示器增删/ Metrics 变化：覆盖层重对屏，桌宠夹回可见区
@@ -758,12 +849,34 @@ app.whenReady().then(async () => {
   powerMonitor.on('resume', () => notifyPower(false));
   ipcMain.handle('get-power-state', () => screenAsleep);
 
+  // 所在屏变化检测：换屏（含拖拽跨屏）时重算屏幕基数并 resize 窗口。
+  // 行走途中节流 500ms 一查；拖拽途中只记标记不动窗口（跟手优先），松手落定后统一应用
+  let curDisplayId = null;
+  let pendingDispResize = false;
+  let dispCheckT = 0;
+  function displayMaybeChanged(force) {
+    if (!win) return;
+    const now = Date.now();
+    if (!force && now - dispCheckT < 500) return;
+    dispCheckT = now;
+    const d = petDisplay();
+    if (curDisplayId === null) { curDisplayId = d.id; return; }
+    if (d.id === curDisplayId && !pendingDispResize) return;
+    curDisplayId = d.id;
+    if (dragOffset) { pendingDispResize = true; return; }
+    pendingDispResize = false;
+    // 「duang duang」弹性动画换新尺寸（内部 refreshScreenK + 每帧广播 _screenK + 收尾坐实）
+    animateWindowResize();
+    syncOverlay();
+  }
+
   // 行走等自主移动：按增量移动窗口
   ipcMain.on('move-by', (_e, dx, dy) => {
     if (!win) return;
     const [x, y] = win.getPosition();
     const p = clampToScreen(Math.round(x + dx), Math.round(y + dy));
     win.setPosition(p.x, p.y);
+    displayMaybeChanged(false);
   });
 
   ipcMain.on('drag-start', () => {
@@ -778,6 +891,7 @@ app.whenReady().then(async () => {
     const cursor = screen.getCursorScreenPoint();
     const p = clampToDrag(Math.round(cursor.x - dragOffset.dx), Math.round(cursor.y - dragOffset.dy), cursor);
     win.setPosition(p.x, p.y);
+    displayMaybeChanged(false); // 跨屏拖拽：先记 pendingDispResize，松手再 resize
   });
 
   ipcMain.on('drag-end', () => {
@@ -790,6 +904,7 @@ app.whenReady().then(async () => {
     }
     dragOffset = null;
     syncOverlay(); // 被拎到别的显示器了，覆盖层跟过去
+    displayMaybeChanged(true); // 跨屏落定：应用拖拽途中记下的尺寸调整
   });
 
   // 点击穿透：渲染层根据光标是否在角色上来回切换
@@ -887,6 +1002,19 @@ app.whenReady().then(async () => {
   // 聊天后端：Kimi API（带 memory），历史也提供给笔记本渲染
   // 流式：id 由渲染层生成，token 经 chat-token 事件带回同一 id（防并发串话）
   ipcMain.handle('chat-send', async (_e, text, id) => {
+    // 「@kira」前缀或「kira，」：转给 kira 机器人（yomi wire），kira 的回答经事件流回小本子机器人 tab
+    // 不带 @ 的「kira 你好」（空格）仍留给她本人——@ 才是机器人的意思
+    const m = String(text || '').match(/^(?:@kira|kira[，,：:])\s*(.+)$/is);
+    if (m) {
+      const payload = m[1].replace(/^[，,：:\s]+/, '');
+      if (!payload) return { ok: false, text: '想说啥？「kira，」后面带上内容哦' };
+      try {
+        const reply = await yomi.handleNotebook(payload);
+        return { ok: true, text: reply };
+      } catch (err) {
+        return { ok: false, text: `kira 还没连上（${err.message}）` };
+      }
+    }
     try {
       const reply = await kimiChat(text, (delta) => {
         if (notebookWin) notebookWin.webContents.send('chat-token', { id, delta });
@@ -1021,6 +1149,60 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('feishu-history', () => feishu.listHistory());
 
+  // ---------- kira 链接（yomi wire 协议，替代飞书 SDK 直连） ----------
+  // daemon 事件流经 SubscribeAll 进来：kira 的回答 → 机器人 tab 上屏 + kira 消息泡泡（独立窗口）
+  const dispatchYomiMsg = (m) => {
+    if (notebookWin) notebookWin.webContents.send('feishu-msg', m);
+    if (m.role === 'assistant') showKiraBubble(m.content.slice(0, 800));
+  };
+  yomi.init({
+    getConfig: () => config.yomi || {},
+    onStatus: (s) => {
+      if (notebookWin) {
+        notebookWin.webContents.send('yomi-status', s);
+        notebookWin.webContents.send('feishu-status', s); // 机器人 tab 沿用旧通道
+      }
+    },
+    onMessage: dispatchYomiMsg,
+    onLog: (entry) => mainLog(entry.type || '系统', entry.text || ''),
+  });
+  if (config.yomi && config.yomi.enabled) yomi.start();
+  ipcMain.handle('get-yomi-config', () => {
+    const y = config.yomi || {};
+    return { wsUrl: y.wsUrl || '', token: y.token || '', sessionId: y.sessionId || '', enabled: !!y.enabled, unlocked: !!y.unlocked, ...yomi.getState() };
+  });
+  ipcMain.on('set-yomi-config', (_e, patch) => {
+    if (!patch || typeof patch !== 'object') return;
+    const y = config.yomi || (config.yomi = {});
+    if (typeof patch.wsUrl === 'string') y.wsUrl = patch.wsUrl.trim();
+    if (typeof patch.token === 'string') y.token = patch.token.trim();
+    if (typeof patch.sessionId === 'string') y.sessionId = patch.sessionId.trim();
+    if (typeof patch.enabled === 'boolean') y.enabled = patch.enabled;
+    if (typeof patch.unlocked === 'boolean') y.unlocked = patch.unlocked;
+    saveConfig();
+    yomi.restart();
+  });
+  ipcMain.handle('yomi-send', async (_e, text) => {
+    if (typeof text !== 'string' || !text.trim()) return { ok: false, error: '空消息' };
+    try {
+      const reply = await yomi.handleNotebook(text.trim().slice(0, 2000));
+      return { ok: true, reply };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('yomi-list-sessions', () => yomi.listSessions());
+  ipcMain.handle('yomi-history', () => yomi.listMessages());
+  // kira 消息泡泡：关闭/双击直达/点击穿透开关
+  ipcMain.on('kira-bubble-dismiss', () => { if (kiraBubbleWin) kiraBubbleWin.hide(); });
+  ipcMain.on('kira-bubble-open', () => {
+    if (kiraBubbleWin) kiraBubbleWin.hide();
+    openNotebook('bot');
+  });
+  ipcMain.on('kb-ignore', (_e, flag) => {
+    if (kiraBubbleWin) kiraBubbleWin.setIgnoreMouseEvents(flag, { forward: true });
+  });
+
   // 笔记本自绘边框：最小化和自定义拉伸
   ipcMain.on('nb-min', () => { if (notebookWin) notebookWin.minimize(); });
   let nbResize = null;
@@ -1095,8 +1277,8 @@ app.whenReady().then(async () => {
     if (typeof d.y === 'number') d.y -= area.y;
     overlay.webContents.send('fx-ext', kind, d);
   });
-  ipcMain.on('fx-ext-done', (_e, kind) => {
-    if (win) win.webContents.send('fx-ext-done', kind);
+  ipcMain.on('fx-ext-done', (_e, kind, seq) => {
+    if (win) win.webContents.send('fx-ext-done', kind, seq);
   });
   // 覆盖层的点击捕获开关（捣乱时本子区域拦截点击用）
   ipcMain.on('ov-ignore', (_e, flag) => {
@@ -1104,13 +1286,13 @@ app.whenReady().then(async () => {
   });
 
   // 动作开关设置
-  ipcMain.handle('get-settings', () => settings);
+  ipcMain.handle('get-settings', () => ({ ...settings, _screenK: screenKCache || 1 }));
   ipcMain.handle('get-version', () => app.getVersion());
   ipcMain.on('set-actions', (_e, patch) => {
     Object.assign(settings, patch);
     saveConfig();
     if (patch && patch._size) applyWindowSize(); // 整体缩放变了，窗口跟着变
-    if (win) win.webContents.send('settings-changed', settings);
+    if (win) win.webContents.send('settings-changed', { ...settings, _screenK: screenKCache || 1 });
   });
 
   // 数值存取
@@ -1228,9 +1410,22 @@ app.whenReady().then(async () => {
     overlay.webContents.send('menu-open', { x: cursor.x - b.x, y: cursor.y - b.y });
   });
 
-  // 星盘菜单选择：动作类转发给桌宠窗口，notebook/settings/quit 由主进程直接处理
+  // 星盘菜单选择：动作类转发给桌宠窗口，notebook/settings/quit/大小档位由主进程直接处理
   ipcMain.on('menu-select', (_e, id) => {
+    if (typeof id === 'string' && id.startsWith('size:')) {
+      // 大小档位：与配置页滑块同一套 _size 语义（0.6/0.8/1/1.25/1.5）
+      const v = parseFloat(id.slice(5));
+      if (v > 0) {
+        settings._size = v;
+        saveConfig();
+        applyWindowSize();
+        if (win) win.webContents.send('settings-changed', { ...settings, _screenK: screenKCache || 1 });
+      }
+      return;
+    }
     if (id === 'notebook') openNotebook();
+    else if (id === 'kira') openNotebook('bot'); // 跟 kira 的对话直达
+    else if (id === 'debug') openNotebook('debug'); // 调试动作页直达
     else if (id === 'settings') openNotebook('config'); // 设置已并入小本子配置页
     else if (id === 'quit') app.quit();
     else if (win) win.webContents.send('menu-action', id);

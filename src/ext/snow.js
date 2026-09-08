@@ -2,6 +2,8 @@
 // 雪停（8~12s + 2s 淡出）overlay 回报 fxDone('snow') 提前收尾；16s 没收到由 tick 兜底。
 (() => {
   let extCtx = null;
+  let fxSeq = 0; // 会话令牌自增
+  let mySeq = 0; // 当前场次的令牌
   let m = null; // { minX, maxX, x, tx, dir, retargetT, catchT }：跑动状态，x 为窗口左上角逐屏坐标
 
   function finish() {
@@ -20,11 +22,14 @@
     start(ctx) {
       if (!extCtx) { // 回执只订阅一次，EXT_CTX 是单例
         extCtx = ctx;
-        ctx.onFxDone((kind) => { if (kind === 'snow') finish(); });
+        ctx.onFxDone((kind, receiptSeq) => {
+          if (kind === 'snow' && (receiptSeq === undefined || receiptSeq === mySeq)) finish();
+        });
       }
+      mySeq = ++fxSeq;
       m = null;
       ctx.say(ctx.pick(LINES.snow), 1800);
-      ctx.fxStart('snow');
+      ctx.fxStart('snow', { seq: mySeq });
       ctx.enter('snow.run', 16); // 兜底时长：正常由 fxDone 提前收尾
       Promise.all([ctx.getStage(), ctx.getPos()]).then(([st, [px]]) => {
         m = {

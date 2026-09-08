@@ -1,10 +1,11 @@
 // 气球漂流（chibi）：她从窗口里消失（sprite visibility hidden，同 swordform 的处理），
 // overlay 画气球+软绳吊着她飘向屏幕另一边再飘回来（见 ov_balloon.js），
-// 收到 fxDone 回执后现身回弹收尾；覆盖层失联有 35s 兜底，绝不永远隐身。
+// 收到 fxDone 回执后现身回弹收尾；fxStart 未发出 3s 短兜底、覆盖层失联 35s 长兜底，绝不永远隐身。
 (function () {
   const MY_LINES = ['气球要起飞咯~', '带我去旅行！', '飘呀飘……', '抓稳咯，出发！'];
-  let bl = null;      // { iv, receipt } 进行中的会话
+  let bl = null;      // { iv, receipt, sent, seq } 进行中的会话
   let blCtx = null;
+  let fxSeq = 0;      // 会话令牌自增（防打断后快速重开的旧回执串台）
   let hooked = false; // onFxDone 只许挂一次（每调一次多一个 IPC 监听）
 
   function show(v) {
@@ -35,20 +36,24 @@
       blCtx = ctx;
       if (!hooked) {
         hooked = true;
-        ctx.onFxDone((kind) => { if (kind === 'balloon' && bl) bl.receipt = true; });
+        ctx.onFxDone((kind, receiptSeq) => {
+          if (kind === 'balloon' && bl && (receiptSeq === undefined || receiptSeq === bl.seq)) bl.receipt = true;
+        });
       }
       cleanup(true); // 防上次残留：旧 overlay 会话还在的话一并收掉
       ctx.say(ctx.pick(MY_LINES), 1600);
-      bl = { receipt: false, iv: null };
+      bl = { receipt: false, sent: false, iv: null, seq: ++fxSeq };
       // 出发点 = 她胸口的屏幕坐标（ctx 拿不到缩放系数，用 sprite 的 CSS 盒 + 窗口位置换算）
       const sp = document.getElementById('sprite');
       if (sp) {
         const r = sp.getBoundingClientRect();
         ctx.getPos().then(([px, py]) => {
-          if (!bl) return;
+          if (!bl || ctx.state !== 'balloon.wait') return;
+          bl.sent = true;
           ctx.fxStart('balloon', {
             x: Math.round(px + r.left + r.width / 2),
             y: Math.round(py + r.top + r.height * 0.42),
+            seq: bl.seq,
           });
         }).catch(() => {});
       }
@@ -66,6 +71,11 @@
           cleanup(false);
           ctx.fxBurst(170, 300, 12, 12, 56);
           ctx.fxText('锵！', 170, 250, 30);
+          ctx.enter('balloon.back', 0.55);
+          return true;
+        }
+        if (!bl.sent && ctx.stateT > 3) { // fxStart 没发出去（getPos 失败等）：短兜底直接现身，别隐满 35s
+          cleanup(false);
           ctx.enter('balloon.back', 0.55);
           return true;
         }

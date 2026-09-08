@@ -10,6 +10,7 @@
   let C = null;    // ctx：按键/戳击回调里读实时 state 用
   let hop = null;  // { t, dur, dx, dy, frac } 进行中的跳开（frac = 已结算位移比例）
   let tauntAt = 5; // 下一次嘲讽的 stateT
+  let driftY = 0;  // 跳开累计的垂直位移：hop.dy 均值非零，不回本会越跳越悬空
 
   const active = () => C && C.state === 'arrowdodge.play';
 
@@ -42,11 +43,19 @@
       C = ctx;
       hop = null;
       tauntAt = 5;
+      driftY = 0;
       ctx.logEvent('自主', '开始方向键逗宠');
       ctx.say(ctx.pick(INTRO), 2000);
       ctx.enter('arrowdodge.play', 15);
     },
     tick(state, dt, t, ctx) {
+      if (!String(state).startsWith('arrowdodge.')) return false;
+      // 没在跳时把攒下的垂直漂移缓回起跳高度
+      if (!hop && Math.abs(driftY) > 0.5) {
+        const my = Math.abs(driftY) <= 90 * dt ? -driftY : -Math.sign(driftY) * 90 * dt;
+        ctx.moveBy(0, my);
+        driftY += my;
+      }
       if (state === 'arrowdodge.play') {
         if (hop) {
           hop.t += dt;
@@ -55,7 +64,9 @@
           const f = Math.sin(Math.PI * 0.5 * k);
           const df = f - hop.frac;
           hop.frac = f;
-          ctx.moveBy(hop.dx * df, hop.dy * df);
+          const my = hop.dy * df;
+          ctx.moveBy(hop.dx * df, my);
+          driftY += my;
           ctx.tf.ty = -58 * Math.sin(Math.PI * k);
           ctx.tf.sx = 1.04; ctx.tf.sy = 0.96;
           if (k >= 1) hop = null;

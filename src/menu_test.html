@@ -48,7 +48,7 @@
     width: 64px;
     height: 64px;
     pointer-events: auto;
-    transition: transform 0.3s cubic-bezier(0.18, 1.35, 0.36, 1), opacity 0.22s ease;
+    transition: transform 0.16s cubic-bezier(0.18, 1.35, 0.36, 1), opacity 0.1s ease;
   }
   .rm-btn, .rm-pill, .rm-hub {
     background: rgba(255, 251, 243, 0.92);
@@ -140,6 +140,9 @@ window.pet = {
   onSettings() {},
   onFxExt() {}, onFxExtDone() {}, fxDone() {},
   onRope() {}, onRopeEnd() {},
+  getYomiConfig() { return Promise.resolve({ unlocked: true, enabled: true, wsUrl: 'wss://test', sessionId: 's1', status: 'online' }); },
+  onYomiStatus() {}, yomiSend() { return Promise.resolve({ ok: true }); },
+  yomiListSessions() { return Promise.resolve([]); }, yomiHistory() { return Promise.resolve([]); },
 };
 </script>
 <script src="overlay.js"></script>

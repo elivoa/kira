@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #2b2f3a;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  /* 窗口比内容高出底部 24px（main.js SHADOW_PAD）：立绘 drop-shadow(0 6px 14px)
+     向下的衰减画在这条余量里，不再被窗口底边切平。body 收短后所有绝对定位元素
+     锚到 body，顶边坐标系与原来逐像素一致；overflow 必须放开，否则阴影在同一条线上再被 body 切一次 */
+  body {
+    position: absolute;
+    inset: 0 0 24px 0;
+    width: auto;
+    height: auto;
+    overflow: visible;
+  }
+  #stage {
+    position: absolute;
+    inset: 0;
+    cursor: grab;
+  }
+  #stage.dragging { cursor: grabbing; }
+  /* 立绘锚定在窗口底部，顶部留出跳跃余量 */
+  #sprite {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    height: 512px;
+    transform-origin: 50% 100%;
+    will-change: transform;
+    pointer-events: none;
+    filter: drop-shadow(0 6px 14px rgba(20, 20, 50, 0.35));
+  }
+  /* 走路帧交叉淡化层：切帧时顶旧帧淡出，新帧在 #sprite 垫底，切换不生硬。
+     淡化 38ms：短于走速 140px/s 的切帧间隔（42ms），保证每次淡化完整收尾——
+     否则画面恒为前后两帧 ~50% 混合，淡色小件（手）会被冲没、动作发糊。
+     不挂 drop-shadow：淡出层也投影的话，每次切帧新旧两帧阴影叠加，
+     白底下阴影会以切帧节奏明暗闪烁；阴影只由 #sprite 承担 */
+  #spriteX {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    height: 512px;
+    transform-origin: 50% 100%;
+    will-change: transform, opacity;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 38ms linear;
+  }
+  /* 戳一戳冒出的爱心 */
+  .heart {
+    position: absolute;
+    font-size: 22px;
+    pointer-events: none;
+    animation: float-up 1s ease-out forwards;
+  }
+  @keyframes float-up {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to   { opacity: 0; transform: translateY(-56px) scale(1.35); }
+  }
+  /* 数值面板 */
+  #statsPanel {
+    position: absolute;
+    left: 50%;
+    top: 140px;
+    transform: translateX(-50%);
+    width: 240px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 6px 20px rgba(30, 30, 70, 0.2);
+    font: 13px/1.6 "PingFang SC", sans-serif;
+    color: #3a3660;
+    opacity: 0;
+    transition: opacity .2s ease;
+    pointer-events: none;
+  }
+  #statsPanel.show { opacity: 1; }
+  #statsPanel .st-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 5px 0;
+  }
+  #statsPanel .st-name { width: 64px; flex: none; font-weight: 600; }
+  #statsPanel .st-bar {
+    flex: 1;
+    height: 8px;
+    border-radius: 4px;
+    background: #e8e6f2;
+    overflow: hidden;
+  }
+  #statsPanel .st-fill { height: 100%; border-radius: 4px; }
+  #statsPanel .st-val { width: 26px; flex: none; text-align: right; color: #8a86a8; }
+  /* 法宝卡牌 */
+  #cardImg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 64px;
+    display: none;
+    pointer-events: none;
+    transform-origin: center;
+    filter: drop-shadow(0 0 10px rgba(160, 130, 255, 0.85));
+    will-change: transform;
+  }
+  /* 法宝踏板（御法宝飞行） */
+  #boardImg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 140px;
+    display: none;
+    pointer-events: none;
+    transform-origin: center;
+    z-index: 10;
+    filter: drop-shadow(0 0 5px rgba(120, 100, 220, 0.9)) drop-shadow(0 2px 3px rgba(20, 20, 50, 0.65));
+    will-change: transform;
+  }
+  /* 乱飞的笛子 */
+  #fluteImg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 60px;
+    display: none;
+    pointer-events: none;
+    transform-origin: center;
+    filter: drop-shadow(0 0 5px rgba(120, 100, 220, 0.9)) drop-shadow(0 2px 3px rgba(20, 20, 50, 0.65));
+    will-change: transform;
+  }
+  /* 睡觉场景图：按窗口宽度适配，不截断。双层结构：base 是完整静态场景（桌子不动），
+     top 用柔边椭圆遮罩只扣出人物，呼吸起伏只作用于 top 层 */
+  #sleepImg {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 340px;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity .7s ease;
+    pointer-events: none;
+    /* 和站立立绘同款的一圈淡阴影 */
+    filter: drop-shadow(0 6px 14px rgba(20, 20, 50, 0.35));
+  }
+  #sleepImg .base { display: block; width: 340px; height: auto; }
+  #sleepImg .top { position: absolute; top: 0; left: 0; width: 340px; height: auto; }
+  /* 漫画特效 SVG 层：340×620 逻辑画幅，底部居中对齐窗口（窗口加大后两侧/顶部是余量） */
+  #fx {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+  /* 爆裂星/拟声词：弹出后消散 */
+  .fx-pop {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fxpop .45s ease-out forwards;
+  }
+  @keyframes fxpop {
+    0%   { opacity: 1; transform: scale(.3) rotate(-6deg); }
+    55%  { opacity: 1; transform: scale(1.12) rotate(2deg); }
+    100% { opacity: 0; transform: scale(1.3) rotate(0deg); }
+  }
+  /* 速度线：出现后迅速淡出 */
+  .fx-line { animation: fxline .3s linear forwards; }
+  @keyframes fxline {
+    from { opacity: .95; }
+    to   { opacity: 0; }
+  }
+  /* 工作模式的烟雾 */
+  .fx-smoke {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fxsmoke .9s ease-out forwards;
+  }
+  @keyframes fxsmoke {
+    from { opacity: .55; transform: translateY(0) scale(.6); }
+    to   { opacity: 0; transform: translateY(-48px) scale(1.9); }
+  }
+  /* 尘土：膨胀上飘消散 */
+  .fx-dust {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fxdust .55s ease-out forwards;
+  }
+  @keyframes fxdust {
+    from { opacity: .85; transform: scale(.5) translateY(0); }
+    to   { opacity: 0; transform: scale(1.9) translateY(-16px); }
+  }
+  /* 长按弹出的小输入框：直接对她说话 */
+  #miniChat {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    width: 250px;
+    padding: 8px 13px;
+    border-radius: 15px;
+    border: 1.5px solid #b9a8ff;
+    background: rgba(255, 255, 255, 0.96);
+    font: 13px "PingFang SC", sans-serif;
+    color: #4a4470;
+    outline: none;
+    box-shadow: 0 4px 14px rgba(80, 60, 160, 0.28);
+    display: none;
+    transform: translateX(-50%) scale(0.9);
+    transition: transform .16s ease;
+  }
+  #miniChat.show { transform: translateX(-50%) scale(1); }
+  #miniChat::placeholder { color: #b3aed4; }
+  /* 看腿场景图：与睡觉场景同款定位 */
+  #legImg {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 340px;
+    height: auto;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity .5s ease;
+    pointer-events: none;
+    filter: drop-shadow(0 6px 14px rgba(20, 20, 50, 0.35));
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <img id="sprite" src="../assets/pet.png" data-cur="../assets/pet.png" draggable="false" alt="">
+    <img id="spriteX" src="../assets/pet.png" draggable="false" alt="">
+    <svg id="fx" width="340" height="620" viewBox="0 0 340 620"></svg>
+    <div id="statsPanel"></div>
+    <input id="miniChat" placeholder="对她说点什么…" maxlength="200" autocomplete="off">
+  </div>
+  <script src="actions.js"></script>
+  <script src="phrases.js"></script>
+  <!-- 动作扩展：core.js 先定义 registerAction，ext/<id>.js 逐个注册（文件可不存在，404 不影响运行） -->
+  <script src="ext/core.js"></script>
+  <script src="ext/follow.js"></script>
+  <script src="ext/sit.js"></script>
+  <script src="ext/sleepwalk.js"></script>
+  <script src="ext/stretch.js"></script>
+  <script src="ext/juggle.js"></script>
+  <script src="ext/magic.js"></script>
+  <script src="ext/yoyo.js"></script>
+  <script src="ext/balloon.js"></script>
+  <script src="ext/roll.js"></script>
+  <script src="ext/trampoline.js"></script>
+  <script src="ext/slide.js"></script>
+  <script src="ext/dance.js"></script>
+  <script src="ext/kite.js"></script>
+  <script src="ext/umbrellawalk.js"></script>
+  <script src="ext/umbrellafly.js"></script>
+  <script src="ext/stargaze.js"></script>
+  <script src="ext/confetti.js"></script>
+  <script src="ext/snow.js"></script>
+  <script src="ext/lantern.js"></script>
+  <script src="ext/photo.js"></script>
+  <script src="ext/hide.js"></script>
+  <script src="ext/rps.js"></script>
+  <script src="ext/arrowdodge.js"></script>
+  <script src="ext/tightrope.js"></script>
+  <script src="ext/nightsleep.js"></script>
+  <script src="ext/water.js"></script>
+  <script src="ext/tomato.js"></script>
+  <script src="ext/cheer.js"></script>
+  <script src="ext/swing.js"></script>
+  <script src="ext/meditate.js"></script>
+  <script src="ext/fish.js"></script>
+  <script src="ext/exercise.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -20,20 +20,28 @@
     effect: { mood: 2 },
     async start(ctx) {
       if (W) return;
+      const from = ctx.state;
+      W = { pending: true }; // 会话占位：await 往返期间挡住菜单连点的第二次触发
       let st, px;
       try {
         st = await ctx.getStage();
         [px] = await ctx.getPos();
-      } catch { return; }
+      } catch { W = null; return; }
+      if (ctx.state !== from) { W = null; return; } // IPC 往返期间被切走，别把她从新状态硬拽出来
       // 朝宽敞的一边溜达，最远 260px；贴边太近就少走点
       const roomR = st.maxX - px, roomL = px - st.minX;
       const dir = roomR >= roomL ? 1 : -1;
       const dist = Math.min(260, Math.max(60, (dir > 0 ? roomR : roomL) - 30));
       W = { st, dir, x0: px, px, target: px + dir * dist, phase: 'go' };
-      // 打断看门狗：状态被切走（拖走/菜单换动作）就收掉会话；
-      // 立绘不在这里恢复——拖拽会自己换回正面图，菜单换动作与内置动作同 flaw（飞图残留同类）
+      // 打断看门狗：状态被切走（拖走/菜单换动作）就收掉会话并换回正面立绘——
+      // 拖拽路径内核会换图，菜单/大模型切动作不会，撑伞图不能赖着
       W.guard = setInterval(() => {
-        if (W && ctx.state !== 'umbrellawalk') { clearInterval(W.guard); W = null; }
+        if (!W) return;
+        if (ctx.state !== 'umbrellawalk') {
+          clearInterval(W.guard);
+          W = null;
+          ctx.swapSprite(FRONT[ctx.form] || FRONT.normal);
+        }
       }, 400);
       ctx.say(ctx.pick(LINES.umbrellawalk), 1800);
       ctx.swapSprite(UMBRELLA_SRC);

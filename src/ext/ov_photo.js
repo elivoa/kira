@@ -2,17 +2,21 @@
 // → 拍立得照片（白边矩形贴她当前形态的图）在角落旋转弹出，停留 2s 再缩小消失。
 // 全程墙钟驱动，rAF + watchdog 兜底（同 flySword 模式）。
 (() => {
-  let running = false;
+  let cur = null; // 当前场次 { finish }
 
   registerOvFx('photo', (data) => {
-    if (running) { window.pet.fxDone('photo'); return; } // 防叠罗汉
-    running = true;
+    if (cur) cur.finish(); // 拆旧开新：重开特效比新场次干等旧场次淡出体验好
+    cur = startPhoto(data || {});
+  });
+
+  function startPhoto(data) {
+    const seq = data.seq;
     const k = ovlK;
     const layer = el('g', {});
 
     // 她的身体区：窗口(460x740 逻辑幅) 内底部居中的 340x620 画幅，四周留点余量
-    const px = data && typeof data.x === 'number' ? data.x : innerWidth / 2 - 230 * k;
-    const py = data && typeof data.y === 'number' ? data.y : innerHeight - 740 * k;
+    const px = typeof data.x === 'number' ? data.x : innerWidth / 2 - 230 * k;
+    const py = typeof data.y === 'number' ? data.y : innerHeight - 740 * k;
     const m = 24 * k;
     const bx = Math.max(8, px + 60 * k - m);
     const by = Math.max(8, py + 120 * k - m);
@@ -53,7 +57,7 @@
       fill: '#fff', stroke: 'rgba(0,0,0,.15)', 'stroke-width': 1.5,
     }, card);
     el('image', {
-      href: (data && data.form) === 'chibi' ? '../assets/chibi.png' : '../assets/pet.png',
+      href: data.form === 'chibi' ? '../assets/chibi.png' : '../assets/pet.png',
       x: -W / 2 + 12, y: -H / 2 + 12, width: W - 24, height: H - 46,
       preserveAspectRatio: 'xMidYMid meet',
     }, card);
@@ -68,8 +72,8 @@
       done = true;
       clearInterval(watchdog);
       layer.remove();
-      running = false;
-      window.pet.fxDone('photo');
+      if (cur === self) cur = null;
+      window.pet.fxDone('photo', seq);
     }
 
     function tick(now) {
@@ -122,5 +126,8 @@
       if (done) return;
       try { tick(performance.now()); } catch (e) { finish(); }
     }, 400);
-  });
+
+    const self = { finish };
+    return self;
+  }
 })();

@@ -6,7 +6,7 @@ const stage = document.getElementById('stage');
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 
-// 状态: idle / walk / hop / land / spin / sway / drag / poke
+// 状态: idle / walk / hop / land / sway / drag / poke
 //      / turnaway / away / gone / back / turnfront （走了走了系列）
 let state = 'idle';
 let stateT = 0;          // 当前状态已进行时间（秒）
@@ -234,7 +234,6 @@ window.addEventListener('mousemove', (e) => updateMouseIgnore(overSprite(e.clien
 const LINES = {
   poke: ['呜哇！', '别戳啦~', '嘿嘿', '干嘛呀？', '再戳我就不理你了！', '♪'],
   hop: ['嘿咻！', '飞起来了~'],
-  spin: ['转圈圈~', '晕晕的...'],
   sway: ['♪~', '啦啦啦~'],
   walk: ['散散步~', '去哪儿呢？'],
   walkfar: ['去那边看看~', '巡视一下领地~', '出发出发！'],
@@ -755,11 +754,6 @@ function doBrock() {
   if (Math.random() < 0.7) say(pick(LINES.brock), 1500);
 }
 
-function doSpin() {
-  enter('spin', 0.65);
-  say(pick(LINES.spin), 1200);
-}
-
 function doSway() {
   enter('sway', 1.8);
   say(pick(LINES.sway), 1500);
@@ -856,10 +850,11 @@ function turnFrame(k, newSrc, onSwap) {
   return 270 + 90 * (k * 2 - 1);
 }
 
-// 变身：翻牌中途切换形态和立绘高度
+// 变身：翻牌中途切换形态和立绘高度；随机换成另一个形态（不许原地变）
 let nextForm = 'chibi';
 function doMorph() {
-  doMorphTo(form === 'normal' ? 'chibi' : 'normal');
+  const pool = Object.keys(FORMS).filter((f) => f !== form);
+  doMorphTo(pool[(Math.random() * pool.length) | 0]);
 }
 
 // 切换到指定形态
@@ -1212,8 +1207,8 @@ function dashFrame(dt) {
 // 起飞爬升 → 高空波浪巡航（到边纸片人掉头）→ 滑翔落地
 let fly = null;
 
-// 飞行姿态立绘（assets/fly_girl.png：裙摆发丝向后飘的驭剑姿，脸朝左）
-const FLY_GIRL_SRC = '../assets/fly_girl.png';
+// 飞行姿态立绘（assets/fly_char.png：裙摆发丝向后飘的驭剑姿，脸朝左，内容已裁到 bbox）
+const FLY_GIRL_SRC = '../assets/fly_char.png';
 new Image().src = FLY_GIRL_SRC;
 
 async function doFly() {
@@ -1225,7 +1220,8 @@ async function doFly() {
     sub: 'takeoff', subT: 0,
     dir: px > (st.minX + st.maxX) / 2 ? -1 : 1,
     cruiseY: st.minY + rand(80, 300),
-    laps: 0, maxLaps: 2 + (Math.random() < 0.5 ? 1 : 0),
+    // 巡航按时间不按趟数：8~28s，加起飞降落 0.9s×2 全程 10~30s
+    laps: 0, cruiseDur: rand(8, 28),
     flipT: 1, lineT: 0, texted: false,
   };
   facing = -fly.dir; // 素材脸朝左：往右飞要镜像
@@ -1238,13 +1234,19 @@ async function doFly() {
 // 起飞时踏板从脚下升起，落地后踏板飞走
 const boardImg = document.createElement('img');
 boardImg.id = 'boardImg';
-boardImg.src = '../assets/sword_blade.png';
+boardImg.src = '../assets/fly_sword.png';
 stage.appendChild(boardImg);
 
-// boardY: 踏板中心在窗口里的 y（脚下）；boardRot: 角度。剑宽 200，中心对准脚下；剑尖随飞行方向镜像
-function boardShow(yC, rot) {
+// 新剑素材 1449×436（内容已裁到 bbox）：细长。宽度/抬升/倾角上限是一组联调出来的约束：
+// 剑穗垂在图底，巡航倾斜时穗尖会戳出窗口底边（764）——W210 + LIFT28 + 倾角≤12° 保证全程不出界，
+// 同时站立面（剑身上沿约图高 30% 处）贴在鞋底。剑尖朝左，随飞行方向镜像
+const BOARD_W = 210, BOARD_RATIO = 436 / 1449, BOARD_STAND = 0.3, BOARD_LIFT = 28, BOARD_MAX_ROT = 12;
+function boardShow(yC, rot, opacity = 1) {
   boardImg.style.display = 'block';
-  boardImg.style.transform = `translate(${FOOT_X - 100 * sizeK + offX()}px, ${yC - 45 * sizeK + offY()}px) rotate(${rot}deg) scaleX(${-fly.dir})`;
+  boardImg.style.opacity = opacity;
+  const w = BOARD_W * sizeK, h = w * BOARD_RATIO;
+  boardImg.style.width = `${w}px`;
+  boardImg.style.transform = `translate(${FOOT_X - w / 2 + offX()}px, ${yC - h * BOARD_STAND - BOARD_LIFT * sizeK + offY()}px) rotate(${rot}deg) scaleX(${-fly.dir})`;
 }
 
 function boardHide() { boardImg.style.display = 'none'; }
@@ -1257,6 +1259,9 @@ function flyFrame(dt) {
   if (f.flipT < 1) {
     f.flipT = Math.min(1, f.flipT + dt / 0.25);
     rotY = 180 * easeInOut(f.flipT);
+    // 翻牌完成瞬间把镜像交接给 facing：rotY 回 0 后人必须朝新方向飞，
+    // 否则剩下的巡航全程背向飞行（侧脸素材，掉头没交接的 bug）
+    if (f.flipT >= 1) facing = -f.dir;
   }
 
   if (f.sub === 'takeoff') {
@@ -1269,7 +1274,8 @@ function flyFrame(dt) {
     rot = f.dir * 6 * k;
     skew = -f.dir * 2 * k;
     sy = 1 + 0.05 * Math.sin(f.subT * 10);
-    boardShow(680 - 74 * k, f.dir * 10 * k);
+    // 升起前 40% 淡入：新剑带下垂剑穗，升出窗底那截会被硬切，用淡入遮掉
+    boardShow(680 - 74 * k, f.dir * 10 * k, Math.min(1, k * 2.5));
     if (!f.texted) { f.texted = true; fxText('嗖——', FOOT_X, 300); }
     if (k >= 1) { f.sub = 'cruise'; f.subT = 0; }
   } else if (f.sub === 'cruise') {
@@ -1286,7 +1292,9 @@ function flyFrame(dt) {
     rot = f.dir * 4 + f.dir * slope * 30;
     skew = -f.dir * 2;
     ty = -2 * Math.abs(Math.sin(f.subT * 6));
-    boardShow(606, f.dir * 6 + slope * 57.3 * f.dir * 0.7);
+    // 踏板贴坡度，但倾角上限 12°：剑穗垂在图底，再大的角会把穗尖甩出窗口底边
+    const boardRot = Math.max(-BOARD_MAX_ROT, Math.min(BOARD_MAX_ROT, f.dir * 6 + slope * 57.3 * f.dir * 0.7));
+    boardShow(606, boardRot);
     f.lineT -= dt;
     if (f.lineT <= 0) { fxSpeedLine(f.dir); f.lineT = 0.08; }
     if (turned) {
@@ -1294,8 +1302,9 @@ function flyFrame(dt) {
       f.flipT = 0;
       f.laps++;
       if (Math.random() < 0.4) fxText('嗖', FOOT_X, 320, 26);
-      if (f.laps >= f.maxLaps) { f.sub = 'glide'; f.subT = 0; f.landFromY = f.py; }
     }
+    // 巡航时间到就滑翔（不等掉头，从当前高度直接落）
+    if (f.subT >= f.cruiseDur) { f.sub = 'glide'; f.subT = 0; f.landFromY = f.py; }
   } else if (f.sub === 'glide') {
     // 滑翔落地：缓降 + 回正，踏板向下飞走
     const k = easeInOut(Math.min(f.subT / 0.9, 1));
@@ -1508,13 +1517,14 @@ window.pet.getSettings().then((s) => {
   actionEnabled = s || {};
   clickThrough = actionEnabled._clickThrough !== false;
   if (actionEnabled._home) homePos = actionEnabled._home; // 上次的常驻位置
-  sizeK = actionEnabled._size || 1;
+  // 整体缩放 = 用户滑块 × 屏幕自适应基数（主进程算好随 settings 下发）
+  sizeK = (actionEnabled._size || 1) * (actionEnabled._screenK || 1);
   applySpriteHeight();
 });
 window.pet.onSettings((s) => {
   actionEnabled = s || {};
   clickThrough = actionEnabled._clickThrough !== false; // 点击穿透默认开
-  sizeK = actionEnabled._size || 1; // 整体缩放（窗口已由主进程 resize）
+  sizeK = (actionEnabled._size || 1) * (actionEnabled._screenK || 1); // 整体缩放（窗口已由主进程 resize）
   applySpriteHeight();
   updateMouseIgnore(lastOver);
   // 拖动频率滑块会连续触发，节流到 3 秒一条
@@ -1704,7 +1714,6 @@ const EFFECTS = {
   walk: { jing: -3, mood: 1 },
   walkfar: { jing: -6, mood: 2 },
   hop: { jing: -4, mood: 2 },
-  spin: { jing: -3, mood: 2 },
   sway: { jing: -2, mood: 3 },
   qbounce: { jing: -5, mood: 3 },
   qsway: { jing: -2, mood: 3 },
@@ -1743,7 +1752,7 @@ function applyEffect(id) {
 }
 
 const DISPATCH = {
-  walk: doWalk, walkfar: doWalkFar, hop: doHop, spin: doSpin, sway: doSway,
+  walk: doWalk, walkfar: doWalkFar, hop: doHop, sway: doSway,
   qbounce: doQBounce, qsway: doQSway, morph: doMorph,
   desk: doDesk, seal: doSeal, goledge: doGoLedge,
   dash: doDash, fly: doFly, poop: doPoop, sword: doSword, drive: doDrive, mischief: doMischief, flutefly: doFluteFly, sleep: doSleep, wallbang: doWallBang, work: doWork,
@@ -1756,6 +1765,14 @@ const EXT_ACTIONS = window.EXT_ACTIONS || (window.EXT_ACTIONS = {});
 
 // 扩展 tick 的变换传出对象：主循环每帧重置，tick 返回 true 后抄进当帧局部量统一应用
 const EXT_TF = { tx: 0, ty: 0, rot: 0, rotY: 0, sx: 1, sy: 1, skew: 0 };
+
+// fxDone 回执的单订阅分发：只挂一次 ipcRenderer.on，扩展注册进 Set 随便加不泄漏
+const EXT_FXDONE_FNS = new Set();
+window.pet.onFxExtDone((kind, seq) => {
+  for (const fn of EXT_FXDONE_FNS) {
+    try { fn(kind, seq); } catch (e) { /* 一个扩展的回执异常不连坐其它扩展 */ }
+  }
+});
 
 // 扩展动作的上下文：只暴露能力，内部变量一律给 getter/setter（tf 是唯一共享可写对象）
 const EXT_CTX = {
@@ -1771,7 +1788,7 @@ const EXT_CTX = {
   inputContext: () => window.pet.inputContext(),
   onArrowKey: (fn) => window.pet.onArrowKey(fn),
   fxStart: (kind, data) => window.pet.fxStart(kind, data),
-  onFxDone: (fn) => window.pet.onFxExtDone(fn),
+  onFxDone: (fn) => { EXT_FXDONE_FNS.add(fn); },
   get state() { return state; },
   get stateT() { return stateT; },
   get stateDur() { return stateDur; },
@@ -1790,12 +1807,21 @@ function applyEffectExt(id) {
 // 扩展动作并入主循环：台词进 LINES，DISPATCH 走统一入口（菜单/大模型决策/随机池即刻可见）
 for (const id in EXT_ACTIONS) {
   const def = EXT_ACTIONS[id];
+  // 撞内置动作 id 直接拒收：静默覆盖内置动作比动作不存在难查得多
+  if (Object.prototype.hasOwnProperty.call(DISPATCH, id)) {
+    console.warn(`[ext] 动作「${id}」与内置动作撞名，已拒收`);
+    continue;
+  }
   if (def.lines) LINES[id] = def.lines;
-  DISPATCH[id] = () => { applyEffectExt(id); def.start(EXT_CTX); };
+  // start 是三个钩子里唯一可能被同步调用的，异常必须隔离（effect 已结算，别让用户白付钱）
+  DISPATCH[id] = () => {
+    applyEffectExt(id);
+    try { def.start(EXT_CTX); } catch (e) { logEvent('系统', `扩展动作「${id}」启动异常：${e && e.message}`); }
+  };
 }
 
 // 心情好更爱玩开心动作，心情差不想玩
-const HAPPY_ACTIONS = new Set(['sway', 'qsway', 'qbounce', 'spin', 'hop']);
+const HAPPY_ACTIONS = new Set(['sway', 'qsway', 'qbounce', 'hop']);
 
 function actionWeight(id) {
   let w = ACTIONS[id].w;
@@ -1866,8 +1892,9 @@ async function idleRandomOnce() {
   // 否则被冷落 40 秒后她就永远站着不动了，要照常走后面的趴睡/问脑/随机逻辑
   // 在外面浪太久了先回家
   if (await checkHome()) return;
-  // 被冷落了：没事就去趴桌睡一会儿
-  if (performance.now() / 1000 - lastInteract > 25 && enabled('sleep') && canAfford('sleep') && Math.random() < 0.45) {
+  // 被冷落了：没事就去趴桌睡一会儿（冷落 2 分钟才睡，睡 4~10 分钟自己醒；
+  // 一直睡到被戳醒只留给菜单哄睡——不然她几乎永远在睡，太安静了）
+  if (performance.now() / 1000 - lastInteract > 120 && enabled('sleep') && canAfford('sleep') && Math.random() < 0.5) {
     applyEffect('sleep');
     logEvent('自主', '没人理，趴桌上睡着了');
     doSleep();
@@ -1991,7 +2018,10 @@ setInterval(() => {
   for (const id in EXT_ACTIONS) {
     const ex = EXT_ACTIONS[id];
     if (!ex.monitor) continue;
-    try { ex.monitor(EXT_CTX); } catch (e) {}
+    // 持续抛错的 monitor 不能无声死掉：每个 id 只记一次，避免刷屏
+    try { ex.monitor(EXT_CTX); } catch (e) {
+      if (!ex._monitorErr) { ex._monitorErr = true; logEvent('系统', `扩展动作「${ex.id}」monitor 异常：${e && e.message}`); }
+    }
   }
   // 避让检查：打字中不挡输入区，平时不长期压着前台窗口
   evadeTick().catch(() => {});
@@ -2125,7 +2155,7 @@ window.pet.onChatToken(({ id, delta }) => {
 
 miniChat.addEventListener('keydown', (e) => {
   e.stopPropagation();
-  if (e.key === 'Enter') submitMiniChat();
+  if (e.key === 'Enter' && !e.isComposing) submitMiniChat();
   else if (e.key === 'Escape') closeMiniChat();
 });
 miniChat.addEventListener('blur', () => closeMiniChat());
@@ -2158,7 +2188,7 @@ function isShakeHard(samples) {
 }
 
 // 可以被戳一戳打断的状态（在这些状态下点击会立即重新触发戳一戳）
-const POKEABLE_STATES = new Set(['idle', 'walk', 'sway', 'land', 'poke', 'hop', 'spin', 'qbounce', 'qsway']);
+const POKEABLE_STATES = new Set(['idle', 'walk', 'sway', 'land', 'poke', 'hop', 'qbounce', 'qsway']);
 
 // 头部区域（姐姐形态立绘的头发范围，窗口坐标）
 const HEAD_REGION = { x1: 95, y1: 95, x2: 250, y2: 270 };
@@ -2586,8 +2616,8 @@ function frame(now) {
       // 趴睡场景淡入盖过立绘（CSS transition 完成过渡）
       if (stateT >= stateDur) {
         zzzT = 1.2;
-        // 一直睡：不设时长，只靠交互叫醒（连点 8 下/使劲晃/菜单）
-        enter('sleeping', pendingSleepDur ?? 1e9);
+        // 自主入睡睡 4~10 分钟自己醒；菜单哄睡（doSleep(1e9)）才一直睡到被叫醒
+        enter('sleeping', pendingSleepDur ?? rand(240, 600));
         pendingSleepDur = null;
       }
       break;
@@ -2624,14 +2654,6 @@ function frame(now) {
         idleWait = nextIdleWait(3, 6);
         if (Math.random() < 0.6) say('睡得好香~', 1800);
       }
-      break;
-    }
-    case 'spin': {
-      // 绕垂直中线翻转的纸片人效果：rotateY 转一整圈
-      const k = easeInOut(stateT / stateDur);
-      rotY = 360 * k;
-      ty = -14 * Math.sin(Math.PI * k);
-      if (stateT >= stateDur) { enter('idle'); idleWait = nextIdleWait(2, 5); }
       break;
     }
     case 'sway': {
@@ -3379,9 +3401,11 @@ function frame(now) {
   // 气泡在独立窗口：每帧把头顶锚点（窗口局部坐标）报给主进程定位
   // 缩放 = 远近缩放 × 整体缩放，但有下限 0.8——人物变再小，字也得能看清
   const spriteH = (state.startsWith('desk') || state.startsWith('work') ? 700 : FORMS[form].height) * sizeK;
-  // 睡觉场景中她的头在场景图上部，气泡贴那里
-  const headY = state.startsWith('sleep') ? 280 * sizeK + offY() : winH() + ty - spriteH * sy * curSize;
-  const bScale = Math.max((state.startsWith('sleep') ? 1 : curSize) * sizeK, 0.8);
+  // 睡觉场景（sleepin/sleeping/sleepout）中她的头在场景图上部，气泡贴那里；
+  // 精确匹配场景态——sleepwalk 等扩展状态名也带 sleep 前缀，但人是站着的，气泡要贴头顶
+  const sleepScene = state === 'sleepin' || state === 'sleeping' || state === 'sleepout';
+  const headY = sleepScene ? 280 * sizeK + offY() : winH() + ty - spriteH * sy * curSize;
+  const bScale = Math.max((sleepScene ? 1 : curSize) * sizeK, 0.8);
   sendBubbleAnchor(winW() / 2 + tx, headY, bScale);
 
   requestAnimationFrame(frame);

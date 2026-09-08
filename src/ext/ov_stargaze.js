@@ -13,10 +13,11 @@
     el('stop', { offset: '100%', 'stop-color': '#fff', 'stop-opacity': 1 }, g);
   }
 
-  function createSession() {
+  function createSession(data) {
     const s = {
       layer: el('g', {}),
       done: false, ending: false, endT: 0,
+      seq: data.seq, // 会话令牌：回执带上，renderer 只认当前场次
       t0: performance.now(), last: performance.now(),
       stars: [], meteor: null, meteorT: 1.5 + Math.random() * 1.5,
     };
@@ -49,7 +50,7 @@
       clearInterval(s.watchdog);
       s.layer.remove();
       if (G === s) G = null;
-      window.pet.fxDone('stargaze');
+      window.pet.fxDone('stargaze', s.seq);
     }
     s.finish = finish;
 
@@ -134,8 +135,13 @@
   }
 
   registerOvFx('stargaze', (data) => {
-    if (data && data.phase === 'end') { if (G) G.ending = true; return; }
-    if (G) return; // 防叠罗汉：已有一场就忽略多余的开场
-    G = createSession();
+    if (data && data.phase === 'end') {
+      // 收场信号：带 seq 时只认同场次（防旧会话的 end 误收新场次）
+      if (G && (data.seq === undefined || data.seq === G.seq)) G.ending = true;
+      return;
+    }
+    if (G && data && data.seq !== undefined && data.seq !== G.seq) G.finish(); // 新会话：拆旧开新
+    if (G) return; // 防叠罗汉：同场次重复开场忽略
+    G = createSession(data || {});
   });
 })();

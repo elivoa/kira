@@ -88,3 +88,9 @@ registerAction({
 4. rAF 循环必须有超时 + 异常兜底，参照 overlay.js `flySword` 的 watchdog 模式：硬超时强制收尾、帧回调 try/catch、setInterval 墙钟推进兜底（rAF 停摆时）。
 5. tick 里先判 `if (state !== '<自己的状态>') return false;`——所有扩展的 tick 每帧都会被问到。
 6. monitor 里触发动作前先看 `ctx.state === 'idle'`（别打断进行中的动作）；触发走全局 `DISPATCH['<id>']()`——与菜单/随机池同一条链，effect 自动结算，不要直接调自己的 `start`。
+7. state 名必须带动作 id 前缀（如 `fish.cast`），且**不得与内置状态同名**（`ctx.enter('walk')` 会以内置逻辑跑，内部数据全是错的）；也避开 `sleep` 前缀（内置点击/拖拽/睡觉场景判定都用 `startsWith('sleep')`）。
+8. **异步 start 范式**（await IPC 的都要写）：`getPos()/activeWindow()/inputContext()` 的 `.then`/await 落地前，先校验 `ctx.state` 仍是出发时的状态——IPC 往返期间用户可能已拖拽/菜单切走，无条件落地会把她从新状态硬拽出来。进 start 时同步先放会话占位对象（重入守卫挡第二次触发），await 后发现状态不对就清场 return。
+9. **换立绘动作范式**：`swapSprite` 换了非正面图的动作，必须有「状态被切走就换回 `FORMS[form].front` 等价物」的看门狗（interval 或 monitor 兼任）——拖拽路径内核会换回正面图，但菜单/大模型切动作不会。
+10. **sprite 隐身动作范式**：藏人的（visibility 或 tf 缩放 0），必须有 interval 看门狗：发现 `ctx.state` 不以自己 id 开头（被打断切走），立即恢复现身 + 清会话 + 通知 overlay 收场。内核没有任何代码会替扩展恢复 visibility。
+11. **fxDone 会话令牌**：会被「打断后快速重开」的特效（气球/风筝/秋千这类长特效），fxStart 的 data 里带 `seq`（自增序号），ov 侧记住当前 seq、结束调 `window.pet.fxDone(kind, seq)`，renderer 只认当前会话的回执——不带 seq 的老写法在新旧协议下都兼容，但防不了旧回执串台。
+12. `onFxDone` 是单订阅分发（内部 Set），重复 add 同一个 fn 会去重，但仍建议文件级只注册一次、按 kind + 会话认领。
