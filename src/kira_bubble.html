@@ -17,7 +17,7 @@
     bottom: 44px; /* 装粘性光晕（6+22px × 缩放上限，防窗口底边切直线） */
     transform: translateX(-50%);
     max-width: 480px;
-    padding: 12px 20px 14px;
+    padding: 12px 32px 14px 20px; /* 右侧给关闭按钮留位，别压正文 */
     border-radius: 18px;
     background: #262433;
     border: 1px solid #3c3954;
@@ -68,12 +68,33 @@
   #kbText.md hr { border: none; border-top: 1px dashed rgba(255,255,255,.4); margin: 8px 0; }
   #kbText.md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
   #kbText.md a { color: #b7aef0; text-decoration: underline; cursor: pointer; }
+  #kbText.md a:hover { cursor: pointer; }
+  /* 右上角关闭按钮：半透明小圆钮，hover 提亮；no-drag 防成拖拽误触区 */
+  #kbClose {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(232, 234, 244, 0.65);
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+  }
+  #kbClose:hover { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
   .kb-hint { display: block; font-size: 12px; font-weight: 400; opacity: 0.8; margin-top: 4px; -webkit-app-region: drag; user-select: none; }
 </style>
   <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
 </head>
 <body>
   <div id="kb">
+    <button id="kbClose" title="关闭">✕</button>
     <div id="kbText" class="md"></div>
     <span class="kb-hint">✦ 单击关闭 · 双击打开 kira</span>
   </div>
