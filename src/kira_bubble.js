@@ -3,6 +3,7 @@
 // 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（框边缘拖，文字不拖）
 const kb = document.getElementById('kb');
 const kbText = document.getElementById('kbText');
+const kbClose = document.getElementById('kbClose');
 
 let shown = false;
 
@@ -39,9 +40,18 @@ kb.addEventListener('click', () => {
   window.pet.kiraBubbleDismiss();
 });
 
-// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接上不算
+// 右上角 ✕ 关闭按钮：stopPropagation 防冒泡到 kb 的单击关闭重复触发
+kbClose.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!shown) return;
+  shown = false;
+  kb.classList.remove('show');
+  window.pet.kiraBubbleDismiss();
+});
+
+// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或关闭按钮上不算
 kb.addEventListener('dblclick', (e) => {
-  if (e.target.closest('a')) return;
+  if (e.target.closest('a') || e.target.closest('#kbClose')) return;
   shown = false;
   kb.classList.remove('show');
   window.pet.kiraBubbleOpen();
