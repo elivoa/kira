@@ -1025,6 +1025,45 @@ window.pet.onFeishuMsg((m) => {
 loadFeishuConfig(); // 打开本子就备好 tab 显隐/命名，不用等切页签
 loadYomiConfig();   // kira tab 同理：打开本子就拉一次链接状态，不然要等点配置页才出现
 
+// ---------- 打字避让（typingguard）：输入时通知桌宠别挡本本 ----------
+// 通道复用 notebook-say（主进程原样转发给桌宠窗口），控制消息带哨兵前缀，
+// 桌宠渲染层识别后不当台词上屏，因此不需要新增 IPC。
+const NB_TYPING_PREFIX = '__nb_typing__:';
+let nbTypingOn = false;
+let nbComposing = false; // IME 组合中（中文输入未上屏也算打字）
+let nbBeatTimer = null;
+
+// 聚焦中的文本输入框（checkbox/range/button 这类非打字控件不算）
+function nbTextField() {
+  const el = document.activeElement;
+  if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return null;
+  return ['checkbox', 'range', 'button', 'submit', 'radio'].includes(el.type) ? null : el;
+}
+
+function nbSendTyping(on, beat) {
+  window.pet.notebookSay(NB_TYPING_PREFIX + JSON.stringify(beat ? { on, beat: true } : { on }));
+}
+
+function nbUpdateTyping() {
+  const on = document.hasFocus() && (nbComposing || !!nbTextField());
+  if (on === nbTypingOn) return;
+  nbTypingOn = on;
+  nbSendTyping(on, false);
+  // typing 期间每 4 秒心跳一次：本子被直接关掉/异常退出时，桌宠靠心跳超时自行恢复
+  clearInterval(nbBeatTimer);
+  nbBeatTimer = null;
+  if (on) nbBeatTimer = setInterval(() => nbSendTyping(true, true), 4000);
+}
+
+document.addEventListener('focusin', () => nbUpdateTyping());
+// focusout 时 activeElement 已指向新元素，延迟一拍读到落定后的焦点
+document.addEventListener('focusout', () => { nbComposing = false; setTimeout(nbUpdateTyping); });
+document.addEventListener('compositionstart', () => { nbComposing = true; nbUpdateTyping(); });
+document.addEventListener('compositionend', () => { nbComposing = false; nbUpdateTyping(); });
+window.addEventListener('blur', () => { nbComposing = false; nbUpdateTyping(); });
+window.addEventListener('focus', () => nbUpdateTyping());
+window.addEventListener('beforeunload', () => { if (nbTypingOn) nbSendTyping(false, false); });
+
 // ---------- 开场白：有历史就渲染历史，没有就打招呼 ----------
 window.pet.chatHistory().then((history) => {
   if (history && history.length) {

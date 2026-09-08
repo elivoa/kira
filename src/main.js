@@ -1224,6 +1224,10 @@ app.whenReady().then(async () => {
   });
   ipcMain.on('nb-resize-end', () => { nbResize = null; });
 
+  // 本子窗口实时位置：typingguard 避让用。settings.notebookBounds 只在移动/缩放/关闭时落盘，
+  // 首次打开没动过窗口时是盲区，所以要能现场查（窗口关着返回 null）
+  ipcMain.handle('get-notebook-bounds', () => (notebookWin ? notebookWin.getBounds() : null));
+
   // 兜风：转发给覆盖层；车回来接她时再通知桌宠
   ipcMain.on('drive-start', () => {
     if (!win || !overlay) return;

@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('pet', {
   nbResizeStart: () => ipcRenderer.send('nb-resize-start'),
   nbResizeMove: () => ipcRenderer.send('nb-resize-move'),
   nbResizeEnd: () => ipcRenderer.send('nb-resize-end'),
+  getNotebookBounds: () => ipcRenderer.invoke('get-notebook-bounds'),
   chatSend: (text, id) => ipcRenderer.invoke('chat-send', text, id),
   chatInject: (userText, replyText) => ipcRenderer.invoke('chat-inject', userText, replyText),
   // 流式 token 订阅，返回取消订阅函数
