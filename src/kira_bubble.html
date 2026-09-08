@@ -13,16 +13,21 @@
   /* kira 消息泡泡：哑光深石板底（近发件 box 的 #242631），边框与呼吸光晕留一点紫调以区分 */
   #kb {
     position: absolute;
-    left: 50%;
+    /* left:50%+translate 会让 shrink-to-fit 的可用宽度只剩半窗（泡泡永远 ≤280px），
+       改成 left/right:0 + margin auto 居中，fit-content 才能真的吃到 max-width */
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: fit-content;
+    box-sizing: border-box;
     bottom: 44px; /* 装粘性光晕（6+22px × 缩放上限，防窗口底边切直线） */
-    transform: translateX(-50%);
-    max-width: 480px;
+    max-width: 520px;
     padding: 12px 32px 14px 20px; /* 右侧给关闭按钮留位，别压正文 */
     border-radius: 18px;
     background: #262433;
     border: 1px solid #3c3954;
     color: #e8eaf4;
-    font: 500 15px/1.6 "PingFang SC", sans-serif;
+    font: 400 13px/1.6 "PingFang SC", sans-serif; /* 字号/字重对齐小本本 .bubble.md（14px 常规），避免粗体感 */
     opacity: 0;
     transition: opacity .18s ease;
     pointer-events: none;
@@ -57,7 +62,9 @@
   /* markdown 样式对齐本本 .bubble.md（间距/字号一致）；颜色沿用深底浅字体系 */
   #kbText.md p { margin: 0 0 8px; }
   #kbText.md p:last-child { margin-bottom: 0; }
-  #kbText.md h1, #kbText.md h2, #kbText.md h3, #kbText.md h4 { margin: 6px 0; font-size: 15px; }
+  #kbText.md h1, #kbText.md h2, #kbText.md h3, #kbText.md h4 { margin: 6px 0; font-size: 14px; font-weight: 600; }
+  /* PingFang SC 的 bold(700) 在小字号下糊成一团，压到 600 */
+  #kbText.md strong, #kbText.md b { font-weight: 600; }
   #kbText.md ul, #kbText.md ol { margin: 0 0 8px; padding-left: 20px; }
   #kbText.md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,.4); opacity: .85; }
   #kbText.md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: rgba(0,0,0,.25); border-radius: 4px; padding: 1px 4px; }
@@ -89,7 +96,18 @@
   #kbClose { top: 7px; }
   #kbOpen { bottom: 7px; font-size: 12px; }
   #kbClose:hover, #kbOpen:hover { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
-  .kb-hint { display: block; font-size: 12px; font-weight: 400; opacity: 0.8; margin-top: 4px; -webkit-app-region: drag; user-select: none; }
+  /* 底部操作提示：与正文用分隔线拉开，右侧留出 💬 按钮的位置 */
+  .kb-hint {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.55;
+    margin-top: 10px;
+    padding: 7px 26px 0 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    -webkit-app-region: drag;
+    user-select: none;
+  }
 </style>
   <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
 </head>
