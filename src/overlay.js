@@ -465,6 +465,8 @@ const LAND_YELLS_1 = ['呜', '好痛…', '呜哇哇', '哎哟…'];
 const LAND_YELLS_2 = ['你给我等着！', '哼！', '下次还敢（嘴硬）', '呜呜，欺负人…'];
 const ROPE_LEN = 104; // 绳长
 const ROPE_N = 10;    // 软绳链条段数（多一点才圆滑）
+const ROPE_MIN = 50;  // 滚轮调绳长：下限
+const ROPE_MAX = 320; // 滚轮调绳长：上限
 
 // Catmull-Rom 转贝塞尔，把链条画成平滑曲线（不然一节节的很僵硬）
 function smoothPath(pts) {
@@ -501,9 +503,11 @@ function mischief(startX, startY) {
   let mx = startX, my = startY;   // 鼠标原始位置
   let ax = startX, ay = startY;   // 平滑后的锚点（迟缓跟随，防止一抖就甩飞）
   // 软绳链条：pts[0] 是锚点，pts[ROPE_N] 是人物
-  const SEG = ROPE_LEN / ROPE_N;
+  // 滚轮调绳长：ropeTarget 是目标绳长，ropeLen 每帧平滑趋近它，段长按当前绳长实时重算
+  let ropeLen = ROPE_LEN;
+  let ropeTarget = ROPE_LEN;
   const pts = Array.from({ length: ROPE_N + 1 }, (_, i) => ({
-    x: startX, y: startY + SEG * i, px: startX, py: startY + SEG * i,
+    x: startX, y: startY + (ROPE_LEN / ROPE_N) * i, px: startX, py: startY + (ROPE_LEN / ROPE_N) * i,
   }));
   let shaking = false;
   let done = false;
@@ -521,8 +525,14 @@ function mischief(startX, startY) {
     // 笔记本盖在指针上，点哪里都点在她本子上
     textPop(MISCHIEF_YELLS[(Math.random() * MISCHIEF_YELLS.length) | 0], mx, my - 140);
   }
+  function onWheel(e) {
+    if (done || shaking) return;
+    // 上滚绳变短、下滚绳变长；deltaY 按量累计，触控板细滚动也平滑
+    ropeTarget = Math.min(ROPE_MAX, Math.max(ROPE_MIN, ropeTarget + e.deltaY * 0.4));
+  }
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mousedown', onDown);
+  window.addEventListener('wheel', onWheel);
   window.pet.ovIgnore(false); // 挂住期间：覆盖层全程捕获，指针处真的点不穿
 
   // 晃掉检测：500ms 内横向大幅来回 ≥4 次换向
@@ -553,6 +563,7 @@ function mischief(startX, startY) {
     done = true;
     window.removeEventListener('mousemove', onMove);
     window.removeEventListener('mousedown', onDown);
+    window.removeEventListener('wheel', onWheel);
     window.pet.ovIgnore(true); // 恢复穿透
     layer.style.transition = 'opacity .5s';
     layer.style.opacity = 0;
@@ -570,6 +581,9 @@ function mischief(startX, startY) {
     last = now;
 
     if (!shaking) {
+      // 绳长平滑趋近滚轮目标值，段长实时重算（只改约束目标，单摆手感不变）
+      ropeLen += (ropeTarget - ropeLen) * Math.min(dt * 6, 1);
+      const SEG = ropeLen / ROPE_N;
       // 锚点迟缓跟随鼠标：鼠标小抖不会直接拽飞她
       ax += (mx - ax) * Math.min(dt * 8, 1);
       ay += (my - ay) * Math.min(dt * 8, 1);
