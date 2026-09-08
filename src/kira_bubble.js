@@ -12,14 +12,22 @@ window.pet.onKiraBubbleShow(({ text }) => {
   shown = true;
 });
 
-// 链接点击：capture 阶段拦下并 stopPropagation，事件到不了 kb 的单击关闭；交给主进程开系统浏览器
+// 链接点击：capture 阶段拦下并 stopPropagation，事件到不了 kb 的单击关闭；交给主进程开系统浏览器。
+// 同 href 300ms 去重：双击序列是 click→click→dblclick，两次 click 都会走到这，不去重会开两个相同标签
+let lastHref = null;
+let lastTime = 0;
 document.addEventListener('click', (e) => {
   const a = e.target.closest('a');
   if (!a || !kb.contains(a)) return;
   e.preventDefault();
   e.stopPropagation();
   const href = a.getAttribute('href');
-  if (href) window.pet.kbOpenLink(href);
+  if (!href) return;
+  const now = Date.now();
+  if (href === lastHref && now - lastTime < 300) return;
+  lastHref = href;
+  lastTime = now;
+  window.pet.kbOpenLink(href);
 }, true);
 
 // 单击关闭：点了但选中了一段文字时不当关闭（那是想复制）
