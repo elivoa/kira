@@ -271,6 +271,10 @@ const LINES = {
 const SLEEP_STATES = new Set(['sleepin', 'sleeping', 'sleepout']);
 function isSleepState(s) { return SLEEP_STATES.has(s); }
 
+// 立绘持续倾斜/打滚的动作态：整个状态期间定向投影都被 transform 甩歪，全程挂无方向光晕
+// （瞬时的 rotY 翻牌/旋转由 frame 里逐帧判定，两类共用 softshadow 类）
+const SOFT_SHADOW_STATES = new Set(['fly', 'dash', 'roll']);
+
 function enter(next, dur = 0) {
   // 变身被打断（拖拽/戳一戳/菜单切动作等）：接续动作作废，否则残留动作会在下一次变身结束时莫名放出
   if (state === 'morph' && next !== 'morph') {
@@ -656,7 +660,8 @@ setSleepScene(SLEEP2_SRC);
 
 function setSpriteVeiled(v) {
   spriteVeiled = v;
-  sprite.style.transition = 'opacity .7s ease';
+  // inline transition 会整个盖掉样式表里的 transition（softshadow 的 filter 渐变），两条都列上
+  sprite.style.transition = 'opacity .7s ease, filter .18s linear';
   sprite.style.opacity = v ? 0 : 1;
 }
 
@@ -3496,6 +3501,9 @@ function frame(now) {
   sprite.style.transform =
     `translateX(-50%) translate(${tx}px, ${ty}px) rotate(${rot}deg) skewX(${skew}deg) perspective(700px) rotateY(${rotY}deg) scale(${sx * facing * curSize}, ${sy * curSize})`;
   spriteX.style.transform = sprite.style.transform; // 淡化层与立绘同动
+  // 定向投影在本地坐标系先生效再被 transform 倾斜/翻牌：持续倾斜态（fly/dash/roll）
+  // 与任何 rotY 翻牌瞬间都换无方向光晕，否则影子甩到裙摆侧、掉头时扫动
+  sprite.classList.toggle('softshadow', SOFT_SHADOW_STATES.has(state) || rotY !== 0);
 
   // 气泡在独立窗口：每帧把头顶锚点（窗口局部坐标）报给主进程定位
   // 缩放 = 远近缩放 × 整体缩放，但有下限 0.8——人物变再小，字也得能看清

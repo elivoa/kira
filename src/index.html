@@ -38,6 +38,13 @@
     will-change: transform;
     pointer-events: none;
     filter: drop-shadow(0 6px 14px rgba(20, 20, 50, 0.35));
+    transition: filter .18s linear;
+  }
+  /* 旋转/翻牌时刻（御剑飞行、暴走、打滚、各状态掉头翻牌瞬间）：定向投影在立绘本地
+     坐标系先生效，再随 transform 倾斜/翻转——巡航时影子甩到裙摆侧、掉头时阴影扫动。
+     renderer 在这些时刻挂这个类，换成无方向光晕（偏移归零），回正即摘 */
+  #sprite.softshadow {
+    filter: drop-shadow(0 0 12px rgba(20, 20, 50, 0.35));
   }
   /* 走路帧交叉淡化层：切帧时顶旧帧淡出，新帧在 #sprite 垫底，切换不生硬。
      淡化 38ms：短于走速 140px/s 的切帧间隔（42ms），保证每次淡化完整收尾——
