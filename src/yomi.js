@@ -27,7 +27,6 @@ let watchdogTimer = null;
 let notebookWait = null;        // 小本子发言等待 kira 回答的挂起 Promise（带 sessionId + 身份校验，防并发串话）
 let restartTimer = null;        // restart() 的延迟启动定时器：stop() 必须能取消它，否则双 socket 泄漏
 const MAX_FRAME = 16 * 1024 * 1024; // 单帧上限：超过即断连，防坏对端/粘包错误把内存撑爆
-let linkedOnce = false;         // 首次连上标记：「蓝牙连上了」只在第一次说，重连不刷屏
 
 function setStatus(s, err) {
   status = s;
@@ -212,11 +211,6 @@ async function connectOnce() {
       startWatchdog();
       setStatus('online');
       if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `kira 连上了（wire v${(hello && hello.protocol_version) || '?'}）` });
-      // 连上了告诉她一声（也顺手验证 SendMessage 通路）；只在首次连上说，重连不刷屏
-      if (!linkedOnce) {
-        linkedOnce = true;
-        sayToSession('蓝牙连上了').catch(() => {});
-      }
     } catch (e) {
       setStatus('error', `握手失败：${e.message}`);
       try { ws && ws.close(); } catch {}
