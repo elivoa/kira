@@ -4,6 +4,8 @@
   let swingFx = null;     // 起荡锚点（屏幕绝对坐标，主进程负责换算）
   let fxSeq = 0;          // 会话令牌自增
   let mySeq = 0;          // 当前场次的令牌
+  let fxSent = false;     // 特效是否已交给覆盖层（没收场就被打断要发结束信号）
+  let swingDog = null;    // 打断看门狗
   let swingHooked = false; // fxDone 只订阅一次
 
   const easeOutBack = (k) => {
@@ -19,6 +21,15 @@
       if (ctx.form !== 'chibi') { ctx.enter('idle'); ctx.idleWait = ctx.nextIdleWait(2, 4); return; }
       swingFx = null;
       mySeq = ++fxSeq;
+      fxSent = false;
+      if (swingDog) { clearInterval(swingDog); swingDog = null; }
+      // 打断看门狗：特效还在覆盖层播着、状态却被切走（拖走/菜单换动作）时通知覆盖层收场
+      swingDog = setInterval(() => {
+        const s = ctx.state;
+        if (s === 'swing.go' || s === 'swing.wait' || s === 'swing.back') return;
+        clearInterval(swingDog); swingDog = null;
+        if (fxSent) { fxSent = false; ctx.fxStart('swing', { end: true, seq: mySeq }); }
+      }, 250);
       ctx.logEvent('自主', '去荡秋千');
       ctx.say(ctx.pick(LINES.swing), 1500);
       if (!swingHooked) {
@@ -26,6 +37,7 @@
         ctx.onFxDone((kind, receiptSeq) => {
           if (kind !== 'swing' || ctx.state !== 'swing.wait') return;
           if (receiptSeq !== undefined && receiptSeq !== mySeq) return; // 旧场次回执不认
+          fxSent = false; // 覆盖层已自行收场
           ctx.fxBurst(170, 300, 12, 12, 56);
           ctx.fxText('嘿咻！', 170, 320, 28);
           ctx.enter('swing.back', 0.5);
@@ -48,6 +60,7 @@
         if (k >= 1) {
           if (swingFx) {
             ctx.fxStart('swing', { x: swingFx.x, y: swingFx.y, seq: mySeq });
+            fxSent = true;
             swingFx = null;
             ctx.enter('swing.wait');
           } else if (ctx.stateT > 2.5) { // 坐标拿不到就不玩了，别卡在隐身
