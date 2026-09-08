@@ -69,10 +69,9 @@
   #kbText.md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
   #kbText.md a { color: #b7aef0; text-decoration: underline; cursor: pointer; }
   #kbText.md a:hover { cursor: pointer; }
-  /* 右上角关闭按钮：半透明小圆钮，hover 提亮；no-drag 防成拖拽误触区 */
-  #kbClose {
+  /* 角落小圆钮（右上 ✕ 关闭 / 右下 💬 打开 kira）：半透明，hover 提亮；no-drag 防成拖拽误触区 */
+  #kbClose, #kbOpen {
     position: absolute;
-    top: 7px;
     right: 8px;
     width: 18px;
     height: 18px;
@@ -87,7 +86,9 @@
     cursor: pointer;
     -webkit-app-region: no-drag;
   }
-  #kbClose:hover { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
+  #kbClose { top: 7px; }
+  #kbOpen { bottom: 7px; font-size: 12px; }
+  #kbClose:hover, #kbOpen:hover { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
   .kb-hint { display: block; font-size: 12px; font-weight: 400; opacity: 0.8; margin-top: 4px; -webkit-app-region: drag; user-select: none; }
 </style>
   <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
@@ -95,6 +96,7 @@
 <body>
   <div id="kb">
     <button id="kbClose" title="关闭">✕</button>
+    <button id="kbOpen" title="打开 kira 对话">💬</button>
     <div id="kbText" class="md"></div>
     <span class="kb-hint">✦ 单击关闭 · 双击打开 kira</span>
   </div>

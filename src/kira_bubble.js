@@ -1,9 +1,10 @@
 // kira 消息泡泡渲染层：markdown 渲染走 MarkdownStream 静态渲染（markdown-it 配置与 KaTeX MATH_OPTIONS 同本本）、
-// 链接点击走系统浏览器（不算关闭）、单击关闭（选中文字不算）、双击打开 kira tab、
+// 链接点击走系统浏览器（不算关闭）、单击关闭（选中文字不算）、双击或右下角 💬 打开 kira tab、
 // 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（框边缘拖，文字不拖）
 const kb = document.getElementById('kb');
 const kbText = document.getElementById('kbText');
 const kbClose = document.getElementById('kbClose');
+const kbOpen = document.getElementById('kbOpen');
 
 let shown = false;
 
@@ -49,9 +50,19 @@ kbClose.addEventListener('click', (e) => {
   window.pet.kiraBubbleDismiss();
 });
 
-// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或关闭按钮上不算
+// 右下角 💬 按钮：打开小本子的 kira tab（同时关掉泡泡）；stopPropagation 防触发 kb 的单击关闭，
+// shown 守卫挡住双击序列的第二次 click，避免重复打开
+kbOpen.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!shown) return;
+  shown = false;
+  kb.classList.remove('show');
+  window.pet.kiraBubbleOpen();
+});
+
+// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或按钮上不算
 kb.addEventListener('dblclick', (e) => {
-  if (e.target.closest('a') || e.target.closest('#kbClose')) return;
+  if (e.target.closest('a') || e.target.closest('button')) return;
   shown = false;
   kb.classList.remove('show');
   window.pet.kiraBubbleOpen();
