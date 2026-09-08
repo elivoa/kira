@@ -1,5 +1,5 @@
 // 桌宠主进程：透明无边框置顶窗口 + 窗口移动/菜单 IPC
-const { app, BrowserWindow, ipcMain, screen, powerMonitor, dialog, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor, dialog, Tray, Menu, nativeImage, shell } = require('electron');
 const { execFile } = require('child_process');
 const updater = require('./updater');
 const feishu = require('./feishu');
@@ -1201,6 +1201,10 @@ app.whenReady().then(async () => {
   });
   ipcMain.on('kb-ignore', (_e, flag) => {
     if (kiraBubbleWin) kiraBubbleWin.setIgnoreMouseEvents(flag, { forward: true });
+  });
+  // 泡泡内链接开系统浏览器；只放行 http/https/mailto，挡渲染层传来的奇怪协议
+  ipcMain.on('kb-open-link', (_e, href) => {
+    if (typeof href === 'string' && /^(https?|mailto):/i.test(href)) shell.openExternal(href);
   });
 
   // 笔记本自绘边框：最小化和自定义拉伸
