@@ -138,21 +138,38 @@ function submit(text) {
   } else if (activeTab === 'bot') {
     addMsg(botMsgs, 'me', text);
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子飞书 tab 发言：${text.slice(0, 30)}` });
+    // 登记乐观上屏的文本：daemon 会把同一条 user 消息回显回来，onFeishuMsg 命中即跳过防双显
+    const sentText = text.slice(0, 2000); // main.js yomi-send/feishu-send 都先截 2000（yomi.js 的 4000 不再生效），回显必为同一串
+    pendingBotSends.push(sentText);
+    if (pendingBotSends.length > 20) pendingBotSends.shift();
     // kira 链接在线时走 yomi wire（回答进飞书）；否则走旧飞书通道
     const send = yomiState.status === 'online' ? window.pet.yomiSend(text) : window.pet.feishuSend(text);
     const typing = addMsg(botMsgs, 'Kira', '正在输入…');
     typing.classList.add('typing');
     botMsgs.scrollTop = botMsgs.scrollHeight;
-    send.then((r) => {
-      if (r && r.ok) {
-        // yomi 的回答经事件流回来上屏；等待气泡撤掉
-        typing.classList.remove('typing');
-        typing.remove();
-        return;
-      }
+    const fail = () => {
       typing.classList.remove('typing');
       typing.innerHTML = '';
       window.MarkdownStream.render(typing, '呜，没发出去…');
+    };
+    send.then((r) => {
+      consumePendingBotSend(sentText); // 回显必在回答之前来（或不会来），到这里清掉防呆
+      if (r && r.ok) {
+        // 回答一般经事件流先回来填进等待气泡（onFeishuMsg）；事件流没来（120s 兜底、
+        // 或当时不在 bot 页被丢弃）时 resolve 的文案不能丢，填进等待气泡
+        if (typing.classList.contains('typing')) {
+          lastBotReply = { text: r.reply || '', t: Date.now() };
+          typing.classList.remove('typing');
+          typing.innerHTML = '';
+          window.MarkdownStream.render(typing, r.reply || '（发出去了，kira 还没回，稍等飞书上看吧）');
+          botMsgs.scrollTop = botMsgs.scrollHeight;
+        }
+        return;
+      }
+      fail();
+    }).catch(() => {
+      consumePendingBotSend(sentText);
+      fail();
     });
   }
 }
@@ -706,13 +723,24 @@ const botMsgs = document.getElementById('botMsgs');
 let feishuState = { status: 'off', error: '', botName: '' };
 let feishuConfigured = false;
 const renderedIds = new Set(); // 已上屏的飞书消息 id，轮询/事件/本地三通道防重
+// 小本子乐观上屏的发言文本队列：daemon 会把同一条 user 消息回显回来，命中即跳过防双显
+const pendingBotSends = [];
+// resolve 先于事件流回来时填过的回答：事件再到按同文案跳过一次（正常走不到，防 IPC 乱序）
+let lastBotReply = null;
+
+function consumePendingBotSend(text) {
+  const idx = pendingBotSends.findIndex((p) => p === text);
+  if (idx < 0) return false;
+  pendingBotSends.splice(idx, 1);
+  return true;
+}
 
 const FS_STATUS_TEXT = { off: '未启用（按上方指引配置，打开开关）', connecting: '连接中…', online: '在线，私聊她或在群里 @她 试试', error: '连接出错，检查配置和上方指引的第 2~4 步' };
 
 // 机器人 tab 显隐：kira 链接（yomi）在线才显示，否则隐藏
 function updateBotTab() {
   // kira 链接在线或配置好（启用 + 地址 + 会话）就显示
-  const yomiConfigured = !!(yomiState.sessionId || (yomiState.enabled && yomiState.wsUrl));
+  const yomiConfigured = !!(yomiState.enabled && yomiState.wsUrl && yomiState.sessionId);
   if (yomiState.status === 'online' || yomiConfigured) {
     botTab.classList.remove('hidden');
     botTabName.textContent = 'kira';
@@ -781,16 +809,19 @@ function renderBotBatch(older) {
 botMsgs.addEventListener('scroll', () => {
   if (botMsgs.scrollTop > 40 || botShown <= 0 || botLoading) return;
   botLoading = true;
+  const prevTop = botMsgs.scrollTop;
   const prevH = botMsgs.scrollHeight;
   renderBotBatch(true);
-  botMsgs.scrollTop = botMsgs.scrollHeight - prevH; // 视口不跳
-  botLoading = false;
   if (botShown === 0 && !botMsgs.querySelector('.bot-top-done')) {
+    // 最早一批也加载完了：顶部放结束标记（先做，高度才能算进下面的视口修正）
     const d = document.createElement('div');
     d.className = 'empty bot-top-done';
     d.textContent = '—— 到顶了，没有更早的消息 ——';
     botMsgs.insertBefore(d, botMsgs.firstChild);
   }
+  // 视口不跳：新增内容（含结束标记）有多高补多少；addMsg 会滚底，必须按 prevTop 重算
+  botMsgs.scrollTop = prevTop + (botMsgs.scrollHeight - prevH);
+  botLoading = false;
 });
 
 function loadBotTab() {
@@ -914,6 +945,8 @@ document.getElementById('yomiSave').addEventListener('click', () => {
     sessionId: yomiSessionId.value.trim(),
     enabled: yomiEnabled.checked,
   });
+  // 同步本地状态：onFeishuMsg 的 sessionId 过滤和 updateBotTab 都读 yomiState，等下次 loadYomiConfig 刷新会漏消息
+  yomiState = { ...yomiState, sessionId: yomiSessionId.value.trim(), enabled: yomiEnabled.checked, wsUrl: yomiWsUrl.value.trim() };
   window.pet.notebookSay('kira 链接记好啦');
   window.pet.logAppend({ t: Date.now(), type: '系统', text: '更新了 kira 链接配置' });
 });
@@ -958,23 +991,33 @@ window.pet.onFeishuStatus((s) => {
 // 归一化飞书消息（事件/轮询/小本子回答）：按 id 防重，时间序追加
 window.pet.onFeishuMsg((m) => {
   if (activeTab !== 'bot') return;
+  // 只上屏绑定 session 的消息：SubscribeAll 推的是全部会话，别的 session 别串进来
+  // （连等待气泡也不能让外来回答抢占）；旧 feishu 通道的消息无 sessionId，放行
+  if (m.sessionId && m.sessionId !== yomiState.sessionId) return;
   if (m.id && renderedIds.has(m.id)) return;
   if (m.id) renderedIds.add(m.id);
-  if (botMsgs.querySelector('.empty')) botMsgs.innerHTML = '';
+  // 只清「还没有消息」占位符：结束标记（bot-top-done）和已上屏历史不能被误杀
+  const placeholder = botMsgs.querySelector('.empty:not(.bot-top-done)');
+  if (placeholder) placeholder.remove();
   if (m.role === 'user') {
+    // 小本子自己发的会被 daemon 原样回显：乐观气泡已上屏，跳过（id 已在上面登记）
+    if (consumePendingBotSend(m.content)) return;
     addMsg(botMsgs, 'me', m.content);
     return;
   }
-  if (m.source === 'notebook') {
-    // 小本子发言的回答：问题已经显示过了，把回答填进等待气泡
-    const typing = botMsgs.querySelector('.bubble.typing');
-    if (typing) {
-      typing.classList.remove('typing');
-      typing.innerHTML = '';
-      window.MarkdownStream.render(typing, m.content);
-      botMsgs.scrollTop = botMsgs.scrollHeight;
-      return;
-    }
+  // resolve 先于事件流回来时回答已填过（见 submit），同文案别再上屏
+  if (lastBotReply && lastBotReply.text === m.content && Date.now() - lastBotReply.t < 10000) {
+    lastBotReply = null;
+    return;
+  }
+  // 有等待气泡就把回答填进去（小本子发言的回答，kira/旧飞书通道同此约定）；没有就直接上屏
+  const typing = botMsgs.querySelector('.bubble.typing');
+  if (typing) {
+    typing.classList.remove('typing');
+    typing.innerHTML = '';
+    window.MarkdownStream.render(typing, m.content);
+    botMsgs.scrollTop = botMsgs.scrollHeight;
+    return;
   }
   addMsg(botMsgs, 'Kira', m.content);
 });
