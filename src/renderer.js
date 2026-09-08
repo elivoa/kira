@@ -486,7 +486,6 @@ function fxText(str, x, y, size = 34) {
 // ---------- 桌子场景 ----------
 // SVG 画一张木桌（带茶杯），立绘放大上移，胸部以上露出桌面，下半身藏桌后
 const DESK_TY = 339; // 立绘就位后的下移量（让胸部正好在桌面上沿）；窗口坐标，使用时乘 sizeK
-let pendingDesk = false; // Q版触发上桌时，先变回姐姐再上桌
 
 function showDesk() {
   if (document.getElementById('desk')) return;
@@ -556,7 +555,7 @@ function doPoke() {
   // 有点烦但还没到扔屎的程度（连戳 3+ 且耐心低于 30）：叉腰指人骂骂咧咧，20s CD
   if (pokeTimes.length >= 3 && stats.shen < 30 && now / 1000 - lastPoint > 20) {
     pokeTimes = [];
-    doPoint();
+    DISPATCH.point();
     return;
   }
   // 耐心耗尽或连戳太多次：生气扔屎
@@ -583,11 +582,9 @@ function doHop() {
 // ---------- 指人发火 ----------
 // 被戳得有点烦（耐心低于 30，还没到扔屎的程度）：叉腰指着你不放，骂骂咧咧一串
 let lastPoint = 0;      // 20s CD
-let pendingPoint = false;
 let pointState = null;  // { said, lineT }
 
 function doPoint() {
-  if (form !== 'normal') { pendingPoint = true; doMorphTo('normal'); return; }
   lastPoint = performance.now() / 1000;
   logEvent('交互', '被点烦了，叉腰指着你骂骂咧咧');
   applyEffect('point');
@@ -622,7 +619,6 @@ new Image().src = SLEEP1_SRC;
 new Image().src = SLEEP2_SRC;
 new Image().src = SLEEP3_SRC;
 const SLEEP_MUMBLE = ['zzZ…', '唔嗯…', '呼…', '嗯…再五分钟…', '嘿嘿…嘿嘿…'];
-let pendingSleep = false;
 let zzzT = 0;
 let flipT = 0; // 翻身计时
 let spriteVeiled = false; // 睡觉场景盖住立绘时，applyTouming 不准把她恢复可见
@@ -725,7 +721,8 @@ window.pet.onPeekEnd(endPeekBig);
 let pendingSleepDur = null;
 
 function doSleep(dur = null) {
-  if (form !== 'normal') { pendingSleep = true; pendingSleepDur = dur; doMorphTo('normal'); return; }
+  // 睡姿场景图只有姐姐版：chibi 也在 sleep.forms 里（DISPATCH 包装不拦），这里自己守，先变姐姐再睡
+  if (form !== 'normal') { pendingAction = 'sleep'; pendingSleepDur = dur; doMorphTo('normal'); return; }
   pendingSleepDur = dur;
   setSleepScene(SLEEP1_SRC);
   sleepImg.style.opacity = 1;
@@ -766,7 +763,6 @@ fluteImg.id = 'fluteImg';
 fluteImg.src = '../assets/flute.png';
 stage.appendChild(fluteImg);
 sprite.style.zIndex = 2; // 让笛子能穿到她身后（z=1）或飞在前面（z=3）
-let pendingFlute = false;
 
 function fluteShow(x, y, rot, behind) {
   fluteImg.style.display = 'block';
@@ -778,8 +774,6 @@ function fluteShow(x, y, rot, behind) {
 function fluteHide() { fluteImg.style.display = 'none'; }
 
 function doFluteFly() {
-  if (form === 'chibi') { pendingFlute = true; doMorph(); return; }
-  if (form === 'flute' || form === 'note') { pendingFlute = true; doMorphTo('normal'); return; }
   enter('fluteturn', 0.5);
   say(pick(['看我的！', '笛子，去！', '给你表演一个~']), 1500);
 }
@@ -902,7 +896,6 @@ async function doGoLedge() {
 // ---------- 撞墙模式 ----------
 // 烦躁时跑到活跃窗口的边沿，助跑拿头撞墙，撞完发晕，然后回家
 let wall = null;
-let pendingWall = false;
 
 async function doWallBang() {
   const st = await window.pet.getStage();
@@ -929,7 +922,6 @@ async function doWallBang() {
     count: 0, maxCount: 3 + ((Math.random() * 3) | 0),
   };
   logEvent('自主', aw ? `烦躁了，去撞「${aw.owner}」的墙` : '烦躁了，去撞屏幕边');
-  if (form === 'flute') { pendingWall = true; doMorphTo('normal'); return; }
   if (form === 'normal') { facing = -dir; enter('wallgoin', 0.3); }
   else { facing = dir; enter('wallgo'); }
   say(pick(['烦死了！', '让我撞一撞！', '啊啊啊——']), 1500);
@@ -940,7 +932,6 @@ async function doWallBang() {
 // 侧身图 493x1298，显示高 512 → 显示半宽约 97px；身体在窗口内居中，左右沿 = 窗心∓97
 const SIDE_HALF_W = 97;
 let knock = null;
-let pendingKnock = false;
 
 async function doKnock() {
   const st = await window.pet.getStage();
@@ -978,8 +969,6 @@ async function doKnock() {
     phase: 'aim', phaseT: 0,
   };
   logEvent('自主', aw ? `去敲「${aw.owner}」的边儿求关注` : '去敲屏幕边求关注');
-  // 侧身图只有姐姐形态有，其他形态先变回来再敲
-  if (form !== 'normal') { pendingKnock = true; doMorphTo('normal'); return; }
   facing = -dir;
   enter('knockin', 0.3);
   say(pick(LINES.knock), 1800);
@@ -990,7 +979,6 @@ async function doKnock() {
 // 爬到顶沿后：上方够高（≥420px，站得下她）就上去踱步待会儿（复用 onledge/jumpdown），
 // 不够高就直接跳下来。攀爬帧只有姐姐形态素材，其它形态先变身再爬。
 let climb = null;
-let pendingClimb = false;
 
 async function doClimb() {
   const st = await window.pet.getStage();
@@ -1038,8 +1026,6 @@ async function doClimb() {
   };
   logEvent('自主', `顺着「${aw.owner}」的边沿往上爬`);
   applyEffect('climb');
-  // 攀爬帧只有姐姐形态素材
-  if (form !== 'normal') { pendingClimb = true; doMorphTo('normal'); return; }
   say(pick(LINES.climb), 1600);
   enter('climbgo');
 }
@@ -1396,7 +1382,6 @@ const WAIST = { x: 195, y: 346 }; // 卡牌在腰间时的窗口坐标（姐姐�
 const WAIST_CHIBI = { x: 168, y: 505 }; // Q版腰间卡牌的窗口坐标
 const FLOAT_POS = { x: 170, y: 290 }; // 卡牌悬浮位置
 let seal = null;
-let pendingSeal = false;
 
 function cardShow(x, y, s, r, o) {
   cardImg.style.display = 'block';
@@ -1407,7 +1392,6 @@ function cardShow(x, y, s, r, o) {
 function cardHide() { cardImg.style.display = 'none'; }
 
 function doSeal() {
-  if (form === 'chibi') { pendingSeal = true; doMorph(); return; }
   seal = { sub: 'emerge', subT: 0, floatDur: 0, sparkT: 0, said: false };
   enter('seal');
   say(pick(LINES.seal), 1500);
@@ -1490,7 +1474,6 @@ function easeOutBack(k) {
 // ---------- 来张桌子（姐姐形态专属） ----------
 // 立绘放大到 700px 并下移，胸部以上露出桌面，下半身被桌体挡住
 function doDesk() {
-  if (form === 'chibi') { pendingDesk = true; doMorph(); return; }
   sprite.style.height = 700 * sizeK + 'px';
   showDesk();
   enter('deskin', 0.6);
@@ -1500,10 +1483,8 @@ function doDesk() {
 // ---------- 工作模式（姐姐形态专属） ----------
 // 同一张课桌，但她在疯狂捯饬：高频抖动 + 烟雾 + 笛子纸张乱飞
 let work = null;
-let pendingWork = false;
 
 function doWork() {
-  if (form === 'chibi') { pendingWork = true; doMorph(); return; }
   sprite.style.height = 700 * sizeK + 'px';
   showDesk();
   work = { smokeT: 0.5, paperT: 0.8, lineT: 2.5 };
@@ -1820,6 +1801,22 @@ for (const id in EXT_ACTIONS) {
   };
 }
 
+// 形象强匹配：当前形态不在动作 forms 里就先变到 forms[0]，变身完成后由 morph 收尾统一接续（pendingAction）。
+// 内置/ext 动作一视同仁；随机池/问脑已按 forms 过滤不会触发，兜底的是菜单手动触发和内部直达调用。
+let pendingAction = null;
+for (const id in DISPATCH) {
+  const run = DISPATCH[id];
+  DISPATCH[id] = () => {
+    const a = ACTIONS[id];
+    if (a && !a.forms.includes(form)) {
+      pendingAction = id;
+      doMorphTo(a.forms[0]);
+      return;
+    }
+    run();
+  };
+}
+
 // 心情好更爱玩开心动作，心情差不想玩
 const HAPPY_ACTIONS = new Set(['sway', 'qsway', 'qbounce', 'hop']);
 
@@ -1910,7 +1907,7 @@ async function idleRandomOnce() {
   // 神（耐心）见底：烦躁了去撞墙发泄
   if (stats.shen < 30 && enabled('wallbang') && canAfford('wallbang') && Math.random() < 0.5) {
     applyEffect('wallbang');
-    doWallBang();
+    DISPATCH.wallbang();
     return;
   }
   // 合适的时机：问大脑，动作和台词配套由模型决定，日志记「智能」
@@ -2802,17 +2799,14 @@ function frame(now) {
         applySpriteHeight();
       });
       if (stateT >= stateDur) {
-        // Q版点了上桌/收法宝：变回姐姐后接着执行
-        if (pendingDesk) { pendingDesk = false; doDesk(); }
-        else if (pendingSeal) { pendingSeal = false; doSeal(); }
-        else if (pendingFlute) { pendingFlute = false; doFluteFly(); }
-        else if (pendingSleep) { pendingSleep = false; doSleep(); }
-        else if (pendingWall) { pendingWall = false; doWallBang(); }
-        else if (pendingKnock) { pendingKnock = false; doKnock(); }
-        else if (pendingClimb) { pendingClimb = false; doClimb(); }
-        else if (pendingPoint) { pendingPoint = false; doPoint(); }
-        else if (pendingWork) { pendingWork = false; doWork(); }
-        else { enter('idle'); idleWait = nextIdleWait(3, 6); }
+        enter('idle');
+        idleWait = nextIdleWait(3, 6);
+        // 被形象校验拦住的动作变身完成后接续（先回 idle 态：还要变身时 doMorphTo 不被 morph 态挡住）
+        if (pendingAction) {
+          const id = pendingAction;
+          pendingAction = null;
+          DISPATCH[id]();
+        }
       }
       break;
     }
