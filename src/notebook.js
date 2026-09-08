@@ -139,7 +139,7 @@ function submit(text) {
     addMsg(botMsgs, 'me', text);
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子飞书 tab 发言：${text.slice(0, 30)}` });
     // 登记乐观上屏的文本：daemon 会把同一条 user 消息回显回来，onFeishuMsg 命中即跳过防双显
-    const sentText = text.slice(0, 2000); // 与主进程 yomi-send/feishu-send 的截断对齐
+    const sentText = text.slice(0, 2000); // main.js yomi-send/feishu-send 都先截 2000（yomi.js 的 4000 不再生效），回显必为同一串
     pendingBotSends.push(sentText);
     if (pendingBotSends.length > 20) pendingBotSends.shift();
     // kira 链接在线时走 yomi wire（回答进飞书）；否则走旧飞书通道
@@ -945,6 +945,8 @@ document.getElementById('yomiSave').addEventListener('click', () => {
     sessionId: yomiSessionId.value.trim(),
     enabled: yomiEnabled.checked,
   });
+  // 同步本地状态：onFeishuMsg 的 sessionId 过滤和 updateBotTab 都读 yomiState，等下次 loadYomiConfig 刷新会漏消息
+  yomiState = { ...yomiState, sessionId: yomiSessionId.value.trim(), enabled: yomiEnabled.checked, wsUrl: yomiWsUrl.value.trim() };
   window.pet.notebookSay('kira 链接记好啦');
   window.pet.logAppend({ t: Date.now(), type: '系统', text: '更新了 kira 链接配置' });
 });
@@ -989,6 +991,9 @@ window.pet.onFeishuStatus((s) => {
 // 归一化飞书消息（事件/轮询/小本子回答）：按 id 防重，时间序追加
 window.pet.onFeishuMsg((m) => {
   if (activeTab !== 'bot') return;
+  // 只上屏绑定 session 的消息：SubscribeAll 推的是全部会话，别的 session 别串进来
+  // （连等待气泡也不能让外来回答抢占）；旧 feishu 通道的消息无 sessionId，放行
+  if (m.sessionId && m.sessionId !== yomiState.sessionId) return;
   if (m.id && renderedIds.has(m.id)) return;
   if (m.id) renderedIds.add(m.id);
   // 只清「还没有消息」占位符：结束标记（bot-top-done）和已上屏历史不能被误杀
