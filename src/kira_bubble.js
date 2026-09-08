@@ -7,8 +7,12 @@ const kbClose = document.getElementById('kbClose');
 const kbOpen = document.getElementById('kbOpen');
 
 let shown = false;
+let closeTimer = null;
 
 window.pet.onKiraBubbleShow(({ text }) => {
+  // 新消息到达时取消待执行的单击关闭，否则旧定时器会在 shown===true 时把新泡泡误关
+  clearTimeout(closeTimer);
+  closeTimer = null;
   window.MarkdownStream.render(kbText, text || '');
   kb.classList.add('show');
   shown = true;
@@ -34,7 +38,6 @@ document.addEventListener('click', (e) => {
 
 // 单击关闭：~250ms 去抖——双击序列是 click→click→dblclick，立即关闭会吃掉 dblclick，
 // 让双击打开 kira 永远不可达；dblclick 到达时取消这个定时器。点了但选中文字不算关闭（那是想复制）
-let closeTimer = null;
 kb.addEventListener('click', () => {
   if (!shown) return;
   if (window.getSelection().toString()) return;
