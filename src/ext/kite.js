@@ -1,9 +1,9 @@
-// 放风筝：她在地面来回小跑拽线，风筝（overlay 侧 ov_kite）在高处按正弦盘旋；
-// 10~15s 后进入收线阶段，风筝缓缓降回手上，overlay 发 fxDone 回执收尾。
+// 放风筝：她在地面来回小跑拽线，Q版小 Kira 当风筝（overlay 侧 ov_kite）在高处按正弦盘旋；
+// 10~15s 后线从手上滑脱，风筝带绳翻滚飞出屏幕，overlay 发 fxDone 回执收尾。
 // 锚点协议：data.x/y = 窗口左上屏幕绝对坐标（主进程自动换算），hx/hy = 未缩放窗口局部
 // 手部偏移，overlay 侧乘 ovlK 得到真实手部坐标（这里读不到 sizeK，缩放交给 overlay 算）。
 (() => {
-  const STATES = new Set(['kite.fly', 'kite.reel']);
+  const STATES = new Set(['kite.fly', 'kite.break']);
   const HAND = { normal: { x: 230, y: 450 }, chibi: { x: 230, y: 560 } }; // 胸口偏上的持线手
   let K = null;          // 进行中场次
   let fxSeq = 0;         // 会话令牌自增（防打断后快速重开的旧回执串台）
@@ -46,7 +46,7 @@
           if (kind !== 'kite' || !K || K.pending || !mine(ctx)) return;
           if (receiptSeq !== undefined && receiptSeq !== K.seq) return; // 旧场次回执不认
           ctx.fxBurst(170, 300, 10, 8, 40);
-          ctx.say(ctx.pick(['完美降落！', '收工收工~', '风筝回来咯~']), 1600);
+          ctx.say(ctx.pick(['风筝飞走啦……', '它替我去看远方了', '下次要抓牢一点！']), 1600);
           finish(ctx);
         });
       }
@@ -88,15 +88,15 @@
         K.lineT -= dt;
         if (K.lineT <= 0) { ctx.say(ctx.pick(LINES.kite), 1600); K.lineT = ctx.rand(3, 5); }
         if (ctx.stateT >= ctx.stateDur) {
-          K.phase = 'reel';
-          sendUpdate(ctx, 'reel');
-          ctx.say('收线咯——', 1500);
-          ctx.enter('kite.reel', 8); // 8s 没收到回执就自己兜底收尾（覆盖层失联场景）
+          K.phase = 'break';
+          sendUpdate(ctx, 'break');
+          ctx.say('哎呀——线断了！', 1500);
+          ctx.enter('kite.break', 8); // 8s 没收到回执就自己兜底收尾（覆盖层失联场景）
         }
         return true;
       }
-      if (state === 'kite.reel') {
-        // 站着绞线等风筝落回手上：轻轻起伏即可
+      if (state === 'kite.break') {
+        // 站着目送风筝飞走：轻轻起伏即可
         ctx.tf.sy = 1 + 0.02 * Math.sin(t * 6);
         ctx.tf.rot = 1.5 * Math.sin(t * 2);
         if (ctx.stateT >= ctx.stateDur) finish(ctx);
