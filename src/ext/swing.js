@@ -18,10 +18,11 @@
     id: 'swing',
     lines: ['荡秋千咯~', '飞高高！', '秋千秋千，荡起来！', '我要荡到云上去~'],
     start(ctx) {
+      // 重开/换形态时旧看门狗随即被清，旧场次特效可能还挂在覆盖层：先补发结束信号
+      if (fxSent) { fxSent = false; ctx.fxStart('swing', { end: true, seq: mySeq }); }
       if (ctx.form !== 'chibi') { ctx.enter('idle'); ctx.idleWait = ctx.nextIdleWait(2, 4); return; }
       swingFx = null;
       mySeq = ++fxSeq;
-      fxSent = false;
       if (swingDog) { clearInterval(swingDog); swingDog = null; }
       // 打断看门狗：特效还在覆盖层播着、状态却被切走（拖走/菜单换动作）时通知覆盖层收场
       swingDog = setInterval(() => {
