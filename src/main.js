@@ -571,7 +571,8 @@ function createKiraBubble() {
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: false,
-    focusable: false,
+    // 要能吃键盘焦点（Esc 关闭泡泡）；不主动 focus，用户点击泡泡即自然聚焦
+    focusable: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -600,6 +601,7 @@ function showKiraBubble(text) {
   if (!kiraBubbleWin) return;
   anchorKiraBubble(); // 只有第一次会真正锚定
   kiraBubbleWin.webContents.send('kira-bubble-show', { text });
+  // 不主动 focus（每条回复都抢键盘焦点会打断用户打字）；窗口 focusable，用户点一下泡泡即聚焦，之后 Esc 可关
   if (!kiraBubbleWin.isVisible()) kiraBubbleWin.showInactive();
 }
 

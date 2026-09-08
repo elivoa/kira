@@ -50,7 +50,7 @@
     border-top-color: #262433;
     border-bottom: 0;
   }
-  /* 文字可选中；双击直达 kira tab，单击（没选中文字时）关闭 */
+  /* 文字可选中；双击直达 kira tab，Esc 或右上角 ✕ 关闭 */
   #kbText {
     -webkit-app-region: no-drag;
     user-select: text;
@@ -116,7 +116,7 @@
     <button id="kbClose" title="关闭">✕</button>
     <button id="kbOpen" title="打开 kira 对话">💬</button>
     <div id="kbText" class="md"></div>
-    <span class="kb-hint">✦ 单击关闭 · 双击打开 kira</span>
+    <span class="kb-hint">✦ 点击后 Esc 关闭 · 双击打开 kira</span>
   </div>
   <script src="../node_modules/markdown-it/dist/browser/markdown-it.umd.min.js"></script>
   <script src="../node_modules/katex/dist/katex.min.js"></script>
