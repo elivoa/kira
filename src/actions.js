@@ -51,7 +51,7 @@ const ACTIONS = {
   snow:        { name: '接雪花',     forms: ['normal', 'chibi'], intrusive: true,  w: 2, auto: true },
   lantern:     { name: '放灯笼',     forms: ['normal', 'chibi'], intrusive: false, w: 3, auto: true },
   photo:       { name: '自拍',       forms: ['normal', 'chibi'], intrusive: false, w: 3, auto: true },
-  hide:        { name: '捉迷藏',     forms: ['normal', 'chibi'], intrusive: true,  w: 2, auto: true },
+  hide:        { name: '捉迷藏',     forms: ['normal', 'chibi'], intrusive: true,  w: 1, auto: true },
   rps:         { name: '石头剪刀布', forms: ['normal', 'chibi'], intrusive: false, w: 2, auto: true },
   arrowdodge:  { name: '方向键逗宠', forms: ['normal', 'chibi'], intrusive: false, w: 2, auto: true },
   tightrope:   { name: '走钢丝',     forms: ['normal'],            intrusive: true,  w: 2, auto: true },
