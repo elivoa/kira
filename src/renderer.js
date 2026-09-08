@@ -1604,13 +1604,19 @@ async function evadeCheck() {
   const nbDanger = nbDangerRect();
   if (nbDanger) {
     if (rectsOverlap(pet, nbDanger)) {
-      // pickEvadeTarget 吃的是 active-window 的 {x,y,w,h} 形状，notebookBounds 是 Electron 的 width/height，先归一
-      const nbActive = { x: nbBounds.x, y: nbBounds.y, w: nbBounds.width, h: nbBounds.height };
-      const target = await pickEvadeTarget({ active: nbActive, caret: null }, px);
-      if (target) {
-        logEvent('自主', '你在小本子里输入，嘟嘟囔囔让开了');
-        doEvade(target, px, py, pick(LINES.nbEvade));
+      // 超宽本本两侧躲不开时会一直压着：冷却期内不重复避/重复嘀咕，除非她离开后再次进入危险区
+      if (nbWasClear || nowSec - nbLastEvadeAt >= NB_EVADE_GAP) {
+        // pickEvadeTarget 吃的是 active-window 的 {x,y,w,h} 形状，notebookBounds 是 Electron 的 width/height，先归一
+        const nbActive = { x: nbBounds.x, y: nbBounds.y, w: nbBounds.width, h: nbBounds.height };
+        const target = await pickEvadeTarget({ active: nbActive, caret: null }, px);
+        if (target) {
+          nbLastEvadeAt = nowSec;
+          nbWasClear = false;
+          doEvade(target, px, py, pick(LINES.nbEvade));
+        }
       }
+    } else {
+      nbWasClear = true; // 已离开危险区，下次再进来立刻重避
     }
     return; // typing 期间只避本子，下面的全局打字检测和软避让都歇着
   }
@@ -1682,13 +1688,16 @@ function doEvade(target, px, py, line) {
 
 // ---------- 打字避让（typingguard）：小本本输入时绝不挡本本 ----------
 // typing 状态由 notebook.js 经 notebook-say 通道（哨兵前缀 JSON）推来；
-// 本子窗口位置读 settings.notebookBounds（主进程在本子移动/缩放/关闭时持久化），typing 中每 8 秒重拉
+// 本子窗口位置优先走 get-notebook-bounds 现场查（settings 落盘有首跑盲区），typing 中每 8 秒重拉
 const NB_TYPING_PREFIX = '__nb_typing__:';
 const NB_BEAT_TIMEOUT = 10000; // 心跳超时：本子关了/崩了自行恢复正常
+const NB_EVADE_GAP = 15;       // 秒，避不开时的重复避让/嘀咕冷却（重新进入危险区不受限）
 let nbTyping = false;
 let nbBounds = null;  // 本子窗口屏幕坐标 {x, y, width, height}
 let nbLastBeat = 0;
 let nbBoundsT = 0;
+let nbLastEvadeAt = -NB_EVADE_GAP;
+let nbWasClear = true; // 她当前是否在本子危险区外（离开后再次进入要立刻重避）
 
 function nbOnTypingMsg(payload) {
   let m;
@@ -1697,12 +1706,18 @@ function nbOnTypingMsg(payload) {
   if (!m.on) { nbTyping = false; return; }
   const wasOff = !nbTyping;
   nbTyping = true;
+  if (wasOff) nbWasClear = true; // 新一轮输入：她在本子上要立刻避，不受冷却挡
   if (wasOff || Date.now() - nbBoundsT > 8000) nbRefreshBounds();
   if (wasOff) evadeTick().catch(() => {}); // 已经开始输入：她已经挡在本子上的话马上走开
 }
 
+// 本子窗口位置：优先现场查（首次打开没动过窗口时 settings 里还没有），查不到再读持久化的 notebookBounds
 async function nbRefreshBounds() {
   nbBoundsT = Date.now();
+  try {
+    const live = await window.pet.getNotebookBounds();
+    if (live && typeof live.x === 'number') { nbBounds = live; return; }
+  } catch {}
   try {
     const s = await window.pet.getSettings();
     const b = s && s.notebookBounds;
@@ -1736,8 +1751,9 @@ function nbClampTx(tx, px, st) {
   return tx;
 }
 
-// typing 期间不进随机池的动作：会横穿/压到本子区域的位移动作（菜单手动触发不拦）
-const NB_POOL_BLOCK = new Set(['walkfar', 'dash', 'fly', 'drive', 'goledge', 'climb', 'knock', 'wallbang', 'mischief', 'flutefly']);
+// typing 期间不进随机池的动作：会横穿/压到本子区域的位移动作（菜单手动触发不拦）。
+// follow 会贴到光标旁（打字时基本就在本本边）、sleepwalk/umbrellawalk 地面游走，一并拦
+const NB_POOL_BLOCK = new Set(['walkfar', 'dash', 'fly', 'drive', 'goledge', 'climb', 'knock', 'wallbang', 'mischief', 'flutefly', 'follow', 'sleepwalk', 'umbrellawalk']);
 function nbPoolOk(id) { return !nbTyping || !NB_POOL_BLOCK.has(id); }
 
 // ---------- 日志（自主动作 / 交互 / 系统事件） ----------
