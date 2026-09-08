@@ -24,7 +24,9 @@ const seenEvents = [];          // event_id 去重环（SubscribeAll 重连后�
 let lastEventId = null;         // 最近收到的事件 id：重连后按它回放漏掉的事件（会话连续性）
 let lastFrameAt = 0;            // 最近收到任何帧的时间：半开连接（对端死了但没 close 事件）靠看门狗发现
 let watchdogTimer = null;
-let notebookWait = null;        // 小本子发言等待 kira 回答的挂起 Promise
+let notebookWait = null;        // 小本子发言等待 kira 回答的挂起 Promise（带 sessionId + 身份校验，防并发串话）
+let restartTimer = null;        // restart() 的延迟启动定时器：stop() 必须能取消它，否则双 socket 泄漏
+const MAX_FRAME = 16 * 1024 * 1024; // 单帧上限：超过即断连，防坏对端/粘包错误把内存撑爆
 let linkedOnce = false;         // 首次连上标记：「蓝牙连上了」只在第一次说，重连不刷屏
 
 function setStatus(s, err) {
@@ -66,6 +68,13 @@ function onData(chunk) {
   for (;;) {
     if (buf.length < 4) return;
     const len = buf.readUInt32BE(0);
+    if (len > MAX_FRAME) {
+      // 帧长度超限：协议已失同步或对端异常，丢弃缓冲并断连（走重连）
+      buf = Buffer.alloc(0);
+      if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `kira 帧长度异常（${len} 字节），断开重连` });
+      try { ws && ws.terminate(); } catch {}
+      return;
+    }
     if (buf.length < 4 + len) return;
     const payload = buf.subarray(4, 4 + len);
     buf = buf.subarray(4 + len);
@@ -104,7 +113,7 @@ const replyBuf = new Map(); // sessionId → { text, eventId }
 function emitMessage(role, content, id, sessionId) {
   const out = { t: Date.now(), role, content, id, source: 'kira', sessionId };
   if (deps.onMessage) deps.onMessage(out);
-  if (role === 'assistant' && notebookWait) {
+  if (role === 'assistant' && notebookWait && sessionId === notebookWait.sessionId) {
     const w = notebookWait;
     notebookWait = null;
     clearTimeout(w.timer);
@@ -162,6 +171,7 @@ function onEvent(msg) {
 async function connectOnce() {
   const cfg = deps.getConfig() || {};
   if (!cfg.enabled || !cfg.wsUrl) { setStatus('off'); return; }
+  buf = Buffer.alloc(0); // 重连必须清空帧缓冲：旧连接的半帧残留会把新连接的解析打乱
   setStatus('connecting');
   try {
     ws = new WebSocket(cfg.wsUrl, cfg.token ? { headers: { Authorization: `Bearer ${cfg.token}` } } : {});
@@ -252,11 +262,15 @@ function stop() {
   stoppedByUser = true;
   stopWatchdog();
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
   if (ws) { try { ws.close(); } catch {} ws = null; }
   setStatus('off');
 }
 
-function restart() { stop(); setTimeout(start, 300); }
+function restart() {
+  stop();
+  restartTimer = setTimeout(() => { restartTimer = null; start(); }, 300);
+}
 
 // 给绑定的 session 发一句话（daemon 会当主人消息处理，kira 的回答进飞书）
 async function sayToSession(text) {
@@ -265,16 +279,20 @@ async function sayToSession(text) {
   return call('send_message', { session_id: cfg.sessionId, blocks: [{ type: 'text', text: String(text).slice(0, 4000) }] }, 20000);
 }
 
-// 小本本发言：发出去并等 kira 的回答（回答经 SubscribeAll 回来）
+// 小本本发言：发出去并等 kira 的回答（回答经 SubscribeAll 回来）。
+// 一次只允许一条在途：第二条直接拒绝，避免两条 waiter 互相顶掉、答非所问
 function handleNotebook(text) {
   return new Promise((resolve, reject) => {
     if (status !== 'online') { reject(new Error('kira 还没连上')); return; }
-    const timer = setTimeout(() => {
-      if (notebookWait) { notebookWait = null; resolve('（发出去了，kira 还没回，稍等飞书上看吧）'); }
+    if (notebookWait) { reject(new Error('上一条还没回，等 kira 答完再问')); return; }
+    const cfg = deps.getConfig() || {};
+    const w = { resolve, timer: null, sessionId: cfg.sessionId || '' };
+    w.timer = setTimeout(() => {
+      if (notebookWait === w) { notebookWait = null; resolve('（发出去了，kira 还没回，稍等飞书上看吧）'); }
     }, 120000);
-    notebookWait = { resolve, timer };
+    notebookWait = w;
     sayToSession(text).catch((e) => {
-      if (notebookWait) { clearTimeout(timer); notebookWait = null; reject(e); }
+      if (notebookWait === w) { clearTimeout(w.timer); notebookWait = null; reject(e); }
     });
   });
 }
