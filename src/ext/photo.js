@@ -4,10 +4,14 @@
 (() => {
   let extCtx = null;
   let poseForm = 'normal';
+  let fxSeq = 0;  // 会话令牌自增
+  let mySeq = 0;  // 当前拍摄会话的令牌
+  let wd = null;  // 立绘看门狗
 
   function finish() {
     const ctx = extCtx;
     if (!ctx || ctx.state !== 'photo.pose') return;
+    clearInterval(wd); wd = null;
     if (poseForm === 'normal') ctx.swapSprite('../assets/pet.png'); // 换回正脸立绘
     ctx.enter('idle');
     ctx.idleWait = ctx.nextIdleWait(3, 6);
@@ -20,15 +24,25 @@
     start(ctx) {
       if (!extCtx) { // 回执只订阅一次，EXT_CTX 是单例
         extCtx = ctx;
-        ctx.onFxDone((kind) => { if (kind === 'photo') finish(); });
+        ctx.onFxDone((kind, receiptSeq) => {
+          if (kind === 'photo' && (receiptSeq === undefined || receiptSeq === mySeq)) finish();
+        });
       }
+      mySeq = ++fxSeq;
       ctx.say(ctx.pick(LINES.photo), 1600);
       poseForm = ctx.form;
       if (poseForm === 'normal') ctx.swapSprite('../assets/point.png'); // 指镜头的 pose
       ctx.enter('photo.pose', 8); // 兜底时长：正常 ~3.6s 由 fxDone 提前收尾
+      // 打断看门狗：菜单/大模型切动作不会换回立绘（拖拽路径内核会换），指人图不能赖着
+      clearInterval(wd);
+      wd = setInterval(() => {
+        if (extCtx && extCtx.state === 'photo.pose') return;
+        clearInterval(wd); wd = null;
+        if (poseForm === 'normal' && extCtx) extCtx.swapSprite('../assets/pet.png');
+      }, 300);
       // 窗口左上角 + 形态给 overlay 定位取景框和照片贴图；拿到时动作已结束就不拍了
       ctx.getPos().then(([px, py]) => {
-        if (extCtx && extCtx.state === 'photo.pose') ctx.fxStart('photo', { x: px, y: py, form: poseForm });
+        if (extCtx && extCtx.state === 'photo.pose') ctx.fxStart('photo', { x: px, y: py, form: poseForm, seq: mySeq });
       }).catch(() => {});
     },
     tick(state, dt, t, ctx) {

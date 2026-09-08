@@ -15,9 +15,11 @@
   }
 
   registerOvFx('hide', (data) => {
-    // 已有场次时新触发直接判超时收场，renderer 侧立即现身
-    if (session) { window.pet.fxDone('hide.timeout'); return; }
-    session = { done: false };
+    // renderer 打断收场信号：把当前场次按超时收掉（回执带旧 seq，renderer 不认）
+    if (data && data.done) { if (session) finish(session, 'hide.timeout'); return; }
+    // 拆旧开新：旧场次立即收场（其回执带旧 seq，renderer 侧新会话不认）
+    if (session) finish(session, 'hide.timeout');
+    session = { done: false, seq: data && data.seq };
     try { show(data && data.corner, session); } catch (e) { finish(session, 'hide.timeout'); }
   });
 
@@ -102,6 +104,6 @@
     }
     if (ss.layer) ss.layer.remove();
     if (session === ss) session = null;
-    window.pet.fxDone(kind);
+    window.pet.fxDone(kind, ss.seq);
   }
 })();

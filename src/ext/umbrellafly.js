@@ -26,11 +26,14 @@
     effect: { jing: -2, mood: 3 },
     async start(ctx) {
       if (F) return;
+      const from = ctx.state;
+      F = { pending: true }; // 会话占位：await 往返期间挡住菜单连点的第二次触发
       let st, px, py;
       try {
         st = await ctx.getStage();
         [px, py] = await ctx.getPos();
-      } catch { return; }
+      } catch { F = null; return; }
+      if (ctx.state !== from) { F = null; return; } // IPC 往返期间被切走，别把她从新状态硬拽出来
       // 朝宽敞的一边飘；两边都挤就原地直上直下
       const roomR = st.maxX - px, roomL = px - st.minX;
       const dir = roomR >= roomL ? 1 : -1;
@@ -40,9 +43,15 @@
         drift: Math.min(420, Math.max(0, Math.max(roomR, roomL) - 40)),
         texted: false,
       };
-      // 打断看门狗：状态被切走就收掉会话（立绘由拖拽/后续动作各自兜底，同 umbrellawalk）
+      // 打断看门狗：状态被切走就收掉会话并换回正面立绘——
+      // 拖拽路径内核会换图，菜单/大模型切动作不会，撑伞图不能赖着
       F.guard = setInterval(() => {
-        if (F && ctx.state !== 'umbrellafly') { clearInterval(F.guard); F = null; }
+        if (!F) return;
+        if (ctx.state !== 'umbrellafly') {
+          clearInterval(F.guard);
+          F = null;
+          ctx.swapSprite(FRONT[ctx.form] || FRONT.normal);
+        }
       }, 400);
       ctx.say(ctx.pick(LINES.umbrellafly), 1800);
       ctx.swapSprite(UMBRELLA_SRC);

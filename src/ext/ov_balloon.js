@@ -37,6 +37,7 @@
     const t0 = performance.now();
     let last = t0;
     let done = false;
+    const seq = data.seq; // 会话令牌：回执带上，renderer 只认当前场次
 
     function finish() {
       if (done) return;
@@ -46,7 +47,17 @@
       layer.style.transition = 'opacity .5s';
       layer.style.opacity = 0;
       setTimeout(() => layer.remove(), 550);
-      window.pet.fxDone('balloon');
+      window.pet.fxDone('balloon', seq);
+    }
+
+    // 拆旧开新：立即清场不等淡出（回执照发，带旧 seq，renderer 新会话不认）
+    function kill() {
+      if (done) return;
+      done = true;
+      session = null;
+      clearInterval(watchdog);
+      layer.remove();
+      window.pet.fxDone('balloon', seq);
     }
 
     function tick(now) {
@@ -110,12 +121,13 @@
       try { tick(performance.now()); } catch (e) { finish(); }
     }, 400);
 
-    return { finish };
+    return { finish, kill };
   }
 
   registerOvFx('balloon', (data) => {
     if (data && data.done) { if (session) session.finish(); return; }
     if (!data || typeof data.x !== 'number') return;
-    if (!session) session = fly(data);
+    if (session) session.kill(); // 重开特效：拆旧场次，别干等旧场次淡出
+    session = fly(data);
   });
 })();

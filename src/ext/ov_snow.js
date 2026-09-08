@@ -1,7 +1,7 @@
 // 下雪特效：30~50 片雪花（❄ 字 + 六角小点）缓缓飘落，开场即铺满屏幕；
 // 8~12s 后雪停（不再补充新雪），余雪 2s 淡出后回报 fxDone。rAF + watchdog 兜底（同 flySword 模式）。
 (() => {
-  let running = false;
+  let cur = null; // 当前场次 { finish }
 
   function hexPoints(r) {
     const pts = [];
@@ -12,9 +12,12 @@
     return pts.join(' ');
   }
 
-  registerOvFx('snow', () => {
-    if (running) { window.pet.fxDone('snow'); return; } // 防叠罗汉
-    running = true;
+  registerOvFx('snow', (data) => {
+    if (cur) cur.finish(); // 拆旧开新：重开特效比新场次干等旧场次淡出体验好
+    cur = startSnow(data && data.seq);
+  });
+
+  function startSnow(seq) {
     const layer = el('g', {});
     const N = 30 + ((Math.random() * 21) | 0);
     const flakes = [];
@@ -57,8 +60,8 @@
       done = true;
       clearInterval(watchdog);
       layer.remove();
-      running = false;
-      window.pet.fxDone('snow');
+      if (cur === self) cur = null;
+      window.pet.fxDone('snow', seq);
     }
 
     function tick(now) {
@@ -98,5 +101,8 @@
       if (done) return;
       try { tick(performance.now()); } catch (e) { finish(); }
     }, 400);
-  });
+
+    const self = { finish };
+    return self;
+  }
 })();

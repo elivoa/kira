@@ -38,9 +38,16 @@
     id: 'cheer',
     lines: ['写得好快！加油加油！', '哒哒哒，文思泉涌！', '冲冲冲！我看好你！', '看你打字我都激动了'],
     async start(ctx) {
-      const st = await ctx.getStage();
-      const [px, py] = await ctx.getPos();
-      const aw = await ctx.activeWindow();
+      if (cheer) return; // 重入守卫（占位会话在 await 期间就放好）
+      const from = ctx.state;
+      cheer = { pending: true }; // 占位：挡住重入，monitor 的打断清理要跳过它
+      let st, px, py, aw;
+      try {
+        st = await ctx.getStage();
+        [px, py] = await ctx.getPos();
+        aw = await ctx.activeWindow();
+      } catch { cheer = null; return; }
+      if (ctx.state !== from) { cheer = null; return; } // IPC 往返期间被切走，别把她从新状态硬拽出来
       let tx = px, ty = py;
       if (aw) {
         // 站位：活动窗口左下角附近——优先贴窗左边（人在窗外一点），贴不下就站窗内左下
@@ -98,8 +105,9 @@
       return true;
     },
     monitor(ctx) {
-      // 被拖拽/戳一戳等打断：状态已不在打call链上，清场（立绘由 enter() 兜底恢复）
-      if (cheer && ctx.state !== 'cheer.go' && ctx.state !== 'cheer.wave' && ctx.state !== 'cheer.back') {
+      // 被拖拽/戳一戳等打断：状态已不在打call链上，清场（立绘由 enter() 兜底恢复）；
+      // pending 占位是 start 的 await 还没落地，别误清
+      if (cheer && !cheer.pending && ctx.state !== 'cheer.go' && ctx.state !== 'cheer.wave' && ctx.state !== 'cheer.back') {
         cheer = null;
         lastEnd = Date.now();
         stopSince = 0;

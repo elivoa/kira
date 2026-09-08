@@ -3,6 +3,7 @@
 (() => {
   const STATES = new Set(['stargaze.watch', 'stargaze.wait']);
   let S = null;          // 进行中场次
+  let fxSeq = 0;         // 会话令牌自增（防打断后快速重开的旧回执串台）
   let doneHooked = false; // 回执只订一次（ipcRenderer.on 重复调用会累加）
 
   function mine(ctx) { return STATES.has(ctx.state); }
@@ -10,9 +11,10 @@
   function cleanup(ctx, foreign) {
     if (!S) return;
     clearInterval(S.guard);
+    const s = S.seq;
     S = null;
     // 被打断（拖走/菜单换动作）：让 overlay 把星星收掉；重复发 end 对 overlay 无害
-    if (foreign) ctx.fxStart('stargaze', { phase: 'end' });
+    if (foreign) ctx.fxStart('stargaze', { phase: 'end', seq: s });
   }
 
   function finish(ctx) {
@@ -29,8 +31,9 @@
       if (S) return;
       if (!doneHooked) {
         doneHooked = true;
-        ctx.onFxDone((kind) => {
+        ctx.onFxDone((kind, receiptSeq) => {
           if (kind !== 'stargaze' || !S || !mine(ctx)) return;
+          if (receiptSeq !== undefined && receiptSeq !== S.seq) return; // 旧场次回执不认
           ctx.say(ctx.pick(['数着数着就困了…', '晚安，星星们', '明天还要一起来看哦']), 1800);
           finish(ctx);
         });
@@ -38,13 +41,13 @@
       // 数数的序列：1 颗、3 颗、6 颗……随机递增
       const nums = [1];
       while (nums.length < 7) nums.push(nums[nums.length - 1] + 1 + Math.ceil(Math.random() * 4));
-      S = { nums, idx: 0, countT: 1.0 };
+      S = { nums, idx: 0, countT: 1.0, seq: ++fxSeq };
       // 打断看门狗：状态被切走就收掉会话并通知 overlay 收场
       S.guard = setInterval(() => {
         if (S && !mine(ctx)) cleanup(ctx, true);
       }, 400);
       ctx.say(ctx.pick(LINES.stargaze), 1800);
-      ctx.fxStart('stargaze', { phase: 'start' });
+      ctx.fxStart('stargaze', { phase: 'start', seq: S.seq });
       ctx.enter('stargaze.watch', ctx.rand(8, 12));
     },
     tick(state, dt, t, ctx) {
@@ -61,7 +64,7 @@
           S.countT = ctx.rand(1.1, 1.9);
         }
         if (ctx.stateT >= ctx.stateDur) {
-          ctx.fxStart('stargaze', { phase: 'end' }); // overlay 星星淡出，完了给回执
+          ctx.fxStart('stargaze', { phase: 'end', seq: S.seq }); // overlay 星星淡出，完了给回执
           ctx.enter('stargaze.wait', 5); // 5s 没回执自己兜底收尾（覆盖层失联场景）
         }
         return true;

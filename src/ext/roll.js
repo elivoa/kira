@@ -15,6 +15,7 @@ function rollFront(form) {
 }
 
 let rollSt = null; // { ready, st, py, dir, dist, phase, t, dur, laps, moved, bodyR, dustT, sx0 }
+let rollWd = null; // 打断看门狗
 
 registerAction({
   id: 'roll',
@@ -24,6 +25,13 @@ registerAction({
     ctx.say(ctx.pick(LINES.roll), 1600);
     rollSt = { ready: false };
     ctx.enter('roll', 9); // 9s 硬超时，任何相卡死都由 tick 兜底回 idle
+    // 打断看门狗：菜单/大模型切动作不会换回立绘（拖拽路径内核会换），侧面图不能赖着
+    clearInterval(rollWd);
+    rollWd = setInterval(() => {
+      if (ctx.state === 'roll') return;
+      clearInterval(rollWd); rollWd = null;
+      if (rollSt) { rollSt = null; ctx.swapSprite(rollFront(ctx.form)); }
+    }, 300);
     Promise.all([ctx.getStage(), ctx.getPos()]).then(([st, [px, py]]) => {
       if (ctx.state !== 'roll' || !rollSt) return; // 初始化期间被打断，放弃
       const dir = (px - st.minX >= st.maxX - px) ? -1 : 1; // 朝空间更大的一侧滚
@@ -48,6 +56,7 @@ registerAction({
     if (state !== 'roll') return false;
     const done = () => {
       rollSt = null;
+      clearInterval(rollWd); rollWd = null;
       ctx.swapSprite(rollFront(ctx.form));
       ctx.enter('idle');
       ctx.idleWait = ctx.nextIdleWait(3, 6);

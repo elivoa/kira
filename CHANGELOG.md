@@ -1,6 +1,130 @@
 # Changelog
 
+## 2026-09-07
+
+### kira 消息泡泡（独立窗口）
+
+- kira 的回答改走一个新的独立窗口 `kira_bubble.html`（星空紫渐变 + 呼吸光晕，与主动搭话粘性气泡同款 UI、无边框圆角带尾巴），不再用跟随人物的粘性气泡
+- 初始位置定在人物头顶上方后**锁死不再跟随**（anchorKiraBubble 只锚一次）；框的边缘可拖动（-webkit-app-region: drag，文字部分 no-drag）；内容 markdown 渲染且**可选中**（user-select: text）；单击（没选中文字时）关闭，双击直达小本子 kira tab
+- 截图工具 `tools/kira_bubble_shot.js`（桩 preload 验证渲染，注意透明窗口 capturePage 空白是 macOS 特性，截图要加底色）
+
+### 主菜单加「Kira」入口（配置好才显示）
+
+- 一级菜单在「小本子」前动态插入 🤖 Kira：只有 config.yomi 配置好（unlocked + enabled + wsUrl）才出现；点开直达小本子的 kira 对话 tab。配置缓存每次开菜单时后台刷新
+- 机器人 tab 显隐同步放宽：在线或配置好（启用+地址+会话）都显示，不再只有在线才亮
+
+### 星盘菜单支持「按住右键拖拽，松手选中」标记菜单交互
+
+- 按住右键移动：扇形照常高亮（已有 hover）；松手时扇形在环带上就激活（点分类进子层、点叶子直接触发），松手位置在圆心小圆（半径 26px 内）就不算点击（取消语义，菜单留着）
+- 右键在扇形上的激活从 contextmenu 按下挪到 mouseup 松手（避免按下/松手双重触发）；左键行为不变
+
+### kira 气泡色调：哑光石板蓝
+
+- 暗色皮肤下原浅底渐变太白刺眼。调成哑光石板蓝渐变（#c3c9de→#a8b0cc + #8f97b8 边 + #23263a 字）——比我的深底亮但不晃眼，同一石板色系浑然一体
+
+### kira tab 滚动分页
+
+- 全量历史缓存在 botHistory，首屏只渲染最新 15 条（不再一次全渲）；滚到顶部动态加载更早的一批（15 条/批，保持视口不跳），到顶显示「没有更早的消息」
+
+### 修：打开小本子时 kira tab 不显示
+
+- loadYomiConfig 原来只在切到配置页时调，打开小本子时 yomiState 停在初始 'off'，tab 被藏，点一下设置页才出现。打开本子时就调一次（跟 loadFeishuConfig 同排）——配置好就一直有
+
+### 机器人消息：markdown 渲染 + kira 浅底左对齐
+
+- 根因：ListMessages 的 role 字段是 `kind` 不是 `role`，listMessages 映射全错，kira 的历史消息全被错标为「我」——所以 markdown 全走了 textContent 原文显示。改用 `m.kind` 判定；tool 类消息（psql/logcli 原始输出）不上屏
+- 背景互换：kira 消息浅底渐变左对齐、我的消息深底右对齐（原 kira 深底、我浅底）
+- 注：MarkdownStream 渲染引擎（markdown-it + KaTeX）本来就在，这次只是角色分类修对了
+
+### 修：kira 连接器「发完就跑」——常驻连接 + 回推解析 + 心跳保活
+
+- 根因三层：① 回推事件解析错了——这个 daemon 版本的 assistant 文本走 `event.model.end`（不是 internal.message_added），回复全漏，用户看不到 kira 的回答。改成 model.end 按 session 缓存最新一条、`agent.lifecycle.stopped` 时一次性吐；用户消息走 `event.user.message` ② 看门狗误杀——「90s 无帧 terminate」在 daemon 空闲时把好连接每 90 秒杀一次（kira 观测到 reset 与看门狗同频实锤）。改成心跳保活：60s 发 `ping`（daemon 回 `pong` 实测生效），150s 完全无回应才杀 ③ 重连不够皮实：指数退避加 jitter（±30%），重连后按 lastEventId 水位 `subscribe` 回放漏掉的事件（会话连续性），断连上报带 close code + reason
+- 验证：kira 侧 16 分钟观测零 reset（旧节奏 8–20 分钟一次）；「回推OK」双向实测通过
+
+## 2026-09-07
+
+### 星盘菜单加「大小」分类
+
+- 右键 → 设置 → 二级圆圈三项：**大小**（迷你/偏小/标准/偏大/巨大五档，与配置页滑块同一套 _size 语义，当前档位标 ✓，选中即调）、**调试动作**（直达小本子调试动作页）、**设置**（打开小本子配置页）；一级菜单回到 10 项圆盘
+- 菜单展开动画提速：单项过渡 0.3s→0.16s（透明度 0.22s→0.1s），错峰延迟圆盘 40ms→14ms、网格 22ms→10ms，关闭移除 260ms→160ms（总展开 ~700ms→~330ms）
+
+## 2026-09-05
+
+### 修：@kira 路由匹配不到 + 输入法 IME 合成问题
+
+- 前缀路由原来只认「kira，」标点分隔，用户习惯的「@kira 你好」（@+空格）匹配不到，全漏到她本人那里去了。改成 `@kira`（@ 后空格/标点都行）或「kira，」才路由给机器人；不带 @ 的「kira 你好」仍留给她本人
+- 输入法 IME 合成问题（打拼音时按 Enter 把未合成完的文字直接提交，出现「k ir a」这种拆开的内容）：小本子输入框和桌宠小输入框的 Enter 都加 `!e.isComposing` 守卫
+
+### 桌宠上直接 @kira 说话（前缀路由）
+
+- 聊天通道（小本子实时聊天 + 长按她身体的小输入框）输入以「kira，」或「@kira」开头，就路由给 kira 机器人（yomi.handleNotebook → SendMessage 到绑定私聊 session），kira 的回答直接显示在同一个聊天里，同时经 SubscribeAll 事件流回小本子机器人 tab；kira 没连上时提示
+- 修 yomi.js 的 ws 连接 bug：`require('ws')` 没有 `connect`（和探针同错），导致客户端一直连不上 daemon（07:36 后断线再没回来）
+
+### 「链接 kira」配置区默认隐藏，暗号解锁
+
+- 不是所有人都有 kira 机器人：配置页的「链接 kira」区块默认 display:none；在小本子聊天输入框输入暗号「kira牛逼」即解锁（config.yomi.unlocked 持久化），解锁后配置区出现并正常使用
+- 本机已配好 kira 的配置同时置 unlocked=true（自己不受影响）
+
+### 链接 kira（yomi wire 协议）上线，替代飞书 SDK 直连
+
+- 新链路：`src/yomi.js`——WebSocket（HTTP/1.1 Upgrade + Bearer token）+ 4 字节大端长度前缀 JSON 帧；Hello 握手 → SubscribeAll 全事件流订阅 + 断线指数退避重连。daemon 在 staging 集群（niko 部署，pod niko-gaobo），入口 `wss://niko-gaobo-ws.dev.kimi.team`（ingress 本身没毛病，早前 502 是 curl 走 HTTP/2 的误诊）
+- **kira → 桌宠**：SubscribeAll 事件里滤 internal.message_added 的 assistant 消息 → 人物粘性气泡同步展示（kira 说话立刻知道）
+- **桌宠 → kira**：小本本机器人 tab（kira 在线才显示）发言 → SendMessage 到绑定私聊 session → daemon 回答进飞书；历史从 ListMessages 拉
+- 配置页新增「链接 kira」区：wsUrl/token/sessionId/开关/状态/列会话挑选绑定；连上后首次握手自动发一句「蓝牙连上了」（重连不刷屏）
+- 踩坑记录：ReqMethod 无参变体必须发字符串（"hello"/"subscribe_all"），方法名必须 snake_case；HTTP/2 下 WS 握手必 502（h2 没有 Upgrade 头）；办公网到 pod 网段（10.3.x.x）不通、系统代理 7890 会劫内网 IP
+- 探针 `tools/yomi_probe.js` 可复用：`node tools/yomi_probe.js wss://niko-gaobo-ws.dev.kimi.team <token> --list-sessions`
+
+## 2026-09-04
+
+### 跨屏跟随：拖到哪块屏就按哪块屏的大小
+
+- 之前屏幕基数在创建窗口时算一次就缓存，她在大屏上仍是按小屏算的尺寸。新增所在屏变化检测：自主移动节流 500ms 一查；跨屏拖拽途中只记标记（窗口跟手不动），松手落定后统一 refreshScreenK + applyWindowSize + 广播 _screenK 给 renderer/overlay
+- resize 加「duang duang」弹性动画：阻尼振荡（振幅 e^-6t 衰减的 cos 12t）0.75s 弹两三次从旧尺寸弹到新尺寸，窗口和渲染层同步逐帧广播 _screenK，锚定与 applyWindowSize 一致收尾无跳变
+
+### 暗中观察大脸不跟人物缩放
+
+- peekbig 的大脸高度原先是「屏高 55% × 整体缩放」，屏幕自适应后（0.48）只剩 1/4 屏高。改成钉死屏高 70%（≥2/3）——全屏特效不按人物缩放缩
+
+### 人物大小跟随屏幕自适应
+
+- 屏幕基数 screenK = min(工作区高/5/512, 工作区宽/5/340)：人物（340×512 逻辑画幅）高宽都不超过屏 1/5，取较小的约束——大屏大、小屏小（本机 2056×1231 工作区 → 人物高 246px 正好 1/5）
+- 实际缩放 = screenK × 配置页缩放滑块（滑块仍是用户微调）；主进程算好随 settings 下发（_screenK），renderer/overlay 统一使用；窗口创建和 applyWindowSize 时刷新，跨屏拖拽途中不重算防抖动
+
+## 2026-09-03
+
+### 御剑飞行时长 10~30s
+
+- 巡航从按趟数（2~3 趟 ≈5s）改成按时间：巡航 8~28s 随机，加起飞/滑翔各 0.9s 全程 10~30s；到点从当前高度直接滑翔，不再等掉头
+
+### 睡眠节奏：不再一直睡
+
+- 上次把自主入睡改成睡到被戳醒为止，结果 25s 冷落就入睡 + 永不自醒 = 她几乎永远在睡。调整：冷落 2 分钟才入睡（原 25s），自主入睡睡 4~10 分钟自己醒（回到玩耍节奏）；「一直睡到被叫醒」只保留给菜单哄睡（doSleep(1e9) 路径不变）
+
 ## 2026-09-02
+
+### 御剑飞行换新素材（人物 + 真剑踏板）
+
+- 新素材接入：`assets/fly_char.png`（驭剑姿人物，1020×1455）、`assets/fly_sword.png`（音符银刃，1515×1023），均按 alpha>10 的内容 bbox 裁剪（人物 737×1228、剑 1449×436），脚底/剑身对齐原契约
+- 防裁切联调（全程截图验证，`tools/fly_shot.js` + 桩 preload 离屏捕捉窗内画面）：剑宽 210 + 抬升 28 + 巡航倾角上限 12°——剑穗垂在图底，宽度 240 或倾角 17° 时穗尖会戳出窗口底边（旧踏板同病，只是图扁看不出来）；起飞上升段前 40% 淡入遮掉从窗底升入的硬切；7 个时间点全帧程序化贴边扫描零裁切，脚底-剑身接触逐帧目视确认
+- 化身成剑（flySword）的剑素材同步换成新剑（同一素材族，旧 sword_blade.png 宽高比 648/1447 → 新 436/1449）
+
+### 动作调整：去掉转个圈、变身随机化、修御剑飞行背向 bug
+
+- 去掉「转个圈」（spin）：actions 注册表、星盘菜单、renderer 状态机/台词/数值/心情权重/可戳状态、大模型 do_action 枚举全链路移除
+- 「变个身」从 normal↔chibi 二人转改成随机变另一个形态（FORMS 全部 5 种排除当前形态）
+- 修：御剑飞行掉头后背向飞——fly 用的侧脸素材靠 facing 镜像朝向，巡航掉头只翻了 dir 和翻牌 rotY，facing 没交接（dash 侧面版有 `facing = -d.dir`，fly 漏了）；翻牌完成瞬间补上 `facing = -f.dir`。harness 实测：takeoff→cruise 两次掉头→glide→land 全链路，背向违例 0、立绘正确恢复
+
+### 小本子「调试动作」页
+
+- 书脊新 tab：60 个动作按形态分组平铺成按钮墙（名字 + id），点一下走星盘菜单同一条 menu-select 链强制演一次；设置里关掉的/不进随机池的调暗但照样能点（调试就是强制触发）
+- 验证工具 `tools/notebook_shot.js` + `tools/nb_stub_preload.js`（桩 window.pet 离屏渲染，60 按钮/触发链已验证；contextBridge 克隆不了 Proxy，桩必须显式方法表）
+
+### Code review 加固轮（两个 reviewer 并行）
+
+- 地基：start() 异常隔离（effect 已结算不能白扣）；registerAction/registerOvFx 重复注册警告 + 撞内置动作 id 拒收；overlay 缺 handler 时立即 fxDone 回执（原来设计性干等）；ctx.onFxDone 改单订阅 Set 分发（原来每 start 累加一个 IPC 监听）；monitor 异常每 id 记一次日志；气泡锚点 startsWith('sleep') 收紧为精确场景态（sleepwalk 不再错位半屏）；网格模式藏装饰环改 visibility（0px 留边框点）
+- fxDone 会话令牌（seq）×12 对：fxStart 带自增 seq、ov 拆旧开新、回执只认当前会话——修掉「打断后快速重开」旧回执串台（balloon 提前现身/kite 秒收/stargaze 干等）和「防叠罗汉立即回执」重开即收尾两个病类
+- 动作：hide 永久隐身路径（唯一 Critical，拖拽/菜单切走后 tick 和回执双丢）补 300ms 打断看门狗；sleepwalk 惊醒动画死代码（wake 先清 sess 再 enter）；roll/slide/dance/photo/umbrellawalk/umbrellafly 立绘残留看门狗；cheer/kite/umbrellawalk/umbrellafly/fish 异步 start 竞态 + 重入 interval 泄漏（await 前放占位、落地前校验状态）；ov_tightrope 补场次守卫；arrowdodge 跳跃 y 漂移缓回；balloon fxStart 未发出时 35s→3s 兜底
+- 验证：34 个 ext 文件语法全过；harness 全量 32 动作 + 打断路径零错误；hide 打断现身/confetti 快速重开不串台/8 对 seq 回执计时断言全部 PASS；README 收尾纪律补 7~12 条（状态命名、异步 start、换立绘、隐身、seq 范式）
 
 ### 菜单配色：深蓝紫 → 奶油暖色
 

@@ -3,8 +3,9 @@
 // 收：fxStart('yoyo', {done:true}) → overlay 淡出后 fxDone 回执，这里等回执再回待机。
 (function () {
   const MY_LINES = ['溜溜球，出发！', '看我的绝招~', '睡眠——再上挑！', '悠悠地转呀转'];
-  let yo = null;      // { iv, receipt } 进行中的会话
+  let yo = null;      // { iv, receipt, seq } 进行中的会话
   let yoCtx = null;   // 会话期间的 ctx（回执/看门狗回调里用）
+  let fxSeq = 0;      // 会话令牌自增（防打断后快速重开的旧回执串台）
   let hooked = false; // onFxDone 每调一次就多挂一个 IPC 监听，只许挂一次
 
   // ctx 拿不到窗口缩放系数，手心屏幕坐标改用 sprite 的 CSS 盒 + 窗口位置换算
@@ -17,6 +18,7 @@
       ctx.fxStart('yoyo', {
         x: Math.round(px + r.left + r.width * 0.82),
         y: Math.round(py + r.top + r.height * 0.52),
+        seq: yo.seq,
       });
     }).catch(() => {});
   }
@@ -36,12 +38,14 @@
       yoCtx = ctx;
       if (!hooked) {
         hooked = true;
-        ctx.onFxDone((kind) => { if (kind === 'yoyo' && yo) yo.receipt = true; });
+        ctx.onFxDone((kind, receiptSeq) => {
+          if (kind === 'yoyo' && yo && (receiptSeq === undefined || receiptSeq === yo.seq)) yo.receipt = true;
+        });
       }
       cleanup(true); // 防上次残留：旧 overlay 会话还在的话一并收掉
       ctx.say(ctx.pick(MY_LINES), 1500);
       ctx.enter('yoyo.play', ctx.rand(6, 8));
-      yo = { receipt: false, iv: null };
+      yo = { receipt: false, iv: null, seq: ++fxSeq };
       sendHand(ctx);
       // 心跳：报手心坐标 + 打断看门狗（tick 在 built-in 状态下不会被调到，只能靠它兜底）
       yo.iv = setInterval(() => {

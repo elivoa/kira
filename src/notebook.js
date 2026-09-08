@@ -29,12 +29,12 @@ document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
     activeTab = btn.dataset.tab;
     document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
-    for (const key of ['chat', 'history', 'mr', 'bot', 'log', 'config']) {
+    for (const key of ['chat', 'history', 'mr', 'bot', 'log', 'debug', 'config']) {
       document.getElementById(`page-${key}`).classList.toggle('hidden', key !== activeTab);
     }
-    inputrow.classList.toggle('hidden', activeTab === 'log' || activeTab === 'config' || activeTab === 'history');
+    inputrow.classList.toggle('hidden', activeTab === 'log' || activeTab === 'config' || activeTab === 'history' || activeTab === 'debug');
     if (activeTab === 'log') loadLogs();
-    if (activeTab === 'config') { loadChatConfig(); loadFeishuConfig(); }
+    if (activeTab === 'config') { loadChatConfig(); loadFeishuConfig(); loadYomiConfig(); }
     if (activeTab === 'history') loadHistoryTab();
     if (activeTab === 'bot') loadBotTab();
   });
@@ -116,6 +116,15 @@ function submit(text) {
   text = (text || '').trim();
   if (!text) return;
   input.value = '';
+  // 暗号：解锁「链接 kira」配置区（不是所有人都有 kira 机器人，默认藏着）
+  if (text === 'kira牛逼') {
+    window.pet.setYomiConfig({ unlocked: true });
+    document.getElementById('yomiSec').style.display = '';
+    addMsg(chatMsgs, 'Kira', '解锁啦！去「配置」页最下面就能看到「链接 kira」了，填上 ws 地址和 token 就能连');
+    window.pet.notebookSay('kira 链接解锁啦');
+    window.pet.logAppend({ t: Date.now(), type: '系统', text: '输入暗号，解锁了链接 kira 配置区' });
+    return;
+  }
   if (activeTab === 'mr') {
     addMsg(mrMsgs, 'me', text);
     const r = mrAnswer(text);
@@ -129,12 +138,18 @@ function submit(text) {
   } else if (activeTab === 'bot') {
     addMsg(botMsgs, 'me', text);
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子飞书 tab 发言：${text.slice(0, 30)}` });
-    // 走飞书机器人通道回答（回答同步进飞书会话），回答经 onFeishuLog 推回填进等待气泡
+    // kira 链接在线时走 yomi wire（回答进飞书）；否则走旧飞书通道
+    const send = yomiState.status === 'online' ? window.pet.yomiSend(text) : window.pet.feishuSend(text);
     const typing = addMsg(botMsgs, 'Kira', '正在输入…');
     typing.classList.add('typing');
     botMsgs.scrollTop = botMsgs.scrollHeight;
-    window.pet.feishuSend(text).then((r) => {
-      if (r && r.ok) return;
+    send.then((r) => {
+      if (r && r.ok) {
+        // yomi 的回答经事件流回来上屏；等待气泡撤掉
+        typing.classList.remove('typing');
+        typing.remove();
+        return;
+      }
       typing.classList.remove('typing');
       typing.innerHTML = '';
       window.MarkdownStream.render(typing, '呜，没发出去…');
@@ -189,7 +204,7 @@ function askKira(list, text) {
 }
 
 document.getElementById('send').addEventListener('click', () => submit(input.value));
-input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(input.value); });
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) submit(input.value); });
 
 // 拖链接进来：自动切到 MR Link 页签
 window.addEventListener('dragover', (e) => e.preventDefault());
@@ -638,7 +653,44 @@ function renderActions() {
 window.pet.getSettings().then((s) => {
   actionSettings = s || {};
   renderActions();
+  renderDebugActions();
 });
+
+// ---------- 调试动作页：全部动作平铺，点一下演一下（走星盘菜单同一条 menu-select 链） ----------
+function renderDebugActions() {
+  const list = document.getElementById('dbgList');
+  list.innerHTML = '';
+  for (const g of FORM_GROUPS) {
+    const ids = Object.keys(ACTIONS).filter((id) => actionFormGroup(ACTIONS[id]) === g.key);
+    if (!ids.length) continue;
+    const h = document.createElement('div');
+    h.className = 'dbg-group';
+    h.textContent = g.label;
+    list.appendChild(h);
+    const grid = document.createElement('div');
+    grid.className = 'dbg-grid';
+    for (const id of ids) {
+      const a = ACTIONS[id];
+      const b = document.createElement('button');
+      // 设置里关掉的/不进随机池的调暗，但调试页照样能点（点就是强制触发）
+      b.className = 'dbg-btn' + (a.off || actionSettings[id] === false || !a.auto ? ' off' : '');
+      b.title = `${id}｜forms: ${a.forms.join('/')}${a.intrusive ? '｜打扰性' : ''}${a.auto ? '' : '｜不进随机池'}`;
+      const n = document.createElement('span');
+      n.textContent = a.name;
+      const i = document.createElement('span');
+      i.className = 'i';
+      i.textContent = id;
+      b.append(n, i);
+      b.addEventListener('click', () => {
+        window.pet.menuSelect(id);
+        b.classList.add('fire');
+        setTimeout(() => b.classList.remove('fire'), 400);
+      });
+      grid.appendChild(b);
+    }
+    list.appendChild(grid);
+  }
+}
 
 // ---------- 飞书：配置在「配置」页，连上后书脊多出以机器人命名的 tab ----------
 const fsAppId = document.getElementById('fsAppId');
@@ -657,8 +709,15 @@ const renderedIds = new Set(); // 已上屏的飞书消息 id，轮询/事件/�
 
 const FS_STATUS_TEXT = { off: '未启用（按上方指引配置，打开开关）', connecting: '连接中…', online: '在线，私聊她或在群里 @她 试试', error: '连接出错，检查配置和上方指引的第 2~4 步' };
 
-// 飞书功能先隐藏：tab 永不显示（恢复见 main.js FEISHU_LIVE）
+// 机器人 tab 显隐：kira 链接（yomi）在线才显示，否则隐藏
 function updateBotTab() {
+  // kira 链接在线或配置好（启用 + 地址 + 会话）就显示
+  const yomiConfigured = !!(yomiState.sessionId || (yomiState.enabled && yomiState.wsUrl));
+  if (yomiState.status === 'online' || yomiConfigured) {
+    botTab.classList.remove('hidden');
+    botTabName.textContent = 'kira';
+    return;
+  }
   botTab.classList.add('hidden');
   if (activeTab === 'bot') document.querySelector('.tab[data-tab="chat"]').click();
 }
@@ -690,9 +749,69 @@ function loadFeishuConfig() {
   });
 }
 
-// 机器人 tab：历史直接拉飞书会话里的真实消息（展示完全 follow 飞书侧），
-// 拉不到时主进程会退回内存镜像
+// 机器人 tab：kira 链接在线时历史从 yomi session 拉，否则走旧飞书通道。
+// 分页：全量缓存在 botHistory，首屏只渲染最新 15 条；滚到顶部动态加载更早的一批
+const BOT_PAGE = 15;
+let botHistory = [];
+let botShown = 0;    // 已上屏消息在 botHistory 里的最早下标（>0 说明还有更早的可加载）
+let botLoading = false;
+
+function renderBotBatch(older) {
+  const end = older ? botShown : botHistory.length;
+  const start = Math.max(0, end - BOT_PAGE);
+  const batch = botHistory.slice(start, end);
+  botShown = start;
+  if (older) {
+    // 向上加载：插到当前最前，保持视口位置
+    const first = botMsgs.firstChild;
+    for (const m of batch) {
+      if (m.id) renderedIds.add(m.id);
+      const b = addMsg(botMsgs, m.role === 'user' ? 'me' : 'Kira', m.content);
+      botMsgs.insertBefore(b.parentNode, first);
+    }
+  } else {
+    for (const m of batch) {
+      if (m.id) renderedIds.add(m.id);
+      addMsg(botMsgs, m.role === 'user' ? 'me' : 'Kira', m.content);
+    }
+  }
+}
+
+// 滚到顶部：还有更早的就加载一批
+botMsgs.addEventListener('scroll', () => {
+  if (botMsgs.scrollTop > 40 || botShown <= 0 || botLoading) return;
+  botLoading = true;
+  const prevH = botMsgs.scrollHeight;
+  renderBotBatch(true);
+  botMsgs.scrollTop = botMsgs.scrollHeight - prevH; // 视口不跳
+  botLoading = false;
+  if (botShown === 0 && !botMsgs.querySelector('.bot-top-done')) {
+    const d = document.createElement('div');
+    d.className = 'empty bot-top-done';
+    d.textContent = '—— 到顶了，没有更早的消息 ——';
+    botMsgs.insertBefore(d, botMsgs.firstChild);
+  }
+});
+
 function loadBotTab() {
+  if (yomiState.status === 'online') {
+    window.pet.yomiHistory().then((list) => {
+      botMsgs.innerHTML = '';
+      renderedIds.clear();
+      if (!list || !list.length) {
+        const d = document.createElement('div');
+        d.className = 'empty';
+        d.textContent = 'kira 已连上，还没有同步到消息；之后飞书里的对话都会出现在这里';
+        botMsgs.appendChild(d);
+        return;
+      }
+      botHistory = list;
+      botShown = list.length;
+      renderBotBatch(false);
+      botMsgs.scrollTop = botMsgs.scrollHeight;
+    });
+    return;
+  }
   window.pet.getFeishuHistory().then((list) => {
     botMsgs.innerHTML = '';
     renderedIds.clear();
@@ -756,6 +875,79 @@ fsReplyBot.addEventListener('change', () => {
   window.pet.logAppend({ t: Date.now(), type: '系统', text: fsReplyBot.checked ? '打开了接管飞书回复' : '关闭了接管飞书回复（只同步）' });
 });
 
+// ---------- 链接 kira（yomi wire 协议） ----------
+const yomiWsUrl = document.getElementById('yomiWsUrl');
+const yomiToken = document.getElementById('yomiToken');
+const yomiSessionId = document.getElementById('yomiSessionId');
+const yomiEnabled = document.getElementById('yomiEnabled');
+const yomiStatus = document.getElementById('yomiStatus');
+const yomiSessionsOut = document.getElementById('yomiSessionsOut');
+let yomiState = { status: 'off', error: '', sessionId: '' };
+
+const YOMI_STATUS_TEXT = {
+  off: '未启用', connecting: '连接中…', online: '已连上，kira 的消息会同步到桌宠和小本子', error: '连接出错',
+};
+
+function renderYomiStatus() {
+  yomiStatus.classList.toggle('ok', yomiState.status === 'online');
+  yomiStatus.textContent = (YOMI_STATUS_TEXT[yomiState.status] || yomiState.status) + (yomiState.error ? `：${yomiState.error}` : '');
+}
+
+function loadYomiConfig() {
+  window.pet.getYomiConfig().then((c) => {
+    // 暗号解锁前配置区藏着（不是所有人都有 kira 机器人）
+    document.getElementById('yomiSec').style.display = c.unlocked ? '' : 'none';
+    if (document.activeElement !== yomiWsUrl) yomiWsUrl.value = c.wsUrl || '';
+    if (document.activeElement !== yomiToken) yomiToken.value = c.token || '';
+    if (document.activeElement !== yomiSessionId) yomiSessionId.value = c.sessionId || '';
+    yomiEnabled.checked = !!c.enabled;
+    yomiState = { status: c.status, error: c.error, sessionId: c.sessionId || '', enabled: !!c.enabled, wsUrl: c.wsUrl || '' };
+    renderYomiStatus();
+    updateBotTab();
+  });
+}
+
+document.getElementById('yomiSave').addEventListener('click', () => {
+  window.pet.setYomiConfig({
+    wsUrl: yomiWsUrl.value.trim(),
+    token: yomiToken.value.trim(),
+    sessionId: yomiSessionId.value.trim(),
+    enabled: yomiEnabled.checked,
+  });
+  window.pet.notebookSay('kira 链接记好啦');
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '更新了 kira 链接配置' });
+});
+
+yomiEnabled.addEventListener('change', () => {
+  window.pet.setYomiConfig({ enabled: yomiEnabled.checked });
+});
+
+// 列会话：从 daemon 拉最近 session 供挑选，点一条填进 sessionId 输入框
+document.getElementById('yomiSessionsBtn').addEventListener('click', async () => {
+  yomiSessionsOut.textContent = '拉取中…';
+  try {
+    const list = await window.pet.yomiListSessions();
+    yomiSessionsOut.innerHTML = '';
+    if (!list || !list.length) { yomiSessionsOut.textContent = '没有会话（先确认已连上）'; return; }
+    for (const s of list.slice(0, 20)) {
+      const d = document.createElement('div');
+      d.style.cssText = 'cursor:pointer;padding:2px 0;';
+      d.textContent = `${s.id}｜${(s.title || s.name || '').slice(0, 30)}`;
+      d.title = '点击填入 session_id';
+      d.addEventListener('click', () => { yomiSessionId.value = s.id; });
+      yomiSessionsOut.appendChild(d);
+    }
+  } catch (e) {
+    yomiSessionsOut.textContent = `拉取失败：${e.message || e}`;
+  }
+});
+
+window.pet.onYomiStatus((s) => {
+  yomiState = { ...yomiState, status: s.status, error: s.error || '' };
+  renderYomiStatus();
+  updateBotTab();
+});
+
 // 状态变化：刷状态行和书脊 tab（拿到机器人名字后 tab 会改名）
 window.pet.onFeishuStatus((s) => {
   feishuState = s;
@@ -788,6 +980,7 @@ window.pet.onFeishuMsg((m) => {
 });
 
 loadFeishuConfig(); // 打开本子就备好 tab 显隐/命名，不用等切页签
+loadYomiConfig();   // kira tab 同理：打开本子就拉一次链接状态，不然要等点配置页才出现
 
 // ---------- 开场白：有历史就渲染历史，没有就打招呼 ----------
 window.pet.chatHistory().then((history) => {

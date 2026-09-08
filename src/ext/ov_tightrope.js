@@ -2,18 +2,22 @@
 // 绳形用解析抛物线——和 renderer 侧她的脚底路径是同一条曲线，脚下零失配；
 // 中段叠一点微颤显软，两端钉死不动。hold 到 mount+dur（她走到对岸）后淡出，fxDone 回报。
 (() => {
+  let cur = null; // 当前场次 { finish }：此前完全没有场次守卫，重开直接叠罗汉
+
   registerOvFx('tightrope', (data) => {
     if (!data || typeof data.x !== 'number' || typeof data.dx !== 'number') {
-      window.pet.fxDone('tightrope');
+      window.pet.fxDone('tightrope', data && data.seq);
       return;
     }
-    show(data);
+    if (cur) cur.finish(); // 拆旧开新：旧绳立即撤，别两根钢丝挂屏上
+    cur = show(data);
   });
 
   function show(data) {
     const x0 = data.x, y0 = data.y, x1 = data.x + data.dx;
     const sag = data.sag || 36;
     const hold = (data.mount || 1) + (data.dur || 10); // 她上绳 + 走绳的总时长（秒）
+    const seq = data.seq; // 会话令牌：回执带上
     const N = 22;
 
     const layer = el('g', {});
@@ -70,7 +74,8 @@
       done = true;
       clearInterval(watchdog);
       layer.remove();
-      window.pet.fxDone('tightrope');
+      if (cur === self) cur = null;
+      window.pet.fxDone('tightrope', seq);
     }
 
     function frame(now) {
@@ -83,5 +88,8 @@
       if (done) return;
       try { tickOv(performance.now()); } catch (e) { finish(); }
     }, 400);
+
+    const self = { finish };
+    return self;
   }
 })();

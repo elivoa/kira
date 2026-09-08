@@ -13,6 +13,8 @@ window.EXT_ACTIONS = window.EXT_ACTIONS || {};
 // }
 function registerAction(def) {
   if (!def || !def.id || typeof def.start !== 'function') return;
+  // 重复注册按文件名序后到的赢，不吭声很难查，至少留个警告
+  if (window.EXT_ACTIONS[def.id]) console.warn(`[ext] 动作「${def.id}」被重复注册，后者覆盖前者`);
   window.EXT_ACTIONS[def.id] = def;
 }
 window.registerAction = registerAction;

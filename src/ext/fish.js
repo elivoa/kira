@@ -1,33 +1,50 @@
 // 钓鱼：走到屏幕顶沿坐下甩竿 → 覆盖层垂鱼线等上钩（旧靴子/宝箱）→ 收杆庆祝 → 回家
 (function () {
   let fish = null;
+  let fxSeq = 0;      // 会话令牌自增
   let fishHooked = false; // fxDone 只订阅一次
 
   registerAction({
     id: 'fish',
     lines: ['钓鱼咯~', '愿者上钩~', '今天会钓到什么呢', '静心等鱼来~'],
     start(ctx) {
-      fish = { px: 0, py: 0, tx: 0, ty: 0, hx: 0, hy: 0, fx: null, cast: false, leanT: 2.8, leaning: 0 };
+      if (fish) return; // 重入守卫：会话占位同步先放，第二次触发被拦
+      const from = ctx.state;
+      fish = { px: 0, py: 0, tx: 0, ty: 0, hx: 0, hy: 0, fx: null, cast: false, leanT: 2.8, leaning: 0, seq: 0, wd: null };
       ctx.logEvent('自主', '去钓鱼');
       ctx.say(ctx.pick(LINES.fish), 1500);
       if (!fishHooked) {
         fishHooked = true;
-        ctx.onFxDone((kind) => {
+        ctx.onFxDone((kind, receiptSeq) => {
           if (kind !== 'fish' || ctx.state !== 'fish.wait') return;
+          if (receiptSeq !== undefined && fish && receiptSeq !== fish.seq) return; // 旧场次回执不认
           ctx.say(ctx.pick(['上钩啦！', '钓到啦钓到啦！', '嘿嘿，有收获~']), 1600);
           ctx.fxBurst(170, 300, 12, 12, 52);
           ctx.enter('fish.back', 0.9);
         });
       }
-      Promise.all([ctx.getPos(), ctx.getStage()]).then(([[px, py], st]) => {
+      // 打断看门狗：状态被外部切走就清会话——否则重入守卫会把动作永久锁死；
+      // entered 前容忍出发态（await 还没落地），entered 后任何非 fish.* 状态都清
+      fish.wd = setInterval(() => {
         if (!fish) return;
+        const s = String(ctx.state);
+        if (s.startsWith('fish.')) return;
+        if (fish.entered || s !== from) { clearInterval(fish.wd); fish = null; }
+      }, 400);
+      Promise.all([ctx.getPos(), ctx.getStage()]).then(([[px, py], st]) => {
+        // IPC 往返期间被切走：清场走人，别把她从新状态硬拽出来
+        if (!fish || ctx.state !== from) { if (fish) { clearInterval(fish.wd); fish = null; } return; }
         fish.px = px; fish.py = py;
         fish.hx = px; fish.hy = py; // 记下出发位，钓完回家
         fish.tx = Math.min(Math.max(px, st.minX), st.maxX);
         fish.ty = st.minY;                     // 窗口顶贴工作区顶沿 = 坐屏幕顶
         fish.fx = { x: px + 260, y: st.minY }; // 鱼线垂在窗边（半宽按基准值估，缩放下略有偏移）
+        fish.entered = true;
         ctx.enter('fish.go');
-      }).catch(() => { ctx.enter('idle'); ctx.idleWait = ctx.nextIdleWait(2, 4); });
+      }).catch(() => {
+        if (fish) { clearInterval(fish.wd); fish = null; }
+        ctx.enter('idle'); ctx.idleWait = ctx.nextIdleWait(2, 4);
+      });
     },
     tick(state, dt, t, ctx) {
       if (!fish) return false;
@@ -58,7 +75,8 @@
         ctx.tf.ty = 4 * Math.sin(Math.PI * k);
         if (!fish.cast && k >= 0.55 && fish.fx) {
           fish.cast = true;
-          ctx.fxStart('fish', fish.fx);
+          fish.seq = ++fxSeq;
+          ctx.fxStart('fish', { x: fish.fx.x, y: fish.fx.y, seq: fish.seq });
         }
         if (k >= 1) ctx.enter('fish.wait');
         return true;
@@ -93,6 +111,7 @@
         const step = 460 * dt;
         if (dist <= step + 2 || ctx.stateT > 10) {
           ctx.moveBy(dx, dy);
+          clearInterval(fish.wd);
           fish = null;
           ctx.enter('idle');
           ctx.idleWait = ctx.nextIdleWait(3, 6);

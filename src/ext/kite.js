@@ -6,24 +6,26 @@
   const STATES = new Set(['kite.fly', 'kite.reel']);
   const HAND = { normal: { x: 230, y: 450 }, chibi: { x: 230, y: 560 } }; // 胸口偏上的持线手
   let K = null;          // 进行中场次
+  let fxSeq = 0;         // 会话令牌自增（防打断后快速重开的旧回执串台）
   let doneHooked = false; // 回执只订一次（ipcRenderer.on 重复调用会累加）
 
   function mine(ctx) { return STATES.has(ctx.state); }
 
   function sendUpdate(ctx, phase) {
     ctx.getPos().then(([x, y]) => {
-      if (!K) return;
+      if (!K || K.pending) return;
       const h = HAND[ctx.form] || HAND.normal;
-      ctx.fxStart('kite', { x, y, hx: h.x + (K.dir || 1) * 26, hy: h.y, phase });
+      ctx.fxStart('kite', { x, y, hx: h.x + (K.dir || 1) * 26, hy: h.y, phase, seq: K.seq });
     }).catch(() => {});
   }
 
   function cleanup(ctx, foreign) {
     if (!K) return;
     clearInterval(K.timer);
+    const s = K.seq;
     K = null;
     // 被打断（拖走/菜单换动作）：让 overlay 赶紧收场，回执来了也没人认，无碍
-    if (foreign) ctx.fxStart('kite', { end: true });
+    if (foreign) ctx.fxStart('kite', { end: true, seq: s });
   }
 
   function finish(ctx) {
@@ -40,19 +42,23 @@
       if (K) return;
       if (!doneHooked) {
         doneHooked = true;
-        ctx.onFxDone((kind) => {
-          if (kind !== 'kite' || !K || !mine(ctx)) return;
+        ctx.onFxDone((kind, receiptSeq) => {
+          if (kind !== 'kite' || !K || K.pending || !mine(ctx)) return;
+          if (receiptSeq !== undefined && receiptSeq !== K.seq) return; // 旧场次回执不认
           ctx.fxBurst(170, 300, 10, 8, 40);
           ctx.say(ctx.pick(['完美降落！', '收工收工~', '风筝回来咯~']), 1600);
           finish(ctx);
         });
       }
+      const from = ctx.state;
+      K = { pending: true }; // 会话占位：await 往返期间挡住菜单连点的第二次触发
       let st, px;
       try {
         st = await ctx.getStage();
         [px] = await ctx.getPos();
-      } catch { return; }
-      K = { st, dir: Math.random() < 0.5 ? -1 : 1, px, turnT: ctx.rand(1.2, 2.4), lineT: ctx.rand(2.5, 4), phase: 'fly' };
+      } catch { K = null; return; }
+      if (ctx.state !== from) { K = null; return; } // IPC 往返期间被切走，别把她从新状态硬拽出来
+      K = { st, dir: Math.random() < 0.5 ? -1 : 1, px, turnT: ctx.rand(1.2, 2.4), lineT: ctx.rand(2.5, 4), phase: 'fly', seq: ++fxSeq };
       // 伴侣定时器：节流给 overlay 报手部锚点；兼作打断看门狗（状态被切走就自我了断）
       K.timer = setInterval(() => {
         if (!K) return;

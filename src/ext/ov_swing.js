@@ -1,16 +1,16 @@
 // 荡秋千覆盖层：屏幕顶边垂两条软绳吊一块小木板，Q版站板上单摆摆动
 // 摆角 30°→60°→30°（周期 ~2s），10~14s 后连人带板淡出，回执桌宠侧现身
 (function () {
-  let swinging = false; // 防叠罗汉：重入直接回执，桌宠侧不会干等
+  let cur = null; // 当前场次 { finish, kill }
 
   registerOvFx('swing', (data) => {
-    if (swinging) { window.pet.fxDone('swing'); return; }
-    swinging = true;
-    startSwing(data || {});
+    if (cur) cur.kill(); // 拆旧开新：重开特效比新场次干等旧场次淡出体验好
+    cur = startSwing(data || {});
   });
 
   function startSwing(data) {
     const K = ovlK;
+    const seq = data.seq; // 会话令牌：回执带上，桌宠侧只认当前场次
     const layer = el('g', {});
     const ROPE_N = 12;
     const LEN = Math.min(innerHeight * 0.52, 560); // 摆长（顶锚点到板面）
@@ -50,8 +50,18 @@
       layer.style.transition = 'opacity .6s';
       layer.style.opacity = 0;
       setTimeout(() => layer.remove(), 650);
-      swinging = false;
-      window.pet.fxDone('swing');
+      if (cur === self) cur = null;
+      window.pet.fxDone('swing', seq);
+    }
+
+    // 拆旧开新：立即清场不等淡出（回执照发，带旧 seq，桌宠侧新会话不认）
+    function kill() {
+      if (done) return;
+      done = true;
+      clearInterval(watchdog);
+      layer.remove();
+      if (cur === self) cur = null;
+      window.pet.fxDone('swing', seq);
     }
 
     // 两端钉死的软绳（climbRope 同款）：2% 松量垂出软感，底端跟着板跑自然带起甩鞭
@@ -129,5 +139,8 @@
       if (done) return;
       try { tick(performance.now()); } catch (e) { finish(); }
     }, 400);
+
+    const self = { finish, kill };
+    return self;
   }
 })();

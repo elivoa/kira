@@ -11,6 +11,8 @@
   const ROPE_MARGIN = 40; // 绳两端离屏幕左右边的距离
 
   let G = null; // 几何与进度：{ x0, x1, dir, topY, floorY, fromX, fromY, winW, winH, walkDur, cur:{x,y}, said }
+  let fxSeq = 0; // 会话令牌自增
+  let mySeq = 0; // 当前场次的令牌（fxStart 带上，ov 侧拆旧开新用）
 
   // 窗口往目标点挪一帧：只发增量，cur 记录已落地的位置（dash 的影子位置同款）
   function moveTo(ctx, x, y) {
@@ -27,6 +29,7 @@
     effect: { jing: -6, mood: 3 },
     start(ctx) {
       G = null;
+      mySeq = ++fxSeq;
       if (ctx.form !== 'normal') { ctx.say('这个要姐姐形态才行…', 1500); return; }
       ctx.logEvent('自主', '去走钢丝');
       ctx.say(ctx.pick(INTRO), 1600);
@@ -63,6 +66,7 @@
             y: G.topY + G.winH,
             dx: G.x1 - G.x0,
             sag: SAG, mount: MOUNT, dur: G.walkDur,
+            seq: mySeq,
           });
           ctx.fxText('嘿咻', 170, 330, 24);
           ctx.enter('tightrope.up', MOUNT);

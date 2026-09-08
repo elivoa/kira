@@ -1,12 +1,11 @@
 // 钓鱼覆盖层：顶边垂一根软绳鱼线，末端鱼钩+浮漂轻晃；等 3~6s「上钩」——
 // 线猛一沉，钓起旧靴子或宝箱，晃两下后连线一起淡出，回执桌宠侧收杆
 (function () {
-  let fishing = false; // 防叠罗汉：重入直接回执，桌宠侧不会干等
+  let cur = null; // 当前场次 { finish, kill }
 
   registerOvFx('fish', (data) => {
-    if (fishing) { window.pet.fxDone('fish'); return; }
-    fishing = true;
-    startFish(data || {});
+    if (cur) cur.kill(); // 拆旧开新：重开特效比新场次干等旧场次淡出体验好
+    cur = startFish(data || {});
   });
 
   function textPop(parent, str, x, y, size) {
@@ -40,6 +39,7 @@
 
   function startFish(data) {
     const K = ovlK;
+    const seq = data.seq; // 会话令牌：回执带上，桌宠侧只认当前场次
     const layer = el('g', {});
     const ROPE_N = 12;
     const LEN0 = innerHeight * 0.3 + 30 + Math.random() * 60;
@@ -72,8 +72,18 @@
       layer.style.transition = 'opacity .6s';
       layer.style.opacity = 0;
       setTimeout(() => layer.remove(), 650);
-      fishing = false;
-      window.pet.fxDone('fish');
+      if (cur === self) cur = null;
+      window.pet.fxDone('fish', seq);
+    }
+
+    // 拆旧开新：立即清场不等淡出（回执照发，带旧 seq，桌宠侧新会话不认）
+    function kill() {
+      if (done) return;
+      done = true;
+      clearInterval(watchdog);
+      layer.remove();
+      if (cur === self) cur = null;
+      window.pet.fxDone('fish', seq);
     }
 
     function tick(now) {
@@ -150,5 +160,8 @@
       if (done) return;
       try { tick(performance.now()); } catch (e) { finish(); }
     }, 400);
+
+    const self = { finish, kill };
+    return self;
   }
 })();

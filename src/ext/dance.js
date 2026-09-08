@@ -18,6 +18,7 @@ function danceFront(form) {
 }
 
 let danceSt = null; // { ready, st, py, phase, t, dur, lastBeat, poseDur }
+let danceWd = null; // 打断看门狗
 
 registerAction({
   id: 'dance',
@@ -27,6 +28,13 @@ registerAction({
     ctx.say(ctx.pick(LINES.dance), 1600);
     danceSt = { ready: false };
     ctx.enter('dance', 15); // 15s 硬超时兜底
+    // 打断看门狗：菜单/大模型切动作不会换回立绘（拖拽路径内核会换），pose 指人图不能赖着
+    clearInterval(danceWd);
+    danceWd = setInterval(() => {
+      if (ctx.state === 'dance') return;
+      clearInterval(danceWd); danceWd = null;
+      if (danceSt) { danceSt = null; ctx.swapSprite(danceFront(ctx.form)); }
+    }, 300);
     Promise.all([ctx.getStage(), ctx.getPos()]).then(([st, [px, py]]) => {
       if (ctx.state !== 'dance' || !danceSt) return; // 初始化期间被打断，放弃
       danceSt = {
@@ -42,6 +50,7 @@ registerAction({
     if (state !== 'dance') return false;
     const done = () => {
       danceSt = null;
+      clearInterval(danceWd); danceWd = null;
       ctx.swapSprite(danceFront(ctx.form));
       ctx.enter('idle');
       ctx.idleWait = ctx.nextIdleWait(3, 6);

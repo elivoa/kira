@@ -50,8 +50,9 @@ contextBridge.exposeInMainWorld('pet', {
   // data.x/data.y 约定为屏幕绝对坐标，主进程换算成覆盖层坐标后转发
   fxStart: (kind, data) => ipcRenderer.send('fx-ext', kind, data),
   onFxExt: (fn) => ipcRenderer.on('fx-ext', (_e, kind, data) => fn(kind, data)),
-  fxDone: (kind) => ipcRenderer.send('fx-ext-done', kind),
-  onFxExtDone: (fn) => ipcRenderer.on('fx-ext-done', (_e, kind) => fn(kind)),
+  // seq 可选：特效会话令牌（防打断后重开时旧回执串台），不带 seq 的老特效不受影响
+  fxDone: (kind, seq) => ipcRenderer.send('fx-ext-done', kind, seq),
+  onFxExtDone: (fn) => ipcRenderer.on('fx-ext-done', (_e, kind, seq) => fn(kind, seq)),
   // 攀爬安全绳：桌宠侧报腰间坐标，覆盖层侧收坐标画绳/收绳
   ropeStart: (d) => ipcRenderer.send('rope-start', d),
   ropeMove: (d) => ipcRenderer.send('rope-move', d),
@@ -83,6 +84,18 @@ contextBridge.exposeInMainWorld('pet', {
   feishuSend: (text) => ipcRenderer.invoke('feishu-send', text),
   getFeishuHistory: () => ipcRenderer.invoke('feishu-history'),
   feishuHandshake: () => ipcRenderer.invoke('feishu-handshake'),
+  // kira 链接（yomi wire 协议）
+  getYomiConfig: () => ipcRenderer.invoke('get-yomi-config'),
+  setYomiConfig: (patch) => ipcRenderer.send('set-yomi-config', patch),
+  yomiSend: (text) => ipcRenderer.invoke('yomi-send', text),
+  yomiListSessions: () => ipcRenderer.invoke('yomi-list-sessions'),
+  yomiHistory: () => ipcRenderer.invoke('yomi-history'),
+  onYomiStatus: (fn) => ipcRenderer.on('yomi-status', (_e, s) => fn(s)),
+  // kira 消息泡泡（独立窗口）
+  onKiraBubbleShow: (fn) => ipcRenderer.on('kira-bubble-show', (_e, d) => fn(d)),
+  kiraBubbleDismiss: () => ipcRenderer.send('kira-bubble-dismiss'),
+  kiraBubbleOpen: () => ipcRenderer.send('kira-bubble-open'),
+  kiraBubbleIgnore: (flag) => ipcRenderer.send('kb-ignore', flag),
   // 归一化飞书消息（事件/轮询/小本子发言的回答）：{t, role, content, id, source}
   onFeishuMsg: (fn) => {
     const h = (_e, m) => fn(m);

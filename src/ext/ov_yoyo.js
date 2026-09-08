@@ -7,6 +7,7 @@
 
   function startYoyo(data) {
     const layer = el('g', {});
+    const seq = data.seq; // 会话令牌：回执带上，renderer 只认当前场次
     const N = 8;
     const R = 22 * ovlK;
     const rope = el('path', { fill: 'none', stroke: '#e8e0d0', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, layer);
@@ -34,7 +35,17 @@
       layer.style.transition = 'opacity .45s';
       layer.style.opacity = 0;
       setTimeout(() => layer.remove(), 500);
-      window.pet.fxDone('yoyo');
+      window.pet.fxDone('yoyo', seq);
+    }
+
+    // 拆旧开新：立即清场不等淡出（回执照发，带旧 seq，renderer 新会话不认）
+    function kill() {
+      if (done) return;
+      done = true;
+      session = null;
+      clearInterval(watchdog);
+      layer.remove();
+      window.pet.fxDone('yoyo', seq);
     }
 
     function tick(now) {
@@ -93,6 +104,8 @@
 
     return {
       finish,
+      kill,
+      seq,
       setHand(x, y) { hx = x; hy = y; },
     };
   }
@@ -100,6 +113,7 @@
   registerOvFx('yoyo', (data) => {
     if (data && data.done) { if (session) session.finish(); return; }
     if (!data || typeof data.x !== 'number') return;
+    if (session && data.seq !== undefined && data.seq !== session.seq) session.kill(); // 新会话：拆旧开新
     if (session) session.setHand(data.x, data.y);
     else session = startYoyo(data);
   });

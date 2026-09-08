@@ -1,7 +1,7 @@
 // 放灯笼特效：一盏灯笼（圆角矩形灯身 + 上下盖 + 穗子 + 暖光晕）从她手边升起，
 // 摇摆着飘向屏幕上方、变小变远，6~8s 飘出顶部回报 fxDone。rAF + watchdog 兜底（同 flySword 模式）。
 (() => {
-  let running = false;
+  let cur = null; // 当前场次 { finish }
 
   function makeLantern(layer) {
     // 暖光渐变跟着 layer 一起生死：每次特效重建，避免引用到上一轮的残留 defs
@@ -21,15 +21,19 @@
   }
 
   registerOvFx('lantern', (data) => {
-    if (running) { window.pet.fxDone('lantern'); return; } // 防叠罗汉
-    running = true;
+    if (cur) cur.finish(); // 拆旧开新：重开特效比新场次干等旧场次淡出体验好
+    cur = startLantern(data || {});
+  });
+
+  function startLantern(data) {
+    const seq = data.seq;
     const k = ovlK; // 灯笼随桌宠整体缩放
     const layer = el('g', {});
     const { g: lantern, glow } = makeLantern(layer);
 
     // 手边起点：窗口(460x740 逻辑幅) 身体中线 ±95，手的高度约在窗口上沿 0.62 处
-    const px = data && typeof data.x === 'number' ? data.x : innerWidth / 2 - 230 * k;
-    const py = data && typeof data.y === 'number' ? data.y : innerHeight * 0.3;
+    const px = typeof data.x === 'number' ? data.x : innerWidth / 2 - 230 * k;
+    const py = typeof data.y === 'number' ? data.y : innerHeight * 0.3;
     const cx = px + 230 * k;
     const side = cx < innerWidth / 2 ? 1 : -1; // 伸朝屏幕中间的那只手
     const hx = cx + side * 95 * k;
@@ -44,8 +48,8 @@
       done = true;
       clearInterval(watchdog);
       layer.remove();
-      running = false;
-      window.pet.fxDone('lantern');
+      if (cur === self) cur = null;
+      window.pet.fxDone('lantern', seq);
     }
 
     function tick(now) {
@@ -74,5 +78,8 @@
       if (done) return;
       try { tick(performance.now()); } catch (e2) { finish(); }
     }, 400);
-  });
+
+    const self = { finish };
+    return self;
+  }
 })();

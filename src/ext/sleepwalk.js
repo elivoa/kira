@@ -18,8 +18,9 @@
 
   function wake(ctx, why) {
     const s = sess;
-    cleanup();
     if (!s) return;
+    // 只停看门狗，sess 必须留着——sleepwalk.wake 分支的动画靠 tick 驱动，结尾自己 cleanup
+    if (s.wd) { clearInterval(s.wd); s.wd = null; }
     ctx.swapSprite(FRONT_SRC);
     if (why === 'bump') {
       ctx.fxBurst(170, 210);

@@ -1,11 +1,14 @@
 // 撒花特效：40~80 个彩色小矩形/圆点从屏幕顶部撒下，旋转 + 左右摇摆下落，
 // 落出屏幕移除；3~4s 收场回报 fxDone。rAF + watchdog 兜底（同 flySword 模式）。
 (() => {
-  let running = false;
+  let cur = null; // 当前场次 { finish }
 
-  registerOvFx('confetti', () => {
-    if (running) { window.pet.fxDone('confetti'); return; } // 防叠罗汉
-    running = true;
+  registerOvFx('confetti', (data) => {
+    if (cur) cur.finish(); // 拆旧开新：重开特效比新场次干等旧场次淡出体验好
+    cur = startConfetti(data && data.seq);
+  });
+
+  function startConfetti(seq) {
     const layer = el('g', {});
     const N = 40 + ((Math.random() * 41) | 0);
     const pieces = [];
@@ -40,8 +43,8 @@
       done = true;
       clearInterval(watchdog);
       layer.remove();
-      running = false;
-      window.pet.fxDone('confetti');
+      if (cur === self) cur = null;
+      window.pet.fxDone('confetti', seq);
     }
 
     function tick(now) {
@@ -74,5 +77,8 @@
       if (done) return;
       try { tick(performance.now()); } catch (e) { finish(); }
     }, 400);
-  });
+
+    const self = { finish };
+    return self;
+  }
 })();

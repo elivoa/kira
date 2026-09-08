@@ -26,6 +26,7 @@
       layer: el('g', {}),
       done: false, ending: false, endT: 0,
       phase: data.phase === 'reel' ? 'reel' : 'fly',
+      seq: data.seq, // 会话令牌：回执带上，renderer 只认当前场次
       reelT: 0,
       t0: performance.now(), last: performance.now(),
       // 手部锚点：目标值（桌宠侧报的）+ 平滑值（防 120ms 上报台阶感）
@@ -49,7 +50,7 @@
       clearInterval(s.watchdog);
       s.layer.remove();
       if (S === s) S = null;
-      window.pet.fxDone('kite');
+      window.pet.fxDone('kite', s.seq);
     }
     s.finish = finish;
 
@@ -155,7 +156,12 @@
   }
 
   registerOvFx('kite', (data) => {
-    if (data && data.end) { if (S) S.ending = true; return; }
+    if (data && data.end) {
+      // 动作被打断：收当前场次；带 seq 时只认同场次（防旧会话的 end 误杀新会话）
+      if (S && (data.seq === undefined || data.seq === S.seq)) S.ending = true;
+      return;
+    }
+    if (S && data && data.seq !== undefined && data.seq !== S.seq) S.finish(); // 新会话：拆旧开新
     if (S) {
       // 后续调用 = 锚点/阶段更新（节流上报，不重开一场）
       if (typeof data.x === 'number') S.tx = data.x + (data.hx || 0) * ovlK;

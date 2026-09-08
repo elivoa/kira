@@ -142,10 +142,15 @@
     word-break: break-all;
     white-space: pre-wrap;
   }
+  .msg.Kira .bubble {
+    background: linear-gradient(180deg, #c3c9de, #a8b0cc);
+    border-color: #8f97b8;
+    color: #23263a;
+  }
   .msg.me .bubble {
-    background: linear-gradient(180deg, #dde0ec, #b7bdd0);
-    border-color: #aab0c4;
-    color: #17181f;
+    background: #242631;
+    border-color: #313441;
+    color: #e8eaf4;
   }
   /* markdown 渲染气泡（Kira 的回答） */
   .bubble.md { white-space: normal; line-height: 1.6; }
@@ -383,6 +388,28 @@
     border-radius: 10px;
     cursor: pointer;
   }
+  /* 调试动作页：全部动作平铺成按钮墙，点一个演一个 */
+  .dbg { padding: 14px 16px 14px 36px; overflow-y: auto; height: 100%; box-sizing: border-box; }
+  .dbg-group { font: 600 12px "PingFang SC", sans-serif; color: #9a9fb8; margin: 10px 2px 6px; letter-spacing: 1px; }
+  .dbg-group:first-child { margin-top: 2px; }
+  .dbg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+  .dbg-btn {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.08);
+    color: #e8eaf4;
+    font: 13px "PingFang SC", sans-serif;
+    padding: 8px 6px 6px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .dbg-btn:hover { background: rgba(255, 255, 255, 0.18); }
+  .dbg-btn .i { font-size: 10px; color: #8a8fa8; }
+  .dbg-btn.off { opacity: 0.38; }
+  .dbg-btn.fire { background: #d9dceb; color: #17181f; }
   .cfg-btn:hover { background: #b7bdd0; }
   .cfg-btn.ghost { background: #2a2c3a; color: #c5cada; }
   .cfg-btn.ghost:hover { background: #343744; }
@@ -451,6 +478,7 @@
         <button class="tab" data-tab="mr">MR Link</button>
         <button class="tab hidden" data-tab="bot" id="botTab">🤖 <span id="botTabName">飞书机器人</span></button>
         <button class="tab" data-tab="log">日志</button>
+        <button class="tab" data-tab="debug">调试动作</button>
         <button class="tab" data-tab="config">配置</button>
       </div>
       <div class="main">
@@ -468,6 +496,9 @@
             <button id="clearLog">清空日志</button>
           </div>
           <div id="logList" class="msgs"></div>
+        </div>
+        <div id="page-debug" class="page hidden">
+          <div class="dbg" id="dbgList"></div>
         </div>
         <div id="page-config" class="page hidden">
           <div class="cfg">
@@ -488,6 +519,23 @@
                 <button id="clearKey" class="cfg-btn ghost">清除</button>
               </div>
               <div id="keyStatus" class="cfg-status"></div>
+            </div>
+            <div class="cfg-sec" id="yomiSec" style="display:none">
+              <div class="cfg-title">链接 kira（yomi wire 协议）</div>
+              <div class="cfg-tip">连上 kira daemon 的 WebSocket 接口：kira 在飞书上说的话会同步到桌宠和小本子，小本本的发言也会发给 kira（回答进飞书）。替代原飞书 SDK 直连。</div>
+              <input id="yomiWsUrl" type="text" placeholder="wss://xxx-ws.dev.kimi.team" autocomplete="off">
+              <input id="yomiToken" type="text" placeholder="socket token（可空）" autocomplete="off">
+              <input id="yomiSessionId" type="text" placeholder="绑定私聊的 session_id" autocomplete="off">
+              <div class="cfg-row" style="padding-left:0">
+                <span>启用 kira 链接</span>
+                <label class="sw"><input id="yomiEnabled" type="checkbox"><i></i></label>
+              </div>
+              <div class="cfg-btns">
+                <button id="yomiSave" class="cfg-btn">保存并连接</button>
+                <button id="yomiSessionsBtn" class="cfg-btn ghost">列会话</button>
+              </div>
+              <div id="yomiStatus" class="cfg-status"></div>
+              <div id="yomiSessionsOut" class="cfg-status"></div>
             </div>
             <div class="cfg-sec" id="fsGuide" style="display:none">
               <div class="cfg-title">连接飞书机器人 · 还没连上，按下面几步来：</div>
