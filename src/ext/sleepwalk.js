@@ -1,7 +1,6 @@
 // 梦游：闭着眼慢慢漂移（极慢 moveBy + Zzz 飘字 + 慢摇晃），撞到屏幕边就惊醒收尾；10~20s 到点自己醒。
 // 立绘换成睡姿场景图（sleep1/sleep2），任何出口前都必须换回正面图——
-// 状态名以 sleep 开头会被主状态机当成睡觉系（连点 8 下会触发 doWake 劫持），
-// 所以看门狗 interval 必备：状态被外部抢走时兜底换图自清，顺带周期同步真实位置（被拖走也不飘）。
+// 看门狗 interval 必备：状态被外部抢走（菜单/拖拽/大模型决策）时兜底换图自清，顺带周期同步真实位置（被拖走也不飘）。
 (function () {
   const FRONT_SRC = '../assets/pet.png';
   const POSES = ['../assets/sleep1.png', '../assets/sleep2.png'];

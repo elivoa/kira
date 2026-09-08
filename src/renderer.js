@@ -266,7 +266,16 @@ const LINES = {
   yell: ['你！就是你！', '戳戳戳，就知道戳！', '别碰我！！', '我数到三！一！！', '大坏蛋！', '哼！气死我了！', '再戳我真生气了！', '出来挨打！（叉腰）', '骂骂咧咧骂骂咧咧', '你礼貌吗！！', '手指的就是你！', '别躲！说的就是你！', '你给我过来！'],
 };
 
+// 内置睡觉三态精确匹配：扩展状态名（sleepwalk.*）也以 sleep 开头，startsWith 会把它们误当睡觉系
+const SLEEP_STATES = new Set(['sleepin', 'sleeping', 'sleepout']);
+function isSleepState(s) { return SLEEP_STATES.has(s); }
+
 function enter(next, dur = 0) {
+  // 变身被打断（拖拽/戳一戳/菜单切动作等）：接续动作作废，否则残留动作会在下一次变身结束时莫名放出
+  if (state === 'morph' && next !== 'morph') {
+    if (pendingAction === 'sleep') pendingSleepDur = null;
+    pendingAction = null;
+  }
   state = next;
   stateT = 0;
   stateDur = dur;
@@ -284,7 +293,7 @@ function enter(next, dur = 0) {
   if (next !== 'flutefly' && next !== 'fluteback' && next !== 'fluteturn' && next !== 'working') fluteHide();
   if (next !== 'legshow') legImg.style.opacity = 0; // 看腿图只在展示期间存在
   // 离开睡觉时撤场景、立绘恢复
-  if (!String(next).startsWith('sleep')) {
+  if (!isSleepState(next)) {
     sleepImg.style.opacity = 0;
     setSpriteVeiled(false);
   }
@@ -723,7 +732,8 @@ let pendingSleepDur = null;
 function doSleep(dur = null) {
   // 睡姿场景图只有姐姐版：chibi 也在 sleep.forms 里（DISPATCH 包装不拦），这里自己守，先变姐姐再睡
   if (form !== 'normal') { pendingAction = 'sleep'; pendingSleepDur = dur; doMorphTo('normal'); return; }
-  pendingSleepDur = dur;
+  // 变身完成后的接续调用不带 dur：保留菜单哄睡（doSleep(1e9)）存下的时长，别用 null 冲掉
+  pendingSleepDur = dur ?? pendingSleepDur;
   setSleepScene(SLEEP1_SRC);
   sleepImg.style.opacity = 1;
   setSpriteVeiled(true);
@@ -733,6 +743,7 @@ function doSleep(dur = null) {
 }
 
 function doWake() {
+  pendingSleepDur = null; // 清掉菜单哄睡存下的时长：sleepin 阶段被打断时别漏给下一次自主入睡
   sleepTop.style.transform = ''; // 停掉呼吸再伸懒腰
   swapSleepPose(SLEEP3_SRC);
   enter('sleepout', 0.9);
@@ -845,9 +856,11 @@ function turnFrame(k, newSrc, onSwap) {
 }
 
 // 变身：翻牌中途切换形态和立绘高度；随机换成另一个形态（不许原地变）
+// 自主变身只在人形间切换：笛子/法宝没有能变回来的自动动作，随机变过去会卡死
+const MORPH_POOL = ['normal', 'chibi', 'back'];
 let nextForm = 'chibi';
 function doMorph() {
-  const pool = Object.keys(FORMS).filter((f) => f !== form);
+  const pool = MORPH_POOL.filter((f) => f !== form);
   doMorphTo(pool[(Math.random() * pool.length) | 0]);
 }
 
@@ -2015,6 +2028,7 @@ setInterval(() => {
   for (const id in EXT_ACTIONS) {
     const ex = EXT_ACTIONS[id];
     if (!ex.monitor) continue;
+    if (!enabled(id)) continue; // 设置里关掉的动作，心跳触发也一并停
     // 持续抛错的 monitor 不能无声死掉：每个 id 只记一次，避免刷屏
     try { ex.monitor(EXT_CTX); } catch (e) {
       if (!ex._monitorErr) { ex._monitorErr = true; logEvent('系统', `扩展动作「${ex.id}」monitor 异常：${e && e.message}`); }
@@ -2234,7 +2248,7 @@ stage.addEventListener('mousedown', (e) => {
   }
   // 长按身体（非头非腰、非睡觉、非法宝）0.6s：弹出小输入框对她说话
   clearTimeout(chatPressTimer);
-  if (!inHead && !waistPress && !state.startsWith('sleep') && form !== 'flute' && form !== 'note') {
+  if (!inHead && !waistPress && !isSleepState(state) && form !== 'flute' && form !== 'note') {
     chatPressTimer = setTimeout(() => {
       if (pressing && !dragging) {
         longPressFired = true; // 标记过，松开时不会再触发戳一戳
@@ -2267,7 +2281,7 @@ window.addEventListener('mousemove', (e) => {
     curSize = 1;
     if (state.startsWith('desk') || state.startsWith('work')) resetDesk();
     // 睡觉中被拎走：不换图不切状态，继续睡，只挪窗口
-    if (!state.startsWith('sleep')) {
+    if (!isSleepState(state)) {
       const front = FORMS[form].front;
       if (sprite.dataset.cur !== front) { sprite.dataset.cur = front; sprite.src = front; }
       enter('drag');
@@ -2277,7 +2291,7 @@ window.addEventListener('mousemove', (e) => {
   if (dragging) {
     window.pet.dragMove();
     // 睡觉中被拎起来使劲晃：600ms 内来回甩 ≥4 次就晃醒
-    if (state.startsWith('sleep')) {
+    if (isSleepState(state)) {
       dragSamples.push({ x: e.screenX, t: performance.now() });
       if (dragSamples.length > 50) dragSamples.shift();
       if (isShakeHard(dragSamples)) {
@@ -2308,7 +2322,7 @@ window.addEventListener('mouseup', () => {
     });
     logEvent('交互', '被安置在新的常驻位置');
     // 睡觉中拖走放下：不切状态，继续睡
-    if (!state.startsWith('sleep')) {
+    if (!isSleepState(state)) {
       facing = 1; // 从侧面图状态拖走的，回正
       enter('idle');
       idleWait = nextIdleWait(1, 3);
@@ -2316,7 +2330,7 @@ window.addEventListener('mouseup', () => {
     return;
   }
   // 睡觉中连点：点一下换个睡姿，超过 8 次才醒，偶尔嘟囔梦话
-  if (state && state.startsWith('sleep')) {
+  if (state && isSleepState(state)) {
     const now = performance.now();
     sleepClicks = now - lastSleepClick < 3000 ? sleepClicks + 1 : 1;
     lastSleepClick = now;
@@ -2375,7 +2389,7 @@ window.pet.onMenuAction((id) => {
   if (id.startsWith('form-')) {
     if (id === 'form-sleep') {
       // 睡觉形态：一直睡到被晃醒/点够 8 下/手动切走
-      if (!state.startsWith('sleep')) {
+      if (!isSleepState(state)) {
         applyEffect('sleep');
         logEvent('交互', '你让她进入睡觉形态');
         doSleep(1e9);
@@ -2799,14 +2813,13 @@ function frame(now) {
         applySpriteHeight();
       });
       if (stateT >= stateDur) {
+        // 被形象校验拦住的动作变身完成后接续：先取下 pendingAction 再回 idle——
+        // enter() 会把 morph→非 morph 的 pendingAction 当打断残留清掉；先回 idle 态是要变身时 doMorphTo 不被 morph 态挡住
+        const id = pendingAction;
+        pendingAction = null;
         enter('idle');
         idleWait = nextIdleWait(3, 6);
-        // 被形象校验拦住的动作变身完成后接续（先回 idle 态：还要变身时 doMorphTo 不被 morph 态挡住）
-        if (pendingAction) {
-          const id = pendingAction;
-          pendingAction = null;
-          DISPATCH[id]();
-        }
+        if (id) DISPATCH[id]();
       }
       break;
     }

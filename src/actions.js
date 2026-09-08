@@ -10,7 +10,7 @@ const ACTIONS = {
   point:   { name: '指人发火', forms: ['normal'],            intrusive: false, w: 5,  auto: true },
   qbounce: { name: '蹦蹦跳',   forms: ['chibi'],             intrusive: false, w: 16, auto: true },
   qsway:   { name: '摇呀摇',   forms: ['chibi'],             intrusive: false, w: 12, auto: true },
-  morph:   { name: '变个身',   forms: ['normal', 'chibi'], intrusive: false, w: 8,  auto: true },
+  morph:   { name: '变个身',   forms: ['normal', 'chibi', 'back'], intrusive: false, w: 8,  auto: true },
   desk:    { name: '来张桌子', forms: ['normal'],            intrusive: false, w: 5,  auto: true },
   seal:    { name: '收进法宝', forms: ['normal'],            intrusive: false, w: 3,  auto: true },
   goledge: { name: '去窗台玩', forms: ['normal', 'chibi'], intrusive: true,  w: 6,  auto: true },
