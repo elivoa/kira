@@ -1,5 +1,6 @@
 // yomi wire 协议探针：WS 连接 daemon → Hello 握手 → ListSessions → SendMessage 验证。
-// 用法：node tools/yomi_probe.js <ws-url> [token] [--say "文本"] [--list-sessions]
+// 用法：node tools/yomi_probe.js <ws-url> [token] [--say "<session-uuid>[|<文本>]"] [--list-sessions]
+//   --say 仅接受两种形式：裸 session UUID（把 UUID 本身作为文本发送），或 "<session-uuid>|<文本>"。
 // 协议（yomi crates/kernel/src/wire + transport）：WS upgrade（可选 Bearer）+ 4 字节大端长度前缀 JSON 帧。
 // 帧类型：{type:"request",id,method} / {type:"response",id,body:{status:"ok"|"err"}} / {type:"event"|"noti"|"ping"|"pong"}
 const WebSocket = require('ws');
@@ -12,7 +13,7 @@ const SAY = sayIdx >= 0 ? args[sayIdx + 1] : null;
 const LIST = args.includes('--list-sessions');
 
 if (!url) {
-  console.log('用法: node tools/yomi_probe.js <ws-url> [token] [--say "文本"] [--list-sessions]');
+  console.log('用法: node tools/yomi_probe.js <ws-url> [token] [--say "<session-uuid>[|<文本>]"] [--list-sessions]');
   process.exit(1);
 }
 
@@ -88,9 +89,11 @@ async function main() {
   }
 
   if (SAY) {
-    const sid = SAY.match(/^[a-f0-9-]{36}$/i) ? SAY : null;
-    if (sid) {
-      const r = await call(ws, 'send_message', { session_id: sid, blocks: [{ type: 'text', text: SAY.split('|')[1] || SAY }] });
+    const m = SAY.match(/^([a-f0-9-]{36})(?:\|([\s\S]*))?$/i);
+    if (!m) {
+      console.warn('[warn] --say 参数无法解析为 <session-uuid> 或 <session-uuid>|<文本>，跳过发送:', SAY);
+    } else {
+      const r = await call(ws, 'send_message', { session_id: m[1], blocks: [{ type: 'text', text: m[2] !== undefined ? m[2] : SAY }] });
       console.log('[SendMessage]', JSON.stringify(r).slice(0, 300));
     }
   }

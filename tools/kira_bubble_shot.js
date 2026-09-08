@@ -6,24 +6,11 @@ const fs = require('fs');
 
 const out = process.argv[2] || 'shots/kira_bubble.png';
 
-const stub = `
-const { contextBridge } = require('electron');
-let showFn = null;
-contextBridge.exposeInMainWorld('pet', {
-  onKiraBubbleShow(fn) { showFn = fn; },
-  kiraBubbleDismiss() { document.title = 'DISMISS'; },
-  kiraBubbleOpen() { document.title = 'OPEN'; },
-  kiraBubbleIgnore() {},
-  __fire(text) { if (showFn) showFn({ text }); },
-});
-`;
-
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
     width: 560, height: 480, show: true, frame: false, transparent: true,
     webPreferences: { contextIsolation: true, preload: path.join(__dirname, 'kb_stub_preload.js') },
   });
-  fs.writeFileSync(path.join(__dirname, 'kb_stub_preload.js'), stub);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   win.webContents.on('console-message', (_e, _l, msg) => console.log('[page]', msg.slice(0, 300)));
   await win.loadFile(path.join(__dirname, '..', 'src', 'kira_bubble.html'));
