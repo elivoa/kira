@@ -480,12 +480,26 @@ function smoothPath(pts) {
   return d;
 }
 
+// 书本投影：feDropShadow 贴 note.png 的 alpha 轮廓。素材带不规则透明边
+// （内容 bbox x[0.129,0.868] y[0.044,0.933]），手摆矩形影对不齐可见书体，滤镜则任意缩放/旋转都贴合
+function ensureBookShadow() {
+  if (document.getElementById('bookShadow')) return;
+  const defs = el('defs', {});
+  const f = el('filter', { id: 'bookShadow', x: '-30%', y: '-30%', width: '160%', height: '160%' }, defs);
+  el('feDropShadow', { dx: 3, dy: 6, stdDeviation: 5, 'flood-color': '#14143c', 'flood-opacity': 0.32 }, f);
+}
+
 function mischief(startX, startY) {
   const layer = el('g', {});
+  ensureBookShadow();
   // 星月夜笔记本真图（assets/note.png，1023x1468≈1:1.44）压住鼠标，代替手绘版；随整体缩放
   const bookG = el('g', {}, layer);
-  el('rect', { x: -44 * ovlK, y: -66 * ovlK, width: 96 * ovlK, height: 138 * ovlK, rx: 8 * ovlK, fill: 'rgba(20,20,60,.28)' }, bookG); // 投影
-  el('image', { href: '../assets/note.png', x: -50 * ovlK, y: -74 * ovlK, width: 98 * ovlK, height: 98 * ovlK * 1468 / 1023 }, bookG);
+  const BOOK_X = -50 * ovlK, BOOK_Y = -74 * ovlK;
+  const BOOK_W = 98 * ovlK, BOOK_H = BOOK_W * 1468 / 1023;
+  el('image', { href: '../assets/note.png', x: BOOK_X, y: BOOK_Y, width: BOOK_W, height: BOOK_H, filter: 'url(#bookShadow)' }, bookG);
+  // 绳的拴结点：书内容底边中点（按内容 bbox 算，透明边不算书），每帧随书的晃动变换到世界坐标
+  const TIE_X = BOOK_X + BOOK_W * (0.129 + 0.868) / 2;
+  const TIE_Y = BOOK_Y + BOOK_H * 0.933;
   // 软绳（verlet 链条）+ 挂在下面的人物
   const rope = el('path', { fill: 'none', stroke: '#6b5a3a', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, layer);
   const charG = el('g', {}, layer);
@@ -587,6 +601,13 @@ function mischief(startX, startY) {
       // 锚点迟缓跟随鼠标：鼠标小抖不会直接拽飞她
       ax += (mx - ax) * Math.min(dt * 8, 1);
       ay += (my - ay) * Math.min(dt * 8, 1);
+      // 笔记本压住指针（轻微晃动）；绳顶端拴在书的拴结点上——
+      // 用与 bookG 完全相同的平移+旋转把拴结点换算到世界坐标，书怎么晃绳端都贴在书上
+      const wob = 2.5 * Math.sin(now / 280);
+      bookG.setAttribute('transform', `translate(${ax + wob},${ay}) rotate(${wob})`);
+      const rad = wob * Math.PI / 180;
+      const tieX = ax + wob + TIE_X * Math.cos(rad) - TIE_Y * Math.sin(rad);
+      const tieY = ay + TIE_X * Math.sin(rad) + TIE_Y * Math.cos(rad);
       // 软绳 verlet：除锚点外全部重力积分（高阻尼，动作更缓），再逐段做长度约束
       // 重坠物模型：小人有重量有惯性，锚点传下来的约束力对末端大幅衰减；
       // 但重力保持全额（自然下垂），且绳长超 1.5 倍时强制拉满（绳子永不断开）
@@ -598,7 +619,7 @@ function mischief(startX, startY) {
         p.y += vy + 1600 * dt * dt;
       }
       for (let iter = 0; iter < 3; iter++) {
-        pts[0].x = ax; pts[0].y = ay + 66; // 锚点钉在笔记本下沿（B5 竖版底边）
+        pts[0].x = tieX; pts[0].y = tieY;
         for (let i = 0; i < ROPE_N; i++) {
           const a = pts[i], b = pts[i + 1];
           const dx = b.x - a.x, dy = b.y - a.y;
@@ -613,9 +634,6 @@ function mischief(startX, startY) {
       // 位置惯性阻尼：绳末端猛动，她也只依惯性缓跟
       charX += (rx - charX) * Math.min(dt * 6, 1);
       charY += (ry - charY) * Math.min(dt * 6, 1);
-      // 笔记本压住指针（轻微晃动）
-      const wob = 2.5 * Math.sin(now / 280);
-      bookG.setAttribute('transform', `translate(${ax + wob},${ay}) rotate(${wob})`);
       // 软绳画成平滑曲线（末端画到阻尼后的小人位置，绳子不断）
       const drawPts = pts.slice();
       drawPts[ROPE_N] = { x: charX, y: charY };
