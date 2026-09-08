@@ -557,7 +557,7 @@ function createBubble() {
 
 // ---------- kira 消息泡泡（独立窗口，UI 同主动搭话粘性气泡） ----------
 // 与气泡窗的区别：初始位置定在人物头顶后就不再跟随人物移动；框边缘可拖动；内容可选中；双击直达 kira tab
-const KB_W = 560, KB_H = 480;
+const KB_W = 560, KB_H = 520; // 内容最高约 490px，480 会裁掉顶部
 let kiraBubbleWin = null;
 let kbAnchored = false; // 初始位置定过没有（定过就锁死，不再跟着人物动）
 
