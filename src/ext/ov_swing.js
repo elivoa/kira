@@ -1,9 +1,15 @@
 // 荡秋千覆盖层：屏幕顶边垂两条软绳吊一块小木板，Q版站板上单摆摆动
 // 摆角 30°→60°→30°（周期 ~2s），10~14s 后连人带板淡出，回执桌宠侧现身
+// data.end=true = 动作被打断，带 seq 认同场次后立即淡出收场（回执照发，桌宠侧不认，无碍）
 (function () {
   let cur = null; // 当前场次 { finish, kill }
 
   registerOvFx('swing', (data) => {
+    if (data && data.end) {
+      // 动作被打断：收当前场次；带 seq 时只认同场次（防旧会话的 end 误杀新会话）
+      if (cur && (data.seq === undefined || data.seq === cur.seq)) cur.finish();
+      return;
+    }
     if (cur) cur.kill(); // 拆旧开新：重开特效比新场次干等旧场次淡出体验好
     cur = startSwing(data || {});
   });
@@ -140,7 +146,7 @@
       try { tick(performance.now()); } catch (e) { finish(); }
     }, 400);
 
-    const self = { finish, kill };
+    const self = { finish, kill, seq };
     return self;
   }
 })();
