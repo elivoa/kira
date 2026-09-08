@@ -39,7 +39,7 @@ document.addEventListener('click', (e) => {
   window.pet.kbOpenLink(href);
 }, true);
 
-// Esc 关闭：窗口 focusable，show 时主进程会把焦点给它
+// Esc 关闭：窗口 focusable，用户点过泡泡拿到焦点后生效（show 不主动 focus，避免抢键盘）
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') dismiss();
 });
