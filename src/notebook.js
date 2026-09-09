@@ -201,7 +201,7 @@ function submit(text) {
         window.MarkdownStream.render(typing, '（发出去了，mira 还没回，稍后再看看）');
       }
     }, 120000);
-    window.pet.miraSend(sentText).then((r) => {
+    window.pet.miraSend(miraState.sessionId, sentText).then((r) => {
       consumePendingMiraSend(sentText); // 回显必在回答之前来（或不会来），到这里清掉防呆（同 bot 约定）
       if (r && r.ok) {
         if (r.reply && typing.classList.contains('typing')) {
