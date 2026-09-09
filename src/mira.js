@@ -191,10 +191,11 @@ function onAgentEvent(p, msg) {
   const sid = (msg && msg.session_uuid) || ev.session_id || ev.sessionId || p.session_id || p.sessionId || '';
   if (sid) lastSessionId = sid; // 记录最近活跃会话：发言缺省目标
 
-  // seq 是回合内序号（续传水位按 per_turn 记），去重键必须带上回合，否则误杀其他回合的同号事件
+  // seq 是回合内序号（续传水位按 per_turn 记），去重键必须带上回合，否则误杀其他回合的同号事件；
+  // 缺 turnId 的兜底事件也至少带上 sid，防跨会话撞号
   const turnKey = sid && ev.turnId != null ? `${sid}:live:${ev.turnId}` : '';
   if (seq != null) {
-    const k = turnKey ? `${turnKey}:${seq}` : String(seq);
+    const k = turnKey ? `${turnKey}:${seq}` : `${sid}:${seq}`;
     if (seenSeq.includes(k)) return;
     seenSeq.push(k);
     if (seenSeq.length > 500) seenSeq.splice(0, 200);
@@ -283,8 +284,8 @@ async function connectOnce() {
     cookie = await ensureCookie();
   } catch (e) {
     if (gen !== connGen) return;
-    // 换 cookie 就 401 是 token 本身不行：粘性 error；网络类失败排重试
-    if (/401|403/.test(e.message)) {
+    // 换 cookie 就 401/403 或服务端确定性回绝（4xx/SSO 重定向）是粘性错误；网络类失败排重试
+    if (e.permanent || /401|403/.test(e.message)) {
       permanentError = true;
       setStatus('error', `鉴权失败：${e.message}`);
       return;
@@ -476,7 +477,12 @@ async function ensureCookie(force) {
   cookiePromise = (async () => {
     const res = await restRaw('GET', `${restBase()}/api/auth/providers/moongate/complete`, cfg.token, '');
     const found = (res.headers['set-cookie'] || []).map((c) => c.split(';')[0]).filter((c) => c.startsWith('mira_session='));
-    if (!found.length) throw new Error(`complete 没发 mira_session（HTTP ${res.status}）`);
+    if (!found.length) {
+      const err = new Error(`complete 没发 mira_session（HTTP ${res.status}）`);
+      // 服务端明确回了 4xx/3xx 异常（SSO 重定向、部署变了 404）：重试不会自愈，转粘性错误
+      err.permanent = res.status < 500;
+      throw err;
+    }
     sessionCookie = found.join('; ');
     cookieFetchedAt = Date.now();
     return sessionCookie;
@@ -512,7 +518,9 @@ function normalizeReplayItem(it, sessionId) {
   if (!text) return null;
   const ts = typeof rec.time === 'number' ? (rec.time < 1e12 ? rec.time * 1000 : rec.time) : Date.parse(rec.time) || Date.now();
   const out = { kind: 'message', sessionId, role, text, cursor: it.recordIdx ?? null, ts, source: 'mira' };
-  if (it.recordIdx != null) out.id = it.recordIdx;
+  // id 加 rec# 命名空间：实时事件的键是回合内 seq（裸整数），两边在 UI 的 miraRenderedIds 里
+  // 共用一个集合，裸 recordIdx 稳态必撞 seq 键、实时消息被静默误杀（R1 P1）
+  if (it.recordIdx != null) out.id = `rec#${it.recordIdx}`;
   return out;
 }
 
