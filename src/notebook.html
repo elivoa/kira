@@ -424,6 +424,21 @@
   .cfg-btn.ghost:hover { background: #36342e; }
   .cfg-status { font-size: 12px; color: #8c887d; }
   .cfg-status.ok { color: #4faa70; }
+  /* 「给 AI 的接入指南」按钮：弱化样式 + hover 预览 prompt（不用默认 title） */
+  .cfg-ai-wrap { position: relative; margin-left: auto; }
+  .cfg-btn.ai { background: transparent; color: #8c887d; border: 1px solid #3b3933; padding: 5px 10px; }
+  .cfg-btn.ai:hover { color: #c6c3bb; border-color: #aaa69b; background: transparent; }
+  .cfg-btn.ai.done { color: #4faa70; border-color: #4faa70; }
+  .ai-tip {
+    display: none;
+    position: absolute; bottom: calc(100% + 8px); right: 0;
+    width: 380px; max-height: 300px; overflow-y: auto;
+    background: #1b1a17; border: 1px solid #3b3933; border-radius: 10px;
+    padding: 10px 12px; font-size: 11px; line-height: 1.7; color: #c6c3bb;
+    white-space: pre-wrap; z-index: 10; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    cursor: default;
+  }
+  .cfg-ai-wrap:hover .ai-tip { display: block; }
   /* 配置页动作开关（沿用原设置页分组） */
   .cfg-subgroup {
     display: flex;
@@ -561,6 +576,10 @@
               <div class="cfg-btns">
                 <button id="miraSave" class="cfg-btn">保存并连接</button>
                 <button id="miraClear" class="cfg-btn ghost">清除</button>
+                <span class="cfg-ai-wrap">
+                  <button id="miraAiGuide" class="cfg-btn ai">🤖 AI 指南</button>
+                  <div id="miraAiTip" class="ai-tip"></div>
+                </span>
               </div>
               <div id="miraStatus" class="cfg-status"></div>
             </div>
