@@ -4,6 +4,7 @@ const { execFile } = require('child_process');
 const updater = require('./updater');
 const feishu = require('./feishu');
 const yomi = require('./yomi');
+const mira = require('./mira');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
@@ -1221,6 +1222,45 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('yomi-list-sessions', () => yomi.listSessions());
   ipcMain.handle('yomi-history', () => yomi.listMessages());
+
+  // ---------- mira 链接（StarForge Mira，JSON-RPC over WebSocket + REST） ----------
+  // subscribe 事件流 → mira-event 推给笔记本 mira tab；发言走 REST inject，历史走 REST 拉取
+  const dispatchMiraEvent = (ev) => {
+    if (notebookWin) notebookWin.webContents.send('mira-event', ev);
+  };
+  mira.init({
+    getConfig: () => config.mira || {},
+    onStatus: (s) => { if (notebookWin) notebookWin.webContents.send('mira-status', s); },
+    onEvent: dispatchMiraEvent,
+    onLog: (entry) => mainLog(entry.type || '系统', entry.text || ''),
+  });
+  if (config.mira && config.mira.enabled) mira.start();
+  ipcMain.handle('get-mira-config', () => {
+    const m = config.mira || {};
+    return { wsUrl: m.wsUrl || 'wss://mira.msh.team/api/stream', token: m.token || '', projectId: m.projectId || '', enabled: !!m.enabled, ...mira.getState() };
+  });
+  ipcMain.on('set-mira-config', (_e, patch) => {
+    if (!patch || typeof patch !== 'object') return;
+    const m = config.mira || (config.mira = {});
+    if (typeof patch.wsUrl === 'string') m.wsUrl = patch.wsUrl.trim();
+    if (typeof patch.token === 'string') m.token = patch.token.trim();
+    if (typeof patch.projectId === 'string') m.projectId = patch.projectId.trim();
+    if (typeof patch.enabled === 'boolean') m.enabled = patch.enabled;
+    saveConfig();
+    mira.restart();
+  });
+  ipcMain.on('mira-start', () => mira.start());
+  ipcMain.on('mira-stop', () => mira.stop());
+  ipcMain.handle('mira-send', async (_e, sessionId, text) => {
+    if (typeof text !== 'string' || !text.trim()) return { ok: false, error: '空消息' };
+    try {
+      const reply = await mira.handleMiraSay(String(sessionId || ''), text.trim().slice(0, 2000));
+      return { ok: true, reply };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('mira-history', (_e, sessionId) => mira.handleMiraHistory(String(sessionId || '')));
   // kira 消息泡泡：关闭/双击直达/点击穿透开关
   ipcMain.on('kira-bubble-dismiss', () => { if (kiraBubbleWin) kiraBubbleWin.hide(); });
   ipcMain.on('kira-bubble-open', () => {

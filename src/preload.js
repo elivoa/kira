@@ -92,6 +92,19 @@ contextBridge.exposeInMainWorld('pet', {
   yomiListSessions: () => ipcRenderer.invoke('yomi-list-sessions'),
   yomiHistory: () => ipcRenderer.invoke('yomi-history'),
   onYomiStatus: (fn) => ipcRenderer.on('yomi-status', (_e, s) => fn(s)),
+  // mira 链接（StarForge Mira，JSON-RPC over WebSocket）
+  getMiraConfig: () => ipcRenderer.invoke('get-mira-config'),
+  setMiraConfig: (patch) => ipcRenderer.send('set-mira-config', patch),
+  miraStart: () => ipcRenderer.send('mira-start'),
+  miraStop: () => ipcRenderer.send('mira-stop'),
+  miraSend: (sessionId, text) => ipcRenderer.invoke('mira-send', sessionId, text),
+  miraHistory: (sessionId) => ipcRenderer.invoke('mira-history', sessionId),
+  onMiraStatus: (fn) => ipcRenderer.on('mira-status', (_e, s) => fn(s)),
+  onMiraEvent: (fn) => {
+    const h = (_e, ev) => fn(ev);
+    ipcRenderer.on('mira-event', h);
+    return () => ipcRenderer.removeListener('mira-event', h);
+  },
   // kira 消息泡泡（独立窗口）
   onKiraBubbleShow: (fn) => ipcRenderer.on('kira-bubble-show', (_e, d) => fn(d)),
   kiraBubbleDismiss: () => ipcRenderer.send('kira-bubble-dismiss'),
