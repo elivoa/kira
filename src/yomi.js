@@ -23,11 +23,15 @@ const pending = new Map();     // id → {resolve, reject, timer}
 const seenEvents = [];          // event_id 去重环（SubscribeAll 重连后可能重放）
 let lastEventId = null;         // 最近收到的事件 id：重连后按它回放漏掉的事件（会话连续性）
 let lastFrameAt = 0;            // 最近收到任何帧的时间：半开连接（对端死了但没 close 事件）靠看门狗发现
+let lastPushAt = 0;             // 最近收到服务端主动帧的时间：订阅假死监测（自己 call 的应答不算）
 let connGen = 0;                // 连接代际：旧 socket 迟到的事件（close/error/message）按代际丢弃，防误杀 restart 后的新连接
 let watchdogTimer = null;
+let pushWatchTimer = null;
 let notebookWait = null;        // 小本子发言等待 kira 回答的挂起 Promise（带 sessionId + 身份校验，防并发串话）
 let restartTimer = null;        // restart() 的延迟启动定时器：stop() 必须能取消它，否则双 socket 泄漏
 const MAX_FRAME = 16 * 1024 * 1024; // 单帧上限：超过即断连，防坏对端/粘包错误把内存撑爆
+const PUSH_IDLE_LIMIT = 30 * 60 * 1000; // 订阅假死阈值：daemon 空闲时不推应用帧（见看门狗注释的踩坑），空闲代价是每 30 分钟一次无谓重连
+const PUSH_WATCH_TICK = 60 * 1000;      // 假死检查节奏（config.pushIdleMs / pushWatchMs 可覆盖，供测试调小）
 
 function setStatus(s, err) {
   status = s;
@@ -87,13 +91,18 @@ function onData(chunk) {
 function handleMsg(msg) {
   if (msg.type === 'response') {
     const p = pending.get(msg.id);
-    if (!p) return;
+    // 无主的 response（迟到应答等）：算服务端主动帧，刷新 lastPushAt
+    if (!p) { lastPushAt = Date.now(); return; }
     pending.delete(msg.id);
     clearTimeout(p.timer);
     if (msg.body && msg.body.status === 'ok') p.resolve(msg.body.result);
     else p.reject(new Error((msg.body && msg.body.error && msg.body.error.message) || 'rpc error'));
+    // 自己 call 的应答不刷新 lastPushAt：socket 活着不代表订阅活着（mira 假死同款教训）
     return;
   }
+  // 服务端主动帧（event/noti/服务端 ping 等）刷新 lastPushAt；唯独 pong 不算——它是我们看门狗
+  // ping 的应答（yomi 的 pong 不带 id，无法像 mira 那样按迟到区分），算上则每 60s 自刷，监测失效
+  if (msg.type !== 'pong') lastPushAt = Date.now();
   if (msg.type === 'ping') { sendFrame({ type: 'pong' }); return; }
   if (msg.type === 'event') onEvent(msg);
 }
@@ -223,6 +232,7 @@ async function connectOnce() {
       if (gen !== connGen) return; // 握手期间连接已被换掉
       retryDelay = 3000;
       lastFrameAt = Date.now();
+      lastPushAt = Date.now();
       startWatchdog();
       setStatus('online');
       if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `kira 连上了（wire v${(hello && hello.protocol_version) || '?'}）` });
@@ -246,9 +256,25 @@ function startWatchdog() {
     }
     sendFrame({ type: 'ping' });
   }, 60000);
+  // 订阅假死监测（mira M38 同款）：ping/pong 只证明 socket 活着，证明不了 daemon 还在给我们
+  // 推事件，所以只认服务端主动帧（event/noti/服务端 ping/无主 response；pong 不算，见 handleMsg）。
+  // daemon 空闲时不推应用帧（上方踩坑），机器人没人聊也一样静默——接受「空闲也会周期重连」
+  // 的代价，阈值给足 30 分钟
+  const cfg = deps.getConfig() || {};
+  const idleLimit = cfg.pushIdleMs > 0 ? cfg.pushIdleMs : PUSH_IDLE_LIMIT;
+  const tick = cfg.pushWatchMs > 0 ? cfg.pushWatchMs : PUSH_WATCH_TICK;
+  pushWatchTimer = setInterval(() => {
+    if (!ws || stoppedByUser) return;
+    const idle = Date.now() - lastPushAt;
+    if (idle <= idleLimit) return;
+    const span = idle >= 60000 ? `${Math.round(idle / 60000)} 分钟` : `${Math.round(idle / 1000)} 秒`;
+    if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `kira ${span}没有任何服务端推送，疑似订阅假死，主动重连` });
+    restart();
+  }, tick);
 }
 function stopWatchdog() {
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  if (pushWatchTimer) { clearInterval(pushWatchTimer); pushWatchTimer = null; }
 }
 
 function scheduleRetry() {
