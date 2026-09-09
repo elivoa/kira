@@ -275,6 +275,9 @@ function stop() {
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
   clearNotebookWait(new Error('kira 已断开'));
+  // 旧 socket 的 close 会被代际校验丢弃，在途 RPC 走不到 close 里的统一 reject，这里补拒，免得挂到各自超时
+  for (const [, p] of pending) { clearTimeout(p.timer); p.reject(new Error('kira 已断开')); }
+  pending.clear();
   if (ws) { try { ws.close(); } catch {} ws = null; }
   setStatus('off');
 }
