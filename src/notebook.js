@@ -29,14 +29,16 @@ document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
     activeTab = btn.dataset.tab;
     document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
-    for (const key of ['chat', 'history', 'mr', 'bot', 'log', 'debug', 'config']) {
+    for (const key of ['chat', 'history', 'mr', 'bot', 'mira', 'log', 'debug', 'config']) {
       document.getElementById(`page-${key}`).classList.toggle('hidden', key !== activeTab);
     }
     inputrow.classList.toggle('hidden', activeTab === 'log' || activeTab === 'config' || activeTab === 'history' || activeTab === 'debug');
     if (activeTab === 'log') loadLogs();
-    if (activeTab === 'config') { loadChatConfig(); loadFeishuConfig(); loadYomiConfig(); }
+    if (activeTab === 'config') { loadChatConfig(); loadFeishuConfig(); loadYomiConfig(); loadMiraConfig(); }
     if (activeTab === 'history') loadHistoryTab();
     if (activeTab === 'bot') loadBotTab();
+    if (activeTab === 'mira') loadMiraTab();
+    updateMiraInput();
   });
 });
 
@@ -47,7 +49,7 @@ window.pet.onNotebookTab((tab) => {
 });
 
 // ---------- 消息 ----------
-function addMsg(list, who, text, cmd) {
+function addMsg(list, who, text, cmd, source) {
   const m = document.createElement('div');
   m.className = `msg ${who}`;
   if (who === 'Kira') {
@@ -72,9 +74,21 @@ function addMsg(list, who, text, cmd) {
       setTimeout(() => { b.textContent = text; }, 800);
     });
   }
-  m.appendChild(b);
+  if (source) {
+    // 来源标识（mira 等外部会话）：气泡上方一行小字，样式与 kira 同源但可区分
+    const col = document.createElement('div');
+    col.className = 'bcol';
+    const s = document.createElement('span');
+    s.className = 'src';
+    s.textContent = source;
+    col.append(s, b);
+    m.appendChild(col);
+  } else {
+    m.appendChild(b);
+  }
   list.appendChild(m);
   list.scrollTop = list.scrollHeight;
+  b.msgEl = m; // 带 bcol 包裹时 b.parentNode 不是 .msg，向上加载统一用 msgEl 定位
   return b;
 }
 
@@ -116,15 +130,6 @@ function submit(text) {
   text = (text || '').trim();
   if (!text) return;
   input.value = '';
-  // 暗号：解锁「链接 kira」配置区（不是所有人都有 kira 机器人，默认藏着）
-  if (text === 'kira牛逼') {
-    window.pet.setYomiConfig({ unlocked: true });
-    document.getElementById('yomiSec').style.display = '';
-    addMsg(chatMsgs, 'Kira', '解锁啦！去「配置」页最下面就能看到「链接 kira」了，填上 ws 地址和 token 就能连');
-    window.pet.notebookSay('kira 链接解锁啦');
-    window.pet.logAppend({ t: Date.now(), type: '系统', text: '输入暗号，解锁了链接 kira 配置区' });
-    return;
-  }
   if (activeTab === 'mr') {
     addMsg(mrMsgs, 'me', text);
     const r = mrAnswer(text);
@@ -169,6 +174,51 @@ function submit(text) {
       fail();
     }).catch(() => {
       consumePendingBotSend(sentText);
+      fail();
+    });
+  } else if (activeTab === 'mira') {
+    if (!hasMira || miraState.readonly) return; // 只读降级时输入框已禁用，这里双保险
+    addMsg(miraMsgs, 'me', text, false, 'mira');
+    window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子 mira tab 发言：${text.slice(0, 30)}` });
+    // 发送点即截 2000（与 bot 路径 main.js yomi-send/feishu-send 同口径）：pending 登记与发送同源，
+    // inject 若把同一条消息回显为 user.input，onMiraEvent 命中即跳过防双显，>2000 字也不会失配
+    const sentText = text.slice(0, 2000);
+    pendingMiraSends.push(sentText);
+    if (pendingMiraSends.length > 20) pendingMiraSends.shift();
+    const typing = addMsg(miraMsgs, 'Kira', '正在输入…', false, 'mira');
+    typing.classList.add('typing');
+    miraMsgs.scrollTop = miraMsgs.scrollHeight;
+    const fail = () => {
+      typing.classList.remove('typing');
+      typing.innerHTML = '';
+      window.MarkdownStream.render(typing, '呜，没发出去…');
+    };
+    // 回答经 mira-event 流回来填等待气泡（delta 或整条）；120s 没回来给个兜底文案
+    const bail = setTimeout(() => {
+      if (typing.classList.contains('typing')) {
+        typing.classList.remove('typing');
+        typing.innerHTML = '';
+        window.MarkdownStream.render(typing, '（发出去了，mira 还没回，稍后再看看）');
+      }
+    }, 120000);
+    window.pet.miraSend(sentText).then((r) => {
+      consumePendingMiraSend(sentText); // 回显必在回答之前来（或不会来），到这里清掉防呆（同 bot 约定）
+      if (r && r.ok) {
+        if (r.reply && typing.classList.contains('typing')) {
+          clearTimeout(bail);
+          lastMiraReply = { text: r.reply, t: Date.now() };
+          typing.classList.remove('typing');
+          typing.innerHTML = '';
+          window.MarkdownStream.render(typing, r.reply);
+          miraMsgs.scrollTop = miraMsgs.scrollHeight;
+        }
+        return;
+      }
+      clearTimeout(bail);
+      fail();
+    }).catch(() => {
+      consumePendingMiraSend(sentText);
+      clearTimeout(bail);
       fail();
     });
   }
@@ -926,8 +976,6 @@ function renderYomiStatus() {
 
 function loadYomiConfig() {
   window.pet.getYomiConfig().then((c) => {
-    // 暗号解锁前配置区藏着（不是所有人都有 kira 机器人）
-    document.getElementById('yomiSec').style.display = c.unlocked ? '' : 'none';
     if (document.activeElement !== yomiWsUrl) yomiWsUrl.value = c.wsUrl || '';
     if (document.activeElement !== yomiToken) yomiToken.value = c.token || '';
     if (document.activeElement !== yomiSessionId) yomiSessionId.value = c.sessionId || '';
@@ -1022,8 +1070,338 @@ window.pet.onFeishuMsg((m) => {
   addMsg(botMsgs, 'Kira', m.content);
 });
 
+// ---------- 链接 mira（StarForge Mira：WS /api/stream 订阅 + inject 发言） ----------
+// 通道与 yomi 镜像：get/set-mira-config、mira-status（推送）、mira-event（推送）、mira-send、mira-history
+const miraWsUrl = document.getElementById('miraWsUrl');
+const miraToken = document.getElementById('miraToken');
+const miraProjectId = document.getElementById('miraProjectId');
+const miraEnabled = document.getElementById('miraEnabled');
+const miraStatus = document.getElementById('miraStatus');
+const miraTab = document.getElementById('miraTab');
+const miraMsgs = document.getElementById('miraMsgs');
+const MIRA_DEFAULT_WS = 'wss://mira.msh.team/api/stream';
+// 连接器（M27）未合入前 preload 没有 mira 通道：全部 mira 功能静默关闭，不影响其他页签
+const hasMira = typeof window.pet.getMiraConfig === 'function';
+// 配置区与 tab 同守卫：无 mira 通道时藏掉（HTML 默认 display:none），避免保存/清除静默 no-op
+if (hasMira) document.getElementById('miraSec').style.display = '';
+let miraState = { status: 'off', error: '', sessionId: '', enabled: false, wsUrl: '', token: '', projectId: '', readonly: false };
+
+const MIRA_STATUS_TEXT = {
+  off: '未配置', connecting: '连接中…', online: '已连接，mira 的消息会同步到小本子', error: '连接出错', disconnected: '已断开',
+};
+
+function miraConfigured() {
+  return !!(miraState.enabled && miraState.wsUrl && miraState.token && miraState.projectId);
+}
+
+// mira tab 显隐：配置好（启用+地址+token+项目）或在线就常驻
+function updateMiraTab() {
+  if (!hasMira) return;
+  if (miraState.status === 'online' || miraConfigured()) {
+    miraTab.classList.remove('hidden');
+    return;
+  }
+  miraTab.classList.add('hidden');
+  if (activeTab === 'mira') document.querySelector('.tab[data-tab="chat"]').click();
+}
+
+function renderMiraStatus() {
+  miraStatus.classList.toggle('ok', miraState.status === 'online');
+  miraStatus.textContent = (MIRA_STATUS_TEXT[miraState.status] || miraState.status) + (miraState.error ? `：${miraState.error}` : '');
+}
+
+// 只读降级（inject 未接入）时禁用输入框并注明；切走 mira tab 即恢复
+function updateMiraInput() {
+  const ro = activeTab === 'mira' && miraState.readonly;
+  input.disabled = ro;
+  document.getElementById('send').disabled = ro;
+  input.placeholder = ro ? 'mira 暂只读同步（inject 未接入）' : '说点什么，或拖入链接…';
+}
+
+function loadMiraConfig() {
+  if (!hasMira) return;
+  window.pet.getMiraConfig().then((c) => {
+    if (!c) return;
+    if (document.activeElement !== miraWsUrl) miraWsUrl.value = c.wsUrl || MIRA_DEFAULT_WS;
+    if (document.activeElement !== miraToken) miraToken.value = c.token || '';
+    if (document.activeElement !== miraProjectId) miraProjectId.value = c.projectId || '';
+    miraEnabled.checked = !!c.enabled;
+    miraState = {
+      status: c.status || 'off', error: c.error || '', sessionId: c.sessionId || '',
+      enabled: !!c.enabled, wsUrl: c.wsUrl || '', token: c.token || '', projectId: c.projectId || '',
+      readonly: !!(c.readonly || c.canSend === false),
+    };
+    renderMiraStatus();
+    updateMiraTab();
+    updateMiraInput();
+  });
+}
+
+document.getElementById('miraSave').addEventListener('click', () => {
+  if (!hasMira) return;
+  const patch = {
+    wsUrl: miraWsUrl.value.trim() || MIRA_DEFAULT_WS,
+    token: miraToken.value.trim(),
+    projectId: miraProjectId.value.trim(),
+    enabled: miraEnabled.checked,
+  };
+  window.pet.setMiraConfig(patch);
+  // 同步本地状态：事件过滤和 updateMiraTab 都读 miraState，等下次 loadMiraConfig 刷新会漏
+  miraState = { ...miraState, ...patch };
+  updateMiraTab();
+  window.pet.notebookSay('mira 链接记好啦');
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '更新了 mira 链接配置' });
+});
+
+document.getElementById('miraClear').addEventListener('click', () => {
+  if (!hasMira) return;
+  window.pet.setMiraConfig({ wsUrl: '', token: '', projectId: '', enabled: false });
+  miraWsUrl.value = MIRA_DEFAULT_WS;
+  miraToken.value = '';
+  miraProjectId.value = '';
+  miraEnabled.checked = false;
+  miraState = { ...miraState, enabled: false, wsUrl: '', token: '', projectId: '', sessionId: '', status: 'off', error: '' };
+  renderMiraStatus();
+  updateMiraTab();
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: '清除了 mira 链接配置' });
+});
+
+miraEnabled.addEventListener('change', () => {
+  if (!hasMira) return;
+  window.pet.setMiraConfig({ enabled: miraEnabled.checked });
+  miraState.enabled = miraEnabled.checked;
+  updateMiraTab();
+});
+
+// mira tab：历史经 mira-history 拉（游标分页），首屏只渲染最新 15 条；滚到顶部先翻缓存、缓存尽再拉更早一页
+const MIRA_PAGE = 15;
+let miraHistoryCache = []; // 已拉到的消息（正序，旧→新）
+let miraShown = 0;         // 已上屏消息在 miraHistoryCache 里的最早下标
+let miraCursor = null;     // 向上翻页游标（连接器 after_cursor 约定）
+let miraHasMore = false;
+let miraLoading = false;
+const miraRenderedIds = new Set(); // 已上屏消息的 id/cursor，历史/事件/回显三通道防重
+const pendingMiraSends = [];       // 乐观上屏的发言文本：inject 回显命中即跳过
+let miraStream = null;             // assistant.delta 流式气泡 { bubble, session }（MarkdownStream 增量会话）
+let lastMiraReply = null;          // miraSend resolve 先填过的回答：事件再到按同文案跳过一次
+
+// 关流：排空平滑器残余队列（done 后自动加速吐完），带全文则校准一次
+function closeMiraStream(fullText) {
+  if (!miraStream) return null;
+  const s = miraStream;
+  miraStream = null;
+  s.session.finish(typeof fullText === 'string' ? fullText : undefined);
+  return s;
+}
+
+function consumePendingMiraSend(text) {
+  const idx = pendingMiraSends.findIndex((p) => p === text);
+  if (idx < 0) return false;
+  pendingMiraSends.splice(idx, 1);
+  return true;
+}
+
+// 兼容连接器返回数组或 { messages, after_cursor/next_cursor, has_more }
+function normalizeMiraHistory(r) {
+  if (Array.isArray(r)) return { messages: r, cursor: null, hasMore: false };
+  const o = r || {};
+  const messages = o.messages || o.list || o.items || [];
+  const cursor = o.after_cursor ?? o.next_cursor ?? o.nextCursor ?? o.cursor ?? null;
+  const hasMore = o.has_more ?? o.hasMore ?? !!cursor;
+  return { messages, cursor, hasMore: !!hasMore };
+}
+
+function miraMsgText(m) { return m.text ?? m.content ?? ''; }
+function miraMsgKey(m) { const k = m.id ?? m.cursor; return k == null ? '' : String(k); }
+
+function renderMiraBatch(older) {
+  const end = older ? miraShown : miraHistoryCache.length;
+  const start = Math.max(0, end - MIRA_PAGE);
+  const batch = miraHistoryCache.slice(start, end);
+  miraShown = start;
+  const renderOne = (m) => {
+    const key = miraMsgKey(m);
+    if (key) miraRenderedIds.add(key);
+    return addMsg(miraMsgs, m.role === 'user' ? 'me' : 'Kira', miraMsgText(m), false, 'mira');
+  };
+  if (older) {
+    // 向上加载：插到当前最前，视口位置由调用方修正
+    const first = miraMsgs.firstChild;
+    for (const m of batch) miraMsgs.insertBefore(renderOne(m).msgEl, first);
+  } else {
+    for (const m of batch) renderOne(m);
+  }
+}
+
+function miraTopDone() {
+  if (!miraHistoryCache.length || miraMsgs.querySelector('.mira-top-done')) return;
+  const d = document.createElement('div');
+  d.className = 'empty mira-top-done';
+  d.textContent = '—— 到顶了，没有更早的消息 ——';
+  miraMsgs.insertBefore(d, miraMsgs.firstChild);
+}
+
+miraMsgs.addEventListener('scroll', async () => {
+  if (miraMsgs.scrollTop > 40 || miraLoading) return;
+  const canLoad = miraShown > 0 || (miraHasMore && miraState.sessionId);
+  if (!canLoad) { miraTopDone(); return; }
+  miraLoading = true;
+  const prevTop = miraMsgs.scrollTop;
+  const prevH = miraMsgs.scrollHeight;
+  if (miraShown > 0) {
+    renderMiraBatch(true);
+  } else {
+    try {
+      const page = normalizeMiraHistory(await window.pet.miraHistory(miraState.sessionId, miraCursor));
+      // 拉到的更早一页拼到缓存前面；与已上屏的按 id/cursor 去重
+      const older = page.messages.filter((m) => { const k = miraMsgKey(m); return !k || !miraRenderedIds.has(k); });
+      miraHistoryCache = [...older, ...miraHistoryCache];
+      miraShown = older.length;
+      miraCursor = page.cursor;
+      miraHasMore = page.hasMore;
+      if (older.length) renderMiraBatch(true);
+    } catch (e) { /* 拉取失败：保持现状，下次滚动重试 */ }
+  }
+  if (miraShown === 0 && !miraHasMore) miraTopDone();
+  // 视口不跳：新增内容（含结束标记）有多高补多少；addMsg 会滚底，必须按 prevTop 重算
+  miraMsgs.scrollTop = prevTop + (miraMsgs.scrollHeight - prevH);
+  miraLoading = false;
+});
+
+function loadMiraTab() {
+  if (!hasMira) return;
+  closeMiraStream(); // 重拉历史会清屏：先关流排空，别让平滑器往已 detach 的气泡里吐字
+  miraMsgs.innerHTML = '';
+  miraRenderedIds.clear();
+  miraHistoryCache = [];
+  miraShown = 0;
+  miraCursor = null;
+  miraHasMore = false;
+  if (!miraState.sessionId) {
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = miraConfigured()
+      ? '还没有定位到 mira 会话；连上之后这里会同步会话消息'
+      : '先去「配置」页填好 mira 链接（地址 / token / project id）';
+    miraMsgs.appendChild(d);
+    return;
+  }
+  miraLoading = true;
+  window.pet.miraHistory(miraState.sessionId).then((r) => {
+    const page = normalizeMiraHistory(r);
+    miraMsgs.innerHTML = '';
+    miraRenderedIds.clear();
+    miraHistoryCache = page.messages;
+    miraShown = page.messages.length;
+    miraCursor = page.cursor;
+    miraHasMore = page.hasMore;
+    if (!page.messages.length) {
+      const d = document.createElement('div');
+      d.className = 'empty';
+      d.textContent = 'mira 已连上，还没有同步到消息；之后会话里的对话都会出现在这里';
+      miraMsgs.appendChild(d);
+    } else {
+      renderMiraBatch(false);
+      miraMsgs.scrollTop = miraMsgs.scrollHeight;
+    }
+    miraLoading = false;
+  }).catch(() => {
+    miraMsgs.innerHTML = '';
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = '历史拉取失败，稍后再试';
+    miraMsgs.appendChild(d);
+    miraLoading = false;
+  });
+}
+
+if (hasMira && window.pet.onMiraStatus) {
+  window.pet.onMiraStatus((s) => {
+    miraState = {
+      ...miraState,
+      status: s.status || miraState.status,
+      error: s.error || '',
+      sessionId: s.sessionId || miraState.sessionId,
+      readonly: s.readonly !== undefined ? !!s.readonly : (s.canSend !== undefined ? s.canSend === false : miraState.readonly),
+    };
+    renderMiraStatus();
+    updateMiraTab();
+    updateMiraInput();
+  });
+}
+
+// mira 实时事件：{kind, sessionId, role, text, cursor, ts, source:'mira'}
+// assistant.delta 走 MarkdownStream 增量会话（同聊天路径，冻结已封口块，避免每 delta 全量重渲），
+// 任何非 delta 事件关流；turn.ended 带全文则 finish 校准一次
+if (hasMira && window.pet.onMiraEvent) {
+  window.pet.onMiraEvent((ev) => {
+    if (!ev || ev.source !== 'mira') return;
+    if (activeTab !== 'mira') return; // 不在 mira 页的消息丢弃，切回时历史重拉补齐（同 bot tab 约定）
+    // 只上屏绑定会话的消息；还没绑定时认领第一条消息的会话
+    if (miraState.sessionId && ev.sessionId && ev.sessionId !== miraState.sessionId) return;
+    if (!miraState.sessionId && ev.sessionId) miraState.sessionId = ev.sessionId;
+    const key = miraMsgKey(ev);
+    if (key && miraRenderedIds.has(key)) return;
+    if (key) miraRenderedIds.add(key);
+    // 只清「还没有消息」占位符：结束标记（mira-top-done）和已上屏历史不能被误杀
+    const placeholder = miraMsgs.querySelector('.empty:not(.mira-top-done)');
+    if (placeholder) placeholder.remove();
+    const kind = ev.kind || '';
+    if (kind === 'assistant.delta' || ev.delta === true) {
+      if (!miraStream) {
+        // 有等待气泡就填进去开流，没有就开新气泡
+        let bubble = miraMsgs.querySelector('.bubble.typing');
+        if (bubble) {
+          bubble.classList.remove('typing');
+          bubble.innerHTML = '';
+        } else {
+          bubble = addMsg(miraMsgs, 'Kira', '', false, 'mira');
+        }
+        const pinScroll = () => { miraMsgs.scrollTop = miraMsgs.scrollHeight; };
+        miraStream = { bubble, session: window.MarkdownStream.create(bubble, pinScroll) };
+      }
+      miraStream.session.append(ev.text || '');
+      return;
+    }
+    if (/^turn/.test(kind)) {
+      // turn 结束：流已上屏只校准全文；没流过且有全文才补一条
+      const hadStream = closeMiraStream(ev.text);
+      if (hadStream || !ev.text) return;
+    } else {
+      closeMiraStream(); // 其他非 delta 事件到来也关流
+    }
+    // thinking/tool 等事件不上屏：kind 不是消息类且没有显式 role 就跳过
+    if (kind && !/^(user|assistant|turn)/.test(kind) && !ev.role) return;
+    const role = ev.role || (/^user/.test(kind) ? 'user' : 'assistant');
+    const text = ev.text || '';
+    if (!text) return; // thinking/tool 等无文本事件不上屏
+    if (role === 'user') {
+      // 小本子自己发的经 inject 回显：乐观气泡已上屏，跳过（key 已在上面登记）
+      if (consumePendingMiraSend(text)) return;
+      addMsg(miraMsgs, 'me', text, false, 'mira');
+      return;
+    }
+    // resolve 先于事件流回来时回答已填过（见 submit），同文案别再上屏
+    if (lastMiraReply && lastMiraReply.text === text && Date.now() - lastMiraReply.t < 10000) {
+      lastMiraReply = null;
+      return;
+    }
+    // 有等待气泡就把回答填进去；没有就直接上屏
+    const typing = miraMsgs.querySelector('.bubble.typing');
+    if (typing) {
+      typing.classList.remove('typing');
+      typing.innerHTML = '';
+      window.MarkdownStream.render(typing, text);
+      miraMsgs.scrollTop = miraMsgs.scrollHeight;
+      return;
+    }
+    addMsg(miraMsgs, 'Kira', text, false, 'mira');
+  });
+}
+
 loadFeishuConfig(); // 打开本子就备好 tab 显隐/命名，不用等切页签
 loadYomiConfig();   // kira tab 同理：打开本子就拉一次链接状态，不然要等点配置页才出现
+loadMiraConfig();   // mira tab 同理
 
 // ---------- 打字避让（typingguard）：输入时通知桌宠别挡本本 ----------
 // 通道复用 notebook-say（主进程原样转发给桌宠窗口），控制消息带哨兵前缀，
