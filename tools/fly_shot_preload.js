@@ -6,7 +6,8 @@ const pObj = (v) => () => Promise.resolve(v);
 
 contextBridge.exposeInMainWorld('pet', {
   getStage: pObj({ minX: 0, maxX: 1200, minY: 0, floorY: 600 }),
-  getPos: pObj([100, 500]),
+  // SHOT_POS 可覆盖初始位置（如 '[1100,500]' 让她去右侧敲），默认左边
+  getPos: pObj(process.env.SHOT_POS ? JSON.parse(process.env.SHOT_POS) : [100, 500]),
   moveBy: noop,
   getCursor: pObj([600, 400]),
   activeWindow: pObj(null),
