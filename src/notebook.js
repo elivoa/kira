@@ -1166,6 +1166,34 @@ document.getElementById('miraClear').addEventListener('click', () => {
   window.pet.logAppend({ t: Date.now(), type: '系统', text: '清除了 mira 链接配置' });
 });
 
+// 「给 AI 的接入指南」：hover 预览 prompt 全文，点击复制到剪贴板，按钮短暂变「已复制 ✓」
+const MIRA_AI_PROMPT = `你要帮我自动完成「Link Mira」接入配置。请按下面的步骤自己找齐三项信息（wsUrl / token / projectId）并填好：
+
+1. wsUrl：固定为 wss://mira.msh.team/api/stream（JSON-RPC over WebSocket，用 Bearer token 鉴权）。
+
+2. token：先读 ~/.zshrc 里 export 的 MOONGATE_ACCESS_TOKEN（39 位、MGU 前缀）。如果没有，提示我通过 MoonGate SSO 获取一个 access token 再给你。
+
+3. projectId（按顺序尝试）：
+   a. 带上 token 调 GET https://mira.msh.team/api/mira/projects（请求头 Authorization: Bearer <token>），从返回的 project 列表里按名称认出我的项目；
+   b. 列表为空或认不出来时，去飞书群里找 mira 机器人的回复卡片，卡片链接形如 https://mira.msh.team/space/<projectId>/workspace/...，从链接里反推出 projectId；
+   c. 确认目标 project 绑定的飞书 channel，避免接错项目。
+
+4. 权限：如果 subscribe 返回 Forbidden，说明你的 mira 用户不是该 project 成员。先调 GET https://mira.msh.team/api/me 拿到你的 mira 用户 id，然后告诉我，让我找 project owner 把你加为成员后再重试。
+
+5. 三项信息都拿到后，填入 Kira 小本子「配置 → 链接 mira」的 wsUrl / token / project id，打开「启用 mira 链接」并保存连接；最后确认 mira tab 里有消息同步进来，即完成。`;
+const miraAiGuide = document.getElementById('miraAiGuide');
+const miraAiTip = document.getElementById('miraAiTip');
+miraAiTip.textContent = `${MIRA_AI_PROMPT}\n\n—— 点击按钮复制完整 prompt ——`;
+miraAiGuide.addEventListener('click', () => {
+  navigator.clipboard.writeText(MIRA_AI_PROMPT);
+  miraAiGuide.classList.add('done');
+  miraAiGuide.textContent = '已复制 ✓';
+  setTimeout(() => {
+    miraAiGuide.classList.remove('done');
+    miraAiGuide.textContent = '🤖 AI 指南';
+  }, 1600);
+});
+
 miraEnabled.addEventListener('change', () => {
   if (!hasMira) return;
   window.pet.setMiraConfig({ enabled: miraEnabled.checked });
