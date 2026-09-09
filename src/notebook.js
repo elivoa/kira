@@ -203,11 +203,13 @@ function submit(text) {
       }
     }, 120000);
     window.pet.miraSend(miraState.sessionId, sentText).then((r) => {
-      consumePendingMiraSend(sentText); // 回显必在回答之前来（或不会来），到这里清掉防呆（同 bot 约定）
+      // 防呆 consume 只在 mira 页做：切走期间回显躺在 miraPending 里还没被消费，这里吃掉登记项
+      // 会让切回重放时匹配落空、用户消息再上一次（R2 P1）；回显不来也无害（pendingMiraSends 上限 20）
+      if (activeTab === 'mira') consumePendingMiraSend(sentText);
       if (r && r.ok) {
         if (r.reply && typing.classList.contains('typing')) {
           clearTimeout(bail);
-          lastMiraReply = { text: r.reply, t: Date.now() };
+          lastMiraReply = { text: r.reply };
           typing.classList.remove('typing');
           typing.innerHTML = '';
           window.MarkdownStream.render(typing, r.reply);
@@ -1303,8 +1305,9 @@ function handleMiraEvent(ev) {
     recordMiraShown('user', text, key);
     return;
   }
-  // resolve 先于事件流回来时回答已填过（见 submit），同文案别再上屏
-  if (lastMiraReply && lastMiraReply.text === text && Date.now() - lastMiraReply.t < 10000) {
+  // resolve 先于事件流回来时回答已填过（见 submit），同文案别再上屏：命中即自清，不设时间窗——
+  // 事件可能在 miraPending 里排队超过任何窗口（R2 P1），「回答只显示一次」要在任何时序下成立
+  if (lastMiraReply && lastMiraReply.text === text) {
     lastMiraReply = null;
     return;
   }
