@@ -51,33 +51,84 @@
     border-top-color: #262433;
     border-bottom: 0;
   }
-  /* 文字可选中；双击直达 kira tab，Esc 或右上角 ✕ 关闭 */
-  #kbText {
+  /* 顶部头像行：Q 版小人贴左上角，标识这张卡是 kira 在说话 */
+  .kb-head { display: flex; align-items: center; margin: -2px 0 2px; user-select: none; }
+  .kb-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex: none;
+    border: 1.5px solid rgba(150, 130, 232, 0.55);
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+    background: #1c1a28;
+  }
+  /* 全身立绘裁出脸部：先 cover 再放大到脸的位置 */
+  .kb-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 20%;
+    transform: scale(2.1);
+    transform-origin: 50% 24%;
+    -webkit-user-drag: none;
+  }
+  /* 消息区：kira 正文（无气泡，沿用原正文样式）+ 自己的居右气泡，上下滚动；
+     跟窗口高度走（默认 520-200=320）：窗口拖高后长文能少滚动 */
+  #kbMsgs {
     -webkit-app-region: no-drag;
     user-select: text;
     -webkit-user-select: text;
     cursor: text;
-    /* 跟窗口高度走（默认 520-120=400 同旧值）：窗口拖高后长文能少滚动 */
-    max-height: calc(100vh - 120px);
+    max-height: calc(100vh - 200px);
     overflow-y: auto;
   }
+  /* 自己的消息：居右深气泡（对齐本本 .msg.me 的深色感，调进泡泡紫调） */
+  .kb-msg { margin-top: 8px; }
+  .kb-msg.me { display: flex; justify-content: flex-end; }
+  .kb-msg.me .kb-bubble {
+    max-width: 84%;
+    padding: 6px 12px;
+    border-radius: 12px 12px 4px 12px;
+    background: #3b3755;
+    border: 1px solid #4c4870;
+    color: #e8eaf4;
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  /* kira 的等待行：回复到达后摘掉 typing 变成正式正文行 */
+  .kb-msg.kira.typing { opacity: 0.6; font-size: 12px; }
+  .kb-msg.kira.typing::after {
+    content: '';
+    display: inline-block;
+    width: 2.2em;
+    animation: typingDots 1.2s steps(1) infinite;
+  }
+  @keyframes typingDots {
+    0% { content: ''; }
+    25% { content: '  ·'; }
+    50% { content: '  · ·'; }
+    75% { content: '  · · ·'; }
+  }
   /* markdown 样式对齐本本 .bubble.md（间距/字号一致）；颜色沿用深底浅字体系 */
-  #kbText.md p { margin: 0 0 8px; }
-  #kbText.md p:last-child { margin-bottom: 0; }
-  #kbText.md h1, #kbText.md h2, #kbText.md h3, #kbText.md h4 { margin: 6px 0; font-size: 14px; font-weight: 600; }
+  .kb-md p { margin: 0 0 8px; }
+  .kb-md p:last-child { margin-bottom: 0; }
+  .kb-md h1, .kb-md h2, .kb-md h3, .kb-md h4 { margin: 6px 0; font-size: 14px; font-weight: 600; }
   /* PingFang SC 的 bold(700) 在小字号下糊成一团，压到 600 */
-  #kbText.md strong, #kbText.md b { font-weight: 600; }
-  #kbText.md ul, #kbText.md ol { margin: 0 0 8px; padding-left: 20px; }
-  #kbText.md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,.4); opacity: .85; }
-  #kbText.md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: rgba(0,0,0,.25); border-radius: 4px; padding: 1px 4px; }
-  #kbText.md pre { background: rgba(0,0,0,.25); border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
-  #kbText.md pre code { background: none; padding: 0; }
-  #kbText.md table { border-collapse: collapse; margin: 0 0 8px; font-size: 12px; }
-  #kbText.md th, #kbText.md td { border: 1px solid rgba(255,255,255,.35); padding: 3px 8px; }
-  #kbText.md hr { border: none; border-top: 1px dashed rgba(255,255,255,.4); margin: 8px 0; }
-  #kbText.md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
-  #kbText.md a { color: #b7aef0; text-decoration: underline; cursor: pointer; }
-  #kbText.md a:hover { cursor: pointer; }
+  .kb-md strong, .kb-md b { font-weight: 600; }
+  .kb-md ul, .kb-md ol { margin: 0 0 8px; padding-left: 20px; }
+  .kb-md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,.4); opacity: .85; }
+  .kb-md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: rgba(0,0,0,.25); border-radius: 4px; padding: 1px 4px; }
+  .kb-md pre { background: rgba(0,0,0,.25); border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
+  .kb-md pre code { background: none; padding: 0; }
+  .kb-md table { border-collapse: collapse; margin: 0 0 8px; font-size: 12px; }
+  .kb-md th, .kb-md td { border: 1px solid rgba(255,255,255,.35); padding: 3px 8px; }
+  .kb-md hr { border: none; border-top: 1px dashed rgba(255,255,255,.4); margin: 8px 0; }
+  .kb-md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+  .kb-md a { color: #b7aef0; text-decoration: underline; cursor: pointer; }
+  .kb-md a:hover { cursor: pointer; }
   /* 角落小圆钮（右上 ✕ 关闭 / 右下 💬 打开 kira、飞书、复位、拖拽手柄 / 左下 ⤢ 放大）：半透明，hover 提亮；no-drag 防成拖拽误触区 */
   #kbClose, #kbOpen, #kbFeishu, #kbReset, #kbResize, #kbZoom {
     position: absolute;
@@ -106,15 +157,54 @@
   #kbZoom.on { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
   #kbFeishu svg, #kbResize svg, #kbZoom svg { vertical-align: middle; margin-top: -2px; }
   #kbClose:hover, #kbOpen:hover, #kbFeishu:hover, #kbReset:hover, #kbResize:hover { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
-  /* 底部操作提示：与正文用分隔线拉开，右侧留出右下角四个按钮的位置 */
+  /* 底部输入区：对齐记事本 .inputrow 视觉（圆角深色底 + 发送钮），
+     整体 no-drag 别和边缘拖拽打架；min-width 兜底：fit-content 下短回复时输入区不缩没 */
+  .kb-inputrow {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.14);
+    min-width: 250px;
+    -webkit-app-region: no-drag;
+  }
+  #kbInput {
+    flex: 1;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    padding: 7px 12px;
+    font: 13px/1.45 "PingFang SC", sans-serif;
+    outline: none;
+    background: rgba(0, 0, 0, 0.28);
+    color: #e8eaf4;
+    resize: none;
+    overflow-y: auto;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  #kbInput:focus { border-color: rgba(183, 174, 240, 0.6); }
+  #kbInput::placeholder { color: rgba(232, 234, 244, 0.38); }
+  #kbSend {
+    flex: none;
+    border: none;
+    background: #cfc9ec;
+    color: #262433;
+    font: 13px "PingFang SC", sans-serif;
+    padding: 0 16px;
+    height: 33px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  #kbSend:hover { background: #b7aef0; }
+  /* 底部操作提示：跟在输入区后面当页脚，右侧留出右下角四个按钮的位置 */
   .kb-hint {
     display: block;
     font-size: 11px;
     font-weight: 400;
     opacity: 0.55;
-    margin-top: 10px;
-    padding: 7px 100px 0 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    margin-top: 6px;
+    padding: 0 100px 0 0;
     -webkit-app-region: drag;
     user-select: none;
   }
@@ -129,7 +219,14 @@
     <button id="kbReset" title="恢复默认位置">↺</button>
     <button id="kbResize" title="拖拽调整大小"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M10.5 1.5 L1.5 10.5 M10.5 5.5 L5.5 10.5 M10.5 9.5 L9.5 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg></button>
     <button id="kbZoom" title="放大"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1.5 4.2 V1.5 H4.2 M7.8 1.5 H10.5 V4.2 M10.5 7.8 V10.5 H7.8 M4.2 10.5 H1.5 V7.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg></button>
-    <div id="kbText" class="md"></div>
+    <div class="kb-head"><span class="kb-avatar"><img src="../assets/chibi.png" draggable="false" alt="kira"></span></div>
+    <div id="kbMsgs">
+      <div id="kbText" class="kb-md"></div>
+    </div>
+    <div class="kb-inputrow">
+      <textarea id="kbInput" rows="1" placeholder="发消息给 kira…"></textarea>
+      <button id="kbSend">发送</button>
+    </div>
     <span class="kb-hint">✦ 点击后 Esc 关闭 · 双击打开 kira</span>
   </div>
   <script src="../node_modules/markdown-it/dist/browser/markdown-it.umd.min.js"></script>
