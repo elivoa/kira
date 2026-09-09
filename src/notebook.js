@@ -179,6 +179,7 @@ function submit(text) {
   } else if (activeTab === 'mira') {
     if (!hasMira || miraState.readonly) return; // 只读降级时输入框已禁用，这里双保险
     addMsg(miraMsgs, 'me', text, false, 'mira');
+    recordMiraShown('user', text, ''); // 乐观气泡也进镜像：切 tab 重进整体重渲，回显被吃掉后这条不能丢
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子 mira tab 发言：${text.slice(0, 30)}` });
     // 发送点即截 2000（与 bot 路径 main.js yomi-send/feishu-send 同口径）：pending 登记与发送同源，
     // prompt 若把同一条消息回显为 user.input，onMiraEvent 命中即跳过防双显，>2000 字也不会失配
@@ -193,7 +194,7 @@ function submit(text) {
       typing.innerHTML = '';
       window.MarkdownStream.render(typing, '呜，没发出去…');
     };
-    // 回答经 mira-event 流回来填等待气泡（delta 或整条）；120s 没回来给个兜底文案
+    // 回答经 mira-event 流回来填等待气泡（source_reply 整条）；120s 没回来给个兜底文案
     const bail = setTimeout(() => {
       if (typing.classList.contains('typing')) {
         typing.classList.remove('typing');
@@ -202,14 +203,17 @@ function submit(text) {
       }
     }, 120000);
     window.pet.miraSend(miraState.sessionId, sentText).then((r) => {
-      consumePendingMiraSend(sentText); // 回显必在回答之前来（或不会来），到这里清掉防呆（同 bot 约定）
+      // 防呆 consume 只在 mira 页做：切走期间回显躺在 miraPending 里还没被消费，这里吃掉登记项
+      // 会让切回重放时匹配落空、用户消息再上一次（R2 P1）；回显不来也无害（pendingMiraSends 上限 20）
+      if (activeTab === 'mira') consumePendingMiraSend(sentText);
       if (r && r.ok) {
         if (r.reply && typing.classList.contains('typing')) {
           clearTimeout(bail);
-          lastMiraReply = { text: r.reply, t: Date.now() };
+          lastMiraReply = { text: r.reply };
           typing.classList.remove('typing');
           typing.innerHTML = '';
           window.MarkdownStream.render(typing, r.reply);
+          recordMiraShown('assistant', r.reply, ''); // resolve 先填的回答事件侧会按同文案跳过，镜像要自己记
           miraMsgs.scrollTop = miraMsgs.scrollHeight;
         }
         return;
@@ -1202,25 +1206,21 @@ miraEnabled.addEventListener('change', () => {
   updateMiraTab();
 });
 
-// mira tab：历史经 mira-history 拉（游标分页），首屏只渲染最新 15 条；滚到顶部先翻缓存、缓存尽再拉更早一页
-const MIRA_PAGE = 15;
-let miraHistoryCache = []; // 已拉到的消息（正序，旧→新）
-let miraShown = 0;         // 已上屏消息在 miraHistoryCache 里的最早下标
-let miraCursor = null;     // 向上翻页游标（连接器 after_cursor 约定）
-let miraHasMore = false;
-let miraLoading = false;
-const miraRenderedIds = new Set(); // 已上屏消息的 id/cursor，历史/事件/回显三通道防重
+// mira tab：tag 无 REST 历史端点、after_cursor 回放也不可用——只显示连接后的实时消息，
+// 不做翻页加载；顶部常驻一条说明。不在 mira 页时消息暂存 miraPending，切回补显
+const miraRenderedIds = new Set(); // 已上屏消息的 id/key/cursor，事件/回显双通道防重
 const pendingMiraSends = [];       // 乐观上屏的发言文本：prompt 回显命中即跳过
-let miraStream = null;             // assistant.delta 流式气泡 { bubble, session }（MarkdownStream 增量会话）
+const miraPending = [];            // 不在 mira 页时暂存的实时消息（上限 200，防无限积）
+const miraShownMsgs = [];          // 已上屏消息的内存镜像 {role, text, key}（含乐观气泡，上限 200）：
+//   切 tab 重进时 innerHTML 清空后靠它整体重渲——没有历史端点，清了就没处补
 let lastMiraReply = null;          // miraSend resolve 先填过的回答：事件再到按同文案跳过一次
 
-// 关流：排空平滑器残余队列（done 后自动加速吐完），带全文则校准一次
-function closeMiraStream(fullText) {
-  if (!miraStream) return null;
-  const s = miraStream;
-  miraStream = null;
-  s.session.finish(typeof fullText === 'string' ? fullText : undefined);
-  return s;
+function recordMiraShown(role, text, key) {
+  miraShownMsgs.push({ role, text, key: key || '' });
+  if (miraShownMsgs.length > 200) {
+    const old = miraShownMsgs.shift();
+    if (old.key) miraRenderedIds.delete(old.key); // 镜像淘汰的键同步放出，防集合只涨不消
+  }
 }
 
 function consumePendingMiraSend(text) {
@@ -1230,119 +1230,9 @@ function consumePendingMiraSend(text) {
   return true;
 }
 
-// 兼容连接器返回数组或 { messages, after_cursor/next_cursor, has_more }
-function normalizeMiraHistory(r) {
-  if (Array.isArray(r)) return { messages: r, cursor: null, hasMore: false };
-  const o = r || {};
-  const messages = o.messages || o.list || o.items || [];
-  const cursor = o.after_cursor ?? o.next_cursor ?? o.nextCursor ?? o.cursor ?? null;
-  const hasMore = o.has_more ?? o.hasMore ?? !!cursor;
-  return { messages, cursor, hasMore: !!hasMore };
-}
-
-function miraMsgText(m) { return m.text ?? m.content ?? ''; }
-function miraMsgKey(m) { const k = m.id ?? m.cursor; return k == null ? '' : String(k); }
-
-function renderMiraBatch(older) {
-  const end = older ? miraShown : miraHistoryCache.length;
-  const start = Math.max(0, end - MIRA_PAGE);
-  const batch = miraHistoryCache.slice(start, end);
-  miraShown = start;
-  const renderOne = (m) => {
-    const key = miraMsgKey(m);
-    if (key) miraRenderedIds.add(key);
-    return addMsg(miraMsgs, m.role === 'user' ? 'me' : 'Kira', miraMsgText(m), false, 'mira');
-  };
-  if (older) {
-    // 向上加载：插到当前最前，视口位置由调用方修正
-    const first = miraMsgs.firstChild;
-    for (const m of batch) miraMsgs.insertBefore(renderOne(m).msgEl, first);
-  } else {
-    for (const m of batch) renderOne(m);
-  }
-}
-
-function miraTopDone() {
-  if (!miraHistoryCache.length || miraMsgs.querySelector('.mira-top-done')) return;
-  const d = document.createElement('div');
-  d.className = 'empty mira-top-done';
-  d.textContent = '—— 到顶了，没有更早的消息 ——';
-  miraMsgs.insertBefore(d, miraMsgs.firstChild);
-}
-
-miraMsgs.addEventListener('scroll', async () => {
-  if (miraMsgs.scrollTop > 40 || miraLoading) return;
-  const canLoad = miraShown > 0 || (miraHasMore && miraState.sessionId);
-  if (!canLoad) { miraTopDone(); return; }
-  miraLoading = true;
-  const prevTop = miraMsgs.scrollTop;
-  const prevH = miraMsgs.scrollHeight;
-  if (miraShown > 0) {
-    renderMiraBatch(true);
-  } else {
-    try {
-      const page = normalizeMiraHistory(await window.pet.miraHistory(miraState.sessionId, miraCursor));
-      // 拉到的更早一页拼到缓存前面；与已上屏的按 id/cursor 去重
-      const older = page.messages.filter((m) => { const k = miraMsgKey(m); return !k || !miraRenderedIds.has(k); });
-      miraHistoryCache = [...older, ...miraHistoryCache];
-      miraShown = older.length;
-      miraCursor = page.cursor;
-      miraHasMore = page.hasMore;
-      if (older.length) renderMiraBatch(true);
-    } catch (e) { /* 拉取失败：保持现状，下次滚动重试 */ }
-  }
-  if (miraShown === 0 && !miraHasMore) miraTopDone();
-  // 视口不跳：新增内容（含结束标记）有多高补多少；addMsg 会滚底，必须按 prevTop 重算
-  miraMsgs.scrollTop = prevTop + (miraMsgs.scrollHeight - prevH);
-  miraLoading = false;
-});
-
-function loadMiraTab() {
-  if (!hasMira) return;
-  closeMiraStream(); // 重拉历史会清屏：先关流排空，别让平滑器往已 detach 的气泡里吐字
-  miraMsgs.innerHTML = '';
-  miraRenderedIds.clear();
-  miraHistoryCache = [];
-  miraShown = 0;
-  miraCursor = null;
-  miraHasMore = false;
-  if (!miraState.sessionId) {
-    const d = document.createElement('div');
-    d.className = 'empty';
-    d.textContent = miraConfigured()
-      ? '还没有定位到 mira 会话；连上之后这里会同步会话消息'
-      : '先去「配置」页填好 mira 链接（地址 / token / space id）';
-    miraMsgs.appendChild(d);
-    return;
-  }
-  miraLoading = true;
-  window.pet.miraHistory(miraState.sessionId).then((r) => {
-    const page = normalizeMiraHistory(r);
-    miraMsgs.innerHTML = '';
-    miraRenderedIds.clear();
-    miraHistoryCache = page.messages;
-    miraShown = page.messages.length;
-    miraCursor = page.cursor;
-    miraHasMore = page.hasMore;
-    if (!page.messages.length) {
-      const d = document.createElement('div');
-      d.className = 'empty';
-      d.textContent = 'mira 已连上，还没有同步到消息；之后会话里的对话都会出现在这里';
-      miraMsgs.appendChild(d);
-    } else {
-      renderMiraBatch(false);
-      miraMsgs.scrollTop = miraMsgs.scrollHeight;
-    }
-    miraLoading = false;
-  }).catch(() => {
-    miraMsgs.innerHTML = '';
-    const d = document.createElement('div');
-    d.className = 'empty';
-    d.textContent = '历史拉取失败，稍后再试';
-    miraMsgs.appendChild(d);
-    miraLoading = false;
-  });
-}
+// 去重键优先 id（source_reply 的 toolCallId），其次 key（连接器传的 turn:seq，跨回合唯一）；
+// cursor 只是回合内 seq，跨回合撞号，只作兜底
+function miraMsgKey(m) { const k = m.id ?? m.key ?? m.cursor; return k == null ? '' : String(k); }
 
 if (hasMira && window.pet.onMiraStatus) {
   window.pet.onMiraStatus((s) => {
@@ -1359,72 +1249,94 @@ if (hasMira && window.pet.onMiraStatus) {
   });
 }
 
-// mira 实时事件：{kind, sessionId, role, text, cursor, ts, source:'mira'}
-// assistant.delta 走 MarkdownStream 增量会话（同聊天路径，冻结已封口块，避免每 delta 全量重渲），
-// 任何非 delta 事件关流；turn.ended 带全文则 finish 校准一次
+function loadMiraTab() {
+  if (!hasMira) return;
+  miraMsgs.innerHTML = '';
+  if (!miraConfigured()) {
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = '先去「配置」页填好 mira 链接（地址 / token / space id）';
+    miraMsgs.appendChild(d);
+    return;
+  }
+  // 常驻说明（mira-live-note）：实时消息上屏清占位符时不清它
+  const note = document.createElement('div');
+  note.className = 'empty mira-live-note';
+  note.textContent = '—— 只显示连接后的新消息，历史消息去 mira 那边看 ——';
+  miraMsgs.appendChild(note);
+  // 已上屏消息从内存镜像整体重渲（miraRenderedIds 不清：防重键要跨 tab 切换存活）
+  for (const m of miraShownMsgs) addMsg(miraMsgs, m.role === 'user' ? 'me' : 'Kira', m.text, false, 'mira');
+  // 切走期间暂存的消息补显
+  const queued = miraPending.splice(0, miraPending.length);
+  for (const ev of queued) handleMiraEvent(ev);
+  if (!miraShownMsgs.length) {
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = miraState.sessionId
+      ? '还没有新消息；之后会话里的对话会实时出现在这里'
+      : '还没有定位到 mira 会话；连上之后这里会同步会话消息';
+    miraMsgs.appendChild(d);
+  }
+  miraMsgs.scrollTop = miraMsgs.scrollHeight;
+}
+
+// mira 实时事件：{kind, sessionId, role, text, cursor, key, ts, source:'mira'}
+// 连接器已按真实帧归一化：用户发言 role=user、source_reply 回答 role=assistant（kind 都是 message），
+// thinking/assistant.delta/tool 等已在连接器侧过滤，这里只上屏 message
+function handleMiraEvent(ev) {
+  if (!ev || ev.source !== 'mira') return;
+  // 只上屏绑定会话的消息；还没绑定时认领第一条消息的会话
+  if (miraState.sessionId && ev.sessionId && ev.sessionId !== miraState.sessionId) return;
+  if (!miraState.sessionId && ev.sessionId) miraState.sessionId = ev.sessionId;
+  if (ev.kind !== 'message') return; // status/history_complete 等不上屏
+  const key = miraMsgKey(ev);
+  if (key && miraRenderedIds.has(key)) return;
+  if (key) miraRenderedIds.add(key);
+  // 只清「还没有消息」占位符：常驻说明（mira-live-note）和已上屏消息不能被误杀
+  const placeholder = miraMsgs.querySelector('.empty:not(.mira-live-note)');
+  if (placeholder) placeholder.remove();
+  const role = ev.role || 'assistant';
+  const text = ev.text || '';
+  if (!text) return;
+  if (role === 'user') {
+    // 小本子自己发的经 prompt 回显：乐观气泡已上屏，跳过（key 已在上面登记）
+    if (consumePendingMiraSend(text)) return;
+    addMsg(miraMsgs, 'me', text, false, 'mira');
+    recordMiraShown('user', text, key);
+    return;
+  }
+  // resolve 先于事件流回来时回答已填过（见 submit），同文案别再上屏：命中即自清，不设时间窗——
+  // 事件可能在 miraPending 里排队超过任何窗口（R2 P1），「回答只显示一次」要在任何时序下成立
+  if (lastMiraReply && lastMiraReply.text === text) {
+    lastMiraReply = null;
+    return;
+  }
+  // 有等待气泡就把回答填进去；没有就直接上屏
+  const typing = miraMsgs.querySelector('.bubble.typing');
+  if (typing) {
+    typing.classList.remove('typing');
+    typing.innerHTML = '';
+    window.MarkdownStream.render(typing, text);
+    recordMiraShown('assistant', text, key);
+    miraMsgs.scrollTop = miraMsgs.scrollHeight;
+    return;
+  }
+  addMsg(miraMsgs, 'Kira', text, false, 'mira');
+  recordMiraShown('assistant', text, key);
+}
+
 if (hasMira && window.pet.onMiraEvent) {
   window.pet.onMiraEvent((ev) => {
     if (!ev || ev.source !== 'mira') return;
-    if (activeTab !== 'mira') return; // 不在 mira 页的消息丢弃，切回时历史重拉补齐（同 bot tab 约定）
-    // 只上屏绑定会话的消息；还没绑定时认领第一条消息的会话
-    if (miraState.sessionId && ev.sessionId && ev.sessionId !== miraState.sessionId) return;
-    if (!miraState.sessionId && ev.sessionId) miraState.sessionId = ev.sessionId;
-    const key = miraMsgKey(ev);
-    if (key && miraRenderedIds.has(key)) return;
-    if (key) miraRenderedIds.add(key);
-    // 只清「还没有消息」占位符：结束标记（mira-top-done）和已上屏历史不能被误杀
-    const placeholder = miraMsgs.querySelector('.empty:not(.mira-top-done)');
-    if (placeholder) placeholder.remove();
-    const kind = ev.kind || '';
-    if (kind === 'assistant.delta' || ev.delta === true) {
-      if (!miraStream) {
-        // 有等待气泡就填进去开流，没有就开新气泡
-        let bubble = miraMsgs.querySelector('.bubble.typing');
-        if (bubble) {
-          bubble.classList.remove('typing');
-          bubble.innerHTML = '';
-        } else {
-          bubble = addMsg(miraMsgs, 'Kira', '', false, 'mira');
-        }
-        const pinScroll = () => { miraMsgs.scrollTop = miraMsgs.scrollHeight; };
-        miraStream = { bubble, session: window.MarkdownStream.create(bubble, pinScroll) };
+    // 不在 mira 页：message 暂存待补显（没有历史端点可补拉，丢了就真没了），其余事件丢弃
+    if (activeTab !== 'mira') {
+      if (ev.kind === 'message') {
+        miraPending.push(ev);
+        if (miraPending.length > 200) miraPending.shift();
       }
-      miraStream.session.append(ev.text || '');
       return;
     }
-    if (/^turn/.test(kind)) {
-      // turn 结束：流已上屏只校准全文；没流过且有全文才补一条
-      const hadStream = closeMiraStream(ev.text);
-      if (hadStream || !ev.text) return;
-    } else {
-      closeMiraStream(); // 其他非 delta 事件到来也关流
-    }
-    // thinking/tool 等事件不上屏：kind 不是消息类且没有显式 role 就跳过
-    if (kind && !/^(user|assistant|turn)/.test(kind) && !ev.role) return;
-    const role = ev.role || (/^user/.test(kind) ? 'user' : 'assistant');
-    const text = ev.text || '';
-    if (!text) return; // thinking/tool 等无文本事件不上屏
-    if (role === 'user') {
-      // 小本子自己发的经 prompt 回显：乐观气泡已上屏，跳过（key 已在上面登记）
-      if (consumePendingMiraSend(text)) return;
-      addMsg(miraMsgs, 'me', text, false, 'mira');
-      return;
-    }
-    // resolve 先于事件流回来时回答已填过（见 submit），同文案别再上屏
-    if (lastMiraReply && lastMiraReply.text === text && Date.now() - lastMiraReply.t < 10000) {
-      lastMiraReply = null;
-      return;
-    }
-    // 有等待气泡就把回答填进去；没有就直接上屏
-    const typing = miraMsgs.querySelector('.bubble.typing');
-    if (typing) {
-      typing.classList.remove('typing');
-      typing.innerHTML = '';
-      window.MarkdownStream.render(typing, text);
-      miraMsgs.scrollTop = miraMsgs.scrollHeight;
-      return;
-    }
-    addMsg(miraMsgs, 'Kira', text, false, 'mira');
+    handleMiraEvent(ev);
   });
 }
 

@@ -1302,9 +1302,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('yomi-history', () => yomi.listMessages());
 
   // ---------- mira 链接（Mira Tag 子部署，JSON-RPC over WebSocket + REST） ----------
-  // subscribe 事件流 → mira-event 推给笔记本 mira tab；发言走 WS prompt，历史走 REST replay 拉取
+  // subscribe 事件流 → mira-event 推给笔记本 mira tab；发言走 WS prompt
+  // source_reply 回答（kind=message/role=assistant）同步弹 kira 泡泡，和 yomi 消息一致（来源标【mira】）
   const dispatchMiraEvent = (ev) => {
     if (notebookWin) notebookWin.webContents.send('mira-event', ev);
+    if (ev.kind === 'message' && ev.role === 'assistant' && ev.text) showKiraBubble(`【mira】${ev.text.slice(0, 800)}`);
   };
   mira.init({
     getConfig: () => config.mira || {},

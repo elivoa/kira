@@ -10,10 +10,12 @@
 //         （主部署是 params.project_id，写错返 Invalid stream request）；成功回 {"id","result":{"ok":true}}
 //   游标  after_cursor = {per_turn:{"<sessionId>:live:<turnId>":maxSeq}}：seq 是回合内序号，水位按回合记
 //   事件  {"method":"agent_event","space_id","session_uuid","params":{"seq,"event":{"type","turnId",...}}}
-//         类型 user.input / assistant.delta / assistant.record / thinking.delta / tool.call.* / turn.started/ended
-//         另有 history_complete（agents 快照 + pending_requests）/ mira_team_status / prompt_queue 等推送
-//   历史  GET /api/mira/spaces/{space}/sessions/{session}/replay?fromRecordIdx=<n>&count=<n>
-//         fromRecordIdx 负数 = 从末尾倒数（前端首屏 -100）；pageInfo.hasOlder/startRecordIdx 翻页
+//         （M35 按真实帧实测修正）用户可见回复只认 tool.call.started 且 name=='source_reply'
+//         的 args.text（一次性给全，无需聚合 delta）；assistant.delta 是 agent 内心叙述，
+//         不到用户侧，不上屏；feishu_reaction 等其他工具调用、thinking.delta / tool.call.delta /
+//         tool.result / agent.status.updated / turn.step.* 全部过滤；user.input = 用户发言；
+//         turn.ended 收尾一回合
+//   历史  tag 无 REST 历史端点，after_cursor 回放也不可用：只显示连接后的实时消息
 //   发言  WS prompt：{"id","method":"prompt","session_uuid","space_id","params":{"session_uuid,"content"}}
 //         （tag 没有主部署的 REST inject 端点）
 //   space 列表  GET /api/mira/spaces（不是主部署的 /projects）
@@ -42,9 +44,7 @@ let lastFrameAt = 0;           // 最近收到任何帧的时间：半开连接�
 let watchdogTimer = null;
 let sayWait = null;            // 小本本发言等待 mira 回答的挂起 Promise（带 sessionId + 身份校验，防并发串话）
 let restartTimer = null;       // restart() 的延迟启动定时器：stop() 必须能取消它，否则双 socket 泄漏
-const turnBuf = new Map();     // sessionId → {text}：assistant.delta 按回合缓存，turn.ended 一次性吐（同 yomi 的 model.end 教训）
 const MAX_FRAME = 16 * 1024 * 1024; // 单帧上限：超过即断连，防坏对端把内存撑爆
-const MAX_TURN_TEXT = 200 * 1024;   // 单回合缓存上限：防流式 delta 失控累积
 
 function setStatus(s, err) {
   status = s;
@@ -125,17 +125,33 @@ function asText(v) {
   return '';
 }
 
-// <system> 开头的是服务端注入的内部消息，前端也不上屏
-function isSystemText(v) {
-  if (typeof v === 'string') return v.startsWith('<system>');
-  if (Array.isArray(v)) return !!(v[0] && typeof v[0].text === 'string' && v[0].text.startsWith('<system>'));
-  return false;
+// user.input 的 input 是 ContentBlock[]（实测）：
+//   <system-reminder> 块是服务端内部注入，整块丢弃；
+//   <system> 块是来源信封（source_message/from/arrived_by 等元数据行），正文在首个空行之后，
+//   可能带 "message: " 前缀；无信封的纯文本块（小本本 prompt 回显）原样保留
+function userInputText(raw) {
+  if (!raw) return '';
+  const blocks = Array.isArray(raw) ? raw : [raw];
+  const parts = [];
+  for (const b of blocks) {
+    let t = typeof b === 'string' ? b : (b && b.type === 'text' ? b.text : '');
+    if (!t) continue;
+    if (t.startsWith('<system-reminder')) continue;
+    if (t.startsWith('<system>')) {
+      const i = t.indexOf('\n\n');
+      t = i < 0 ? '' : t.slice(i + 2).replace(/^message:\s*/, '');
+    }
+    if (t.trim()) parts.push(t.trim());
+  }
+  return parts.join('\n');
 }
 
 // 统一出口：{kind, sessionId, role, text, cursor, ts, source:'mira'}（与 M28 约定的事件格式）
-function emitEvent(kind, sessionId, role, text, id) {
+// key 是跨回合唯一的去重键（turn:seq）：cursor 只是回合内 seq，跨回合会撞号，UI 去重优先用 key
+function emitEvent(kind, sessionId, role, text, id, key) {
   const out = { kind, sessionId: sessionId || '', role: role || '', text: text || '', cursor: lastSeq, ts: Date.now(), source: 'mira' };
   if (id != null) out.id = id;
+  if (key != null) out.key = key;
   if (deps.onEvent) deps.onEvent(out);
   if (kind === 'message' && role === 'assistant' && sayWait && sessionId === sayWait.sessionId) {
     const w = sayWait;
@@ -192,14 +208,16 @@ function onAgentEvent(p, msg) {
   if (sid) lastSessionId = sid; // 记录最近活跃会话：发言缺省目标
 
   // seq 是回合内序号（续传水位按 per_turn 记），去重键必须带上回合，否则误杀其他回合的同号事件；
-  // 缺 turnId 的兜底事件也至少带上 sid，防跨会话撞号
+  // 缺 turnId 的兜底事件也至少带上 sid，防跨会话撞号。evtKey 随事件传出给 UI 做去重键
   const turnKey = sid && ev.turnId != null ? `${sid}:live:${ev.turnId}` : '';
+  let evtKey = null;
   if (seq != null) {
     const k = turnKey ? `${turnKey}:${seq}` : `${sid}:${seq}`;
     if (seenSeq.includes(k)) return;
     seenSeq.push(k);
     if (seenSeq.length > 500) seenSeq.splice(0, 200);
     lastSeq = seq;
+    evtKey = k;
     if (turnKey) {
       const n = typeof seq === 'number' ? seq : Number(seq);
       if (Number.isFinite(n) && (cursorPerTurn[turnKey] ?? -1) < n) cursorPerTurn[turnKey] = n;
@@ -212,64 +230,39 @@ function onAgentEvent(p, msg) {
 
   // 用户输入（mira 侧真人发言，飞书 channel 进来的也算）
   if (type === 'user.input') {
-    const raw = ev.input ?? ev.text ?? ev.content;
-    if (isSystemText(raw)) return;
-    const text = asText(raw);
-    if (text) emitEvent('message', sid, 'user', text, ev.message_id ?? ev.id);
+    const text = userInputText(ev.input ?? ev.text ?? ev.content);
+    if (text) emitEvent('message', sid, 'user', text, ev.message_id ?? ev.id, evtKey);
     return;
   }
 
-  // assistant.record：整段回答全量（回放合成或某些回合直发），顶掉 delta 缓存防重复上屏
-  if (type === 'assistant.record') {
-    const text = asText(ev.text ?? ev.content);
-    turnBuf.delete(sid);
-    if (text) emitEvent('message', sid, 'assistant', text, ev.id);
-    return;
-  }
-
-  // assistant 流式增量：按回合缓存，不逐条冒泡（一回合几百个 delta，会把 IPC 打爆）
-  if (type === 'assistant.delta') {
-    const delta = asText(ev.delta ?? ev.text ?? ev.content);
-    if (delta) {
-      const b = turnBuf.get(sid) || { text: '' };
-      b.text += delta;
-      if (b.text.length > MAX_TURN_TEXT) b.text = b.text.slice(-MAX_TURN_TEXT);
-      turnBuf.set(sid, b);
+  // 用户可见回复只认 source_reply 工具调用（实测：tool.call.started 一次性给全 args.text）。
+  // feishu_reaction 等其他工具一律不上屏；toolCallId 做 id 防重连回放重复上屏
+  if (type === 'tool.call.started') {
+    if (ev.name === 'source_reply') {
+      const text = asText(ev.args && ev.args.text);
+      if (text) emitEvent('message', sid, 'assistant', text, ev.toolCallId, evtKey);
     }
     return;
   }
 
-  // 回合结束：把缓存的回答一次性吐出来
+  // 回合收尾：回答已经随 source_reply 上屏，这里只发状态让 UI 收束等待态
   if (type === 'turn.ended') {
-    flushTurn(sid);
-    emitEvent('status', sid, '', 'turn.ended');
+    emitEvent('status', sid, '', 'turn.ended', undefined, evtKey);
     return;
   }
   if (type === 'turn.started') {
-    emitEvent('status', sid, '', 'turn.started');
-    return;
-  }
-
-  // 工具调用：只报开始（delta/progress/result 是噪音/大料，不上屏）
-  if (type === 'tool.call.started') {
-    const name = asText(ev.name ?? ev.tool ?? ev.tool_name ?? (ev.call && ev.call.name));
-    emitEvent('tool', sid, 'assistant', name ? `调用工具：${name}` : '调用工具');
+    emitEvent('status', sid, '', 'turn.started', undefined, evtKey);
     return;
   }
 
   // 交互提交（审批/问答的回答）：当用户消息上屏
   if (type === 'interactive.submission') {
     const text = asText(ev.text ?? ev.content ?? ev.value ?? ev.submission);
-    if (text) emitEvent('message', sid, 'user', text, ev.id);
+    if (text) emitEvent('message', sid, 'user', text, ev.id, evtKey);
     return;
   }
-  // thinking.delta / tool.call.delta / tool.progress / tool.result 等：跳过（游标已记账）
-}
-
-function flushTurn(sid) {
-  const b = turnBuf.get(sid);
-  if (b && b.text.trim()) emitEvent('message', sid, 'assistant', b.text.trim());
-  turnBuf.delete(sid);
+  // assistant.delta（agent 内心叙述，不到用户侧）/ thinking.delta / tool.call.delta /
+  // tool.result / agent.status.updated / turn.step.* 等：全部过滤（游标已在上面记账）
 }
 
 // ---------- 连接管理 ----------
@@ -434,7 +427,7 @@ let cookieFetchedAt = 0;
 let cookiePromise = null;    // 在途换取：并发调用共享同一个 Promise，防打桩
 const COOKIE_TTL = 29 * 24 * 3600 * 1000; // 30 天 Max-Age，提前一天主动重换
 
-// ---------- REST（cookie 换取 + 历史回填） ----------
+// ---------- REST（cookie 换取） ----------
 // 注意：必须用 Node https 而不是全局 fetch —— Electron 主进程的全局 fetch 走
 // Chromium network service，长连接/大响应上有坑（main.js 的 kimiChat 同款教训）
 function restBase() {
@@ -490,63 +483,10 @@ async function ensureCookie(force) {
   try { return await cookiePromise; } finally { cookiePromise = null; }
 }
 
-async function restJson(method, url, payload, timeoutMs = 20000) {
-  const cfg = deps.getConfig() || {};
-  let cookie = await ensureCookie();
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await restRaw(method, url, cfg.token, cookie, payload, timeoutMs);
-    if (res.status >= 200 && res.status < 300) {
-      try { return res.body ? JSON.parse(res.body) : null; } catch { throw new Error('响应不是 JSON'); }
-    }
-    // 401 当是 cookie 提前失效：重换一次再试；第二次还 401 才是真的鉴权失败
-    if (res.status === 401 && attempt === 0 && cfg.token) { cookie = await ensureCookie(true); continue; }
-    const hint = res.status === 401 ? '（token 不对或 cookie 已失效）' : res.status === 403 ? '（不是该 space 成员）' : '';
-    throw new Error(`HTTP ${res.status}${hint}：${res.body.slice(0, 120)}`);
-  }
-  throw new Error('unreachable');
-}
-
-// replay 记录：{recordIdx, turnId?, record:{type, time, message:{role, content, origin}}}；只上屏 user/assistant 消息
-function normalizeReplayItem(it, sessionId) {
-  const rec = it && it.record;
-  if (!rec || rec.type !== 'message' || !rec.message) return null;
-  const m = rec.message;
-  const role = m.role === 'user' ? 'user' : m.role === 'assistant' ? 'assistant' : '';
-  if (!role) return null; // tool/system 等记录不上屏
-  if (isSystemText(m.content)) return null;
-  const text = asText(m.content ?? m.text);
-  if (!text) return null;
-  const ts = typeof rec.time === 'number' ? (rec.time < 1e12 ? rec.time * 1000 : rec.time) : Date.parse(rec.time) || Date.now();
-  const out = { kind: 'message', sessionId, role, text, cursor: it.recordIdx ?? null, ts, source: 'mira' };
-  // id 加 rec# 命名空间：实时事件的键是回合内 seq（裸整数），两边在 UI 的 miraRenderedIds 里
-  // 共用一个集合，裸 recordIdx 稳态必撞 seq 键、实时消息被静默误杀（R1 P1）
-  if (it.recordIdx != null) out.id = `rec#${it.recordIdx}`;
-  return out;
-}
-
-// tab 初始化 + 向上翻页：拉绑定 session 的历史（机器人 tab 同款，对应 yomi 的 listMessages）。
-// cursor 是上一页最早一条的 recordIdx；首页不带 cursor 从末尾倒取 100 条（同 tag 前端首屏 -100）
-async function handleMiraHistory(sessionId, cursor) {
-  const cfg = deps.getConfig() || {};
-  if (!cfg.projectId) throw new Error('还没配 projectId（space id）');
-  if (!sessionId) return { items: [], nextCursor: null, hasMore: false };
-  let from = -100;
-  let count = 100;
-  if (cursor != null && cursor !== '') {
-    const c = Number(cursor);
-    if (!Number.isFinite(c) || c <= 0) return { items: [], nextCursor: null, hasMore: false };
-    from = Math.max(0, c - 100);
-    count = c - from;
-  }
-  const url = `${restBase()}/api/mira/spaces/${encodeURIComponent(cfg.projectId)}/sessions/${encodeURIComponent(sessionId)}/replay?fromRecordIdx=${from}&count=${count}`;
-  const data = await restJson('GET', url);
-  const list = Array.isArray(data) ? data : (data && data.items) || [];
-  const items = (Array.isArray(list) ? list : []).map((it) => normalizeReplayItem(it, sessionId)).filter(Boolean).sort((a, b) => a.ts - b.ts);
-  const page = (!Array.isArray(data) && data && data.pageInfo) || {};
-  const hasMore = page.hasOlder === true;
-  let nextCursor = hasMore ? (page.startRecordIdx ?? null) : null;
-  if (nextCursor == null && hasMore && items.length) nextCursor = items[0].cursor ?? null; // 兜底：本页最早一条
-  return { items, nextCursor, hasMore };
+// tag 没有 REST 历史端点（replay 实测不可用），after_cursor 回放也不可用：
+// mira tab 只显示连接后的实时消息。保留 IPC 契约（main.js mira-history 还挂着），返回空页
+async function handleMiraHistory() {
+  return { items: [], nextCursor: null, hasMore: false };
 }
 
 // 小本本发言：WS prompt 发出并等 mira 的回答（回答经 subscribe 事件流回来）。
