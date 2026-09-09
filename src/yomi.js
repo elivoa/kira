@@ -23,6 +23,7 @@ const pending = new Map();     // id → {resolve, reject, timer}
 const seenEvents = [];          // event_id 去重环（SubscribeAll 重连后可能重放）
 let lastEventId = null;         // 最近收到的事件 id：重连后按它回放漏掉的事件（会话连续性）
 let lastFrameAt = 0;            // 最近收到任何帧的时间：半开连接（对端死了但没 close 事件）靠看门狗发现
+let connGen = 0;                // 连接代际：旧 socket 迟到的事件（close/error/message）按代际丢弃，防误杀 restart 后的新连接
 let watchdogTimer = null;
 let notebookWait = null;        // 小本子发言等待 kira 回答的挂起 Promise（带 sessionId + 身份校验，防并发串话）
 let restartTimer = null;        // restart() 的延迟启动定时器：stop() 必须能取消它，否则双 socket 泄漏
@@ -120,6 +121,15 @@ function emitMessage(role, content, id, sessionId) {
   }
 }
 
+// stop()/断连时清在途小本本 waiter：不清的话旧 waiter 会挡新发言直到 120s 超时
+function clearNotebookWait(err) {
+  if (!notebookWait) return;
+  const w = notebookWait;
+  notebookWait = null;
+  clearTimeout(w.timer);
+  w.reject(err);
+}
+
 function onEvent(msg) {
   const evId = msg.event_id;
   if (evId) {
@@ -170,6 +180,7 @@ function onEvent(msg) {
 async function connectOnce() {
   const cfg = deps.getConfig() || {};
   if (!cfg.enabled || !cfg.wsUrl) { setStatus('off'); return; }
+  const gen = ++connGen; // 本 socket 的代际：之后所有事件处理器先验代，旧代事件直接丢
   buf = Buffer.alloc(0); // 重连必须清空帧缓冲：旧连接的半帧残留会把新连接的解析打乱
   setStatus('connecting');
   try {
@@ -179,16 +190,19 @@ async function connectOnce() {
     scheduleRetry();
     return;
   }
-  ws.on('message', onData);
+  ws.on('message', (d) => { if (gen === connGen) onData(d); });
   ws.on('unexpected-response', (_req, res) => {
+    if (gen !== connGen) return;
     setStatus('error', `握手被拒：HTTP ${res.statusCode}${res.statusCode === 401 ? '（token 不对）' : ''}`);
     ws.close();
   });
-  ws.on('error', (e) => { if (status !== 'error') setStatus('error', e.message); });
+  ws.on('error', (e) => { if (gen === connGen && status !== 'error') setStatus('error', e.message); });
   ws.on('close', (code, reason) => {
-    // 拒绝所有挂起的 RPC
+    if (gen !== connGen) return; // 旧 socket 迟到的 close：别误杀新一代的连接
+    // 拒绝所有挂起的 RPC 和在途小本本 waiter
     for (const [, p] of pending) { clearTimeout(p.timer); p.reject(new Error('connection closed')); }
     pending.clear();
+    clearNotebookWait(new Error('kira 连接断了'));
     ws = null;
     stopWatchdog();
     if (!stoppedByUser) {
@@ -206,12 +220,14 @@ async function connectOnce() {
         try { await call('subscribe', { session_id: cfg2.sessionId, after_event_id: lastEventId }); } catch {}
       }
       await call('subscribe_all');
+      if (gen !== connGen) return; // 握手期间连接已被换掉
       retryDelay = 3000;
       lastFrameAt = Date.now();
       startWatchdog();
       setStatus('online');
       if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `kira 连上了（wire v${(hello && hello.protocol_version) || '?'}）` });
     } catch (e) {
+      if (gen !== connGen) return;
       setStatus('error', `握手失败：${e.message}`);
       try { ws && ws.close(); } catch {}
     }
@@ -254,9 +270,14 @@ function start() {
 
 function stop() {
   stoppedByUser = true;
+  connGen++; // 作废旧 socket：它迟到的 close/error/message 全部忽略，防误杀下一代连接
   stopWatchdog();
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+  clearNotebookWait(new Error('kira 已断开'));
+  // 旧 socket 的 close 会被代际校验丢弃，在途 RPC 走不到 close 里的统一 reject，这里补拒，免得挂到各自超时
+  for (const [, p] of pending) { clearTimeout(p.timer); p.reject(new Error('kira 已断开')); }
+  pending.clear();
   if (ws) { try { ws.close(); } catch {} ws = null; }
   setStatus('off');
 }
