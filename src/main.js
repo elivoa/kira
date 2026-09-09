@@ -567,6 +567,7 @@ let kbMutePersist = false; // 程序化锚定（首次/复位）触发的 move/r
 let kbZoomed = false; // 左下角放大钮的临时放大态：窗口×2+内容 zoom×2，不落盘
 let kbZoomScale = { sx: 1, sy: 1 }; // 放大时实际生效的轴比例（钳制后可能 <2），持久化换算回基准尺寸用
 let kbZoomAnim = null; // 放大/缩回的窗口尺寸过渡动画定时器
+let kbZoomAnimTarget = null; // 进行中动画的目标 bounds：动画中再次切换时先 settle 到这里，别从插值中间帧读数
 
 // 放大态下窗口 bounds 反推出未放大的基准 bounds（中心对齐换算）：持久化和缩回都用它，
 // 这样放大期间的边缘拖动/手柄调整也能正确折算回基准尺寸
@@ -579,11 +580,13 @@ function kbBaseBounds(zb) {
 // 窗口尺寸过渡动画（~180ms ease-out）；instant 时直接落定（关闭/复位等不需要动画的场合）
 function animateKbBounds(target, instant) {
   if (kbZoomAnim) { clearInterval(kbZoomAnim); kbZoomAnim = null; }
+  kbZoomAnimTarget = null;
   if (instant) { kiraBubbleWin.setBounds(target); return; }
   const start = kiraBubbleWin.getBounds();
   const t0 = Date.now();
+  kbZoomAnimTarget = target;
   kbZoomAnim = setInterval(() => {
-    if (!kiraBubbleWin) { clearInterval(kbZoomAnim); kbZoomAnim = null; return; }
+    if (!kiraBubbleWin) { clearInterval(kbZoomAnim); kbZoomAnim = null; kbZoomAnimTarget = null; return; }
     const t = Math.min((Date.now() - t0) / 180, 1);
     const e = 1 - (1 - t) * (1 - t);
     kiraBubbleWin.setBounds({
@@ -592,7 +595,7 @@ function animateKbBounds(target, instant) {
       width: Math.round(start.width + (target.width - start.width) * e),
       height: Math.round(start.height + (target.height - start.height) * e),
     });
-    if (t >= 1) { clearInterval(kbZoomAnim); kbZoomAnim = null; }
+    if (t >= 1) { clearInterval(kbZoomAnim); kbZoomAnim = null; kbZoomAnimTarget = null; }
   }, 16);
 }
 
@@ -600,6 +603,14 @@ function animateKbBounds(target, instant) {
 // 放大是临时态——kbZoomed 期间 saveKbBounds/kb-resize-end 一律换算成基准 bounds 再落盘
 function setKbZoom(on, animate = true) {
   if (!kiraBubbleWin || on === kbZoomed) return;
+  // 动画进行中再次触发（快速双击放大钮/连按 Esc）：先 settle 到进行中动画的目标态，
+  // 否则 getBounds 读到插值中间帧，kbZoomScale/基准 bounds 按中间态算会漂移并被落盘
+  if (kbZoomAnim) {
+    clearInterval(kbZoomAnim);
+    kbZoomAnim = null;
+    kiraBubbleWin.setBounds(kbZoomAnimTarget);
+    kbZoomAnimTarget = null;
+  }
   const b = kiraBubbleWin.getBounds();
   const a = screen.getDisplayMatching(b).workArea;
   let target;
