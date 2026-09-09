@@ -1,6 +1,7 @@
 // kira 消息泡泡渲染层：markdown 渲染走 MarkdownStream 静态渲染（markdown-it 配置与 KaTeX MATH_OPTIONS 同本本）、
 // 链接点击走系统浏览器（不算关闭）、Esc 或右上角 ✕ 关闭、双击或右下角 💬 打开 kira tab、
 // 右下角还有：飞书跳转、↺ 复位默认位置、拖拽手柄调大小（位置+大小由主进程持久化）、
+// 左下角放大钮：窗口×2+内容 CSS zoom×2 的临时放大态（不落盘，Esc 优先缩回），
 // 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（框边缘拖，文字不拖）
 const kb = document.getElementById('kb');
 const kbText = document.getElementById('kbText');
@@ -9,8 +10,10 @@ const kbOpen = document.getElementById('kbOpen');
 const kbFeishu = document.getElementById('kbFeishu');
 const kbReset = document.getElementById('kbReset');
 const kbResize = document.getElementById('kbResize');
+const kbZoom = document.getElementById('kbZoom');
 
 let shown = false;
+let zoomed = false; // 放大态：窗口×2+内容 zoom×2；临时态不落盘，Esc 优先缩回
 
 window.pet.onKiraBubbleShow(({ text }) => {
   window.MarkdownStream.render(kbText, text || '');
@@ -43,9 +46,11 @@ document.addEventListener('click', (e) => {
   window.pet.kbOpenLink(href);
 }, true);
 
-// Esc 关闭：窗口 focusable，用户点过泡泡拿到焦点后生效（show 不主动 focus，避免抢键盘）
+// Esc：放大态优先缩回原尺寸，非放大态才关闭（窗口 focusable，用户点过泡泡拿到焦点后生效）
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') dismiss();
+  if (e.key !== 'Escape') return;
+  if (zoomed) window.pet.kbZoom(false);
+  else dismiss();
 });
 
 // 右上角 ✕ 关闭按钮
@@ -89,6 +94,19 @@ window.addEventListener('mouseup', (e) => {
   const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
   ignoring = !over;
   window.pet.kbResizeEnd(ignoring);
+});
+
+// 左下角放大钮：点击切换放大态。窗口尺寸由主进程×2（可能钳制），实际缩放比例随
+// kira-bubble-zoom 事件回来后再落到 CSS zoom 上，保证两边比例一致
+kbZoom.addEventListener('click', () => {
+  if (!shown) return;
+  window.pet.kbZoom(!zoomed);
+});
+window.pet.onKbZoom(({ on, scale }) => {
+  zoomed = on;
+  kb.style.zoom = scale;
+  kbZoom.classList.toggle('on', on);
+  kbZoom.title = on ? '缩小（Esc）' : '放大';
 });
 
 // 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或按钮上不算

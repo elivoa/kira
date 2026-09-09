@@ -564,6 +564,72 @@ let kiraBubbleWin = null;
 let kbAnchored = false; // 初始位置定过没有（定过就锁死，不再跟着人物动）
 let kbResizing = false; // 手柄拖拽调大小期间：主进程强制接管鼠标，渲染层的穿透开关先压住
 let kbMutePersist = false; // 程序化锚定（首次/复位）触发的 move/resize 不落盘：没记录就该每次默认锚定
+let kbZoomed = false; // 左下角放大钮的临时放大态：窗口×2+内容 zoom×2，不落盘
+let kbZoomScale = { sx: 1, sy: 1 }; // 放大时实际生效的轴比例（钳制后可能 <2），持久化换算回基准尺寸用
+let kbZoomAnim = null; // 放大/缩回的窗口尺寸过渡动画定时器
+
+// 放大态下窗口 bounds 反推出未放大的基准 bounds（中心对齐换算）：持久化和缩回都用它，
+// 这样放大期间的边缘拖动/手柄调整也能正确折算回基准尺寸
+function kbBaseBounds(zb) {
+  const w = Math.round(zb.width / kbZoomScale.sx);
+  const h = Math.round(zb.height / kbZoomScale.sy);
+  return { x: Math.round(zb.x + (zb.width - w) / 2), y: Math.round(zb.y + (zb.height - h) / 2), width: w, height: h };
+}
+
+// 窗口尺寸过渡动画（~180ms ease-out）；instant 时直接落定（关闭/复位等不需要动画的场合）
+function animateKbBounds(target, instant) {
+  if (kbZoomAnim) { clearInterval(kbZoomAnim); kbZoomAnim = null; }
+  if (instant) { kiraBubbleWin.setBounds(target); return; }
+  const start = kiraBubbleWin.getBounds();
+  const t0 = Date.now();
+  kbZoomAnim = setInterval(() => {
+    if (!kiraBubbleWin) { clearInterval(kbZoomAnim); kbZoomAnim = null; return; }
+    const t = Math.min((Date.now() - t0) / 180, 1);
+    const e = 1 - (1 - t) * (1 - t);
+    kiraBubbleWin.setBounds({
+      x: Math.round(start.x + (target.x - start.x) * e),
+      y: Math.round(start.y + (target.y - start.y) * e),
+      width: Math.round(start.width + (target.width - start.width) * e),
+      height: Math.round(start.height + (target.height - start.height) * e),
+    });
+    if (t >= 1) { clearInterval(kbZoomAnim); kbZoomAnim = null; }
+  }, 16);
+}
+
+// 放大/缩回切换：尺寸×2（钳制到工作区、保持中心）并通知渲染层同步 CSS zoom；
+// 放大是临时态——kbZoomed 期间 saveKbBounds/kb-resize-end 一律换算成基准 bounds 再落盘
+function setKbZoom(on, animate = true) {
+  if (!kiraBubbleWin || on === kbZoomed) return;
+  const b = kiraBubbleWin.getBounds();
+  const a = screen.getDisplayMatching(b).workArea;
+  let target;
+  if (on) {
+    const w = Math.round(Math.min(b.width * 2, a.width));
+    const h = Math.round(Math.min(b.height * 2, a.height));
+    kbZoomScale = { sx: w / b.width, sy: h / b.height };
+    target = {
+      x: Math.round(Math.min(Math.max(b.x + b.width / 2 - w / 2, a.x), Math.max(a.x, a.x + a.width - w))),
+      y: Math.round(Math.min(Math.max(b.y + b.height / 2 - h / 2, a.y), Math.max(a.y, a.y + a.height - h))),
+      width: w,
+      height: h,
+    };
+    kbZoomed = true;
+  } else {
+    const base = kbBaseBounds(b);
+    const w = Math.min(base.width, a.width);
+    const h = Math.min(base.height, a.height);
+    target = {
+      x: Math.round(Math.min(Math.max(base.x, a.x), Math.max(a.x, a.x + a.width - w))),
+      y: Math.round(Math.min(Math.max(base.y, a.y), Math.max(a.y, a.y + a.height - h))),
+      width: w,
+      height: h,
+    };
+    kbZoomed = false;
+    kbZoomScale = { sx: 1, sy: 1 };
+  }
+  kiraBubbleWin.webContents.send('kira-bubble-zoom', { on: kbZoomed, scale: kbZoomed ? kbZoomScale.sx : 1 });
+  animateKbBounds(target, !animate);
+}
 
 function createKiraBubble() {
   kiraBubbleWin = new BrowserWindow({
@@ -593,7 +659,8 @@ function createKiraBubble() {
   let kbBoundsTimer = null;
   const saveKbBounds = () => {
     if (!kiraBubbleWin || kbMutePersist) return;
-    settings.kiraBubbleBounds = kiraBubbleWin.getBounds();
+    // 放大态是临时态：落盘一律写换算回的基准 bounds，×2 的尺寸不进 settings
+    settings.kiraBubbleBounds = kbZoomed ? kbBaseBounds(kiraBubbleWin.getBounds()) : kiraBubbleWin.getBounds();
     saveConfig();
   };
   const debounceSaveKbBounds = () => {
@@ -1262,9 +1329,17 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('mira-history', (_e, sessionId, cursor) => mira.handleMiraHistory(String(sessionId || ''), cursor));
   // kira 消息泡泡：关闭/双击直达/点击穿透开关
-  ipcMain.on('kira-bubble-dismiss', () => { if (kiraBubbleWin) kiraBubbleWin.hide(); });
+  ipcMain.on('kira-bubble-dismiss', () => {
+    if (kiraBubbleWin) {
+      setKbZoom(false, false); // 放大态不带到下次 show
+      kiraBubbleWin.hide();
+    }
+  });
   ipcMain.on('kira-bubble-open', () => {
-    if (kiraBubbleWin) kiraBubbleWin.hide();
+    if (kiraBubbleWin) {
+      setKbZoom(false, false);
+      kiraBubbleWin.hide();
+    }
     openNotebook('bot');
   });
   ipcMain.on('kb-ignore', (_e, flag) => {
@@ -1285,11 +1360,14 @@ app.whenReady().then(async () => {
   });
   // 恢复默认位置：清掉记录的 bounds，重新锚定到人物头顶（锚定过程中的 move/resize 有 kbMutePersist 压住不落盘）
   ipcMain.on('kira-bubble-reset', () => {
+    setKbZoom(false, false); // 放大态先瞬时缩回，锚定到默认尺寸才有意义
     delete settings.kiraBubbleBounds;
     saveConfig();
     kbAnchored = false;
     anchorKiraBubble();
   });
+  // 左下角放大钮：放大一倍/缩回（渲染层只发意图，实际比例由主进程钳制后回传）
+  ipcMain.on('kb-zoom', (_e, on) => setKbZoom(!!on));
   // 右下角手柄拖拽调大小：笔记本 nb-resize 同款（记光标起点+初始尺寸，move 时差值 setSize）。
   // 拖拽期间强制接管鼠标：光标滑出泡泡时渲染层本来会把窗口切回穿透，拖拽就断了
   let kbResize = null;
@@ -1308,12 +1386,12 @@ app.whenReady().then(async () => {
     const h = Math.min(Math.max(KB_MIN_H, kbResize.size[1] + (c.y - kbResize.cy)), a.height);
     kiraBubbleWin.setSize(Math.round(w), Math.round(h));
   });
-  // ignore 是渲染层在 mouseup 时算好的穿透状态，直接恢复；最终 bounds 落定落盘
+  // ignore 是渲染层在 mouseup 时算好的穿透状态，直接恢复；最终 bounds 落定落盘（放大态换算回基准尺寸）
   ipcMain.on('kb-resize-end', (_e, ignore) => {
     kbResize = null;
     kbResizing = false;
     if (kiraBubbleWin) {
-      settings.kiraBubbleBounds = kiraBubbleWin.getBounds();
+      settings.kiraBubbleBounds = kbZoomed ? kbBaseBounds(kiraBubbleWin.getBounds()) : kiraBubbleWin.getBounds();
       saveConfig();
       kiraBubbleWin.setIgnoreMouseEvents(!!ignore, { forward: true });
     }

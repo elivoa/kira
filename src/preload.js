@@ -116,6 +116,8 @@ contextBridge.exposeInMainWorld('pet', {
   kbResizeEnd: (ignore) => ipcRenderer.send('kb-resize-end', ignore),
   kiraBubbleFeishu: () => ipcRenderer.send('kira-bubble-feishu'),
   kiraBubbleReset: () => ipcRenderer.send('kira-bubble-reset'),
+  kbZoom: (on) => ipcRenderer.send('kb-zoom', on),
+  onKbZoom: (fn) => ipcRenderer.on('kira-bubble-zoom', (_e, d) => fn(d)),
   // 归一化飞书消息（事件/轮询/小本子发言的回答）：{t, role, content, id, source}
   onFeishuMsg: (fn) => {
     const h = (_e, m) => fn(m);
