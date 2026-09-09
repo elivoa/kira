@@ -90,11 +90,10 @@ new Image().src = SIDE_SRC;
 new Image().src = FLUTE_SRC;
 new Image().src = NOTE_SRC;
 
-// 敲门求关注真图序列：备敲（蓄力）和叩上去（咚！！爆星）。帧图朝右 = 敲左边沿；敲右边沿用 facing=dir 镜像
+// 敲门求关注：人物本体侧视图（拳头举起备敲），被敲的玻璃是独立 overlay 层（见下面 knockGlass），
+// 不再把玻璃/爆点抠进人物图。图朝右 = 敲左边沿；敲右边沿用 facing=dir 镜像
 const KNOCK_READY_SRC = '../assets/knock/ready.png';
-const KNOCK_HIT_SRC = '../assets/knock/hit.png';
 new Image().src = KNOCK_READY_SRC;
-new Image().src = KNOCK_HIT_SRC;
 
 // 指人发火：叉腰指你骂骂咧咧（正面图）
 const POINT_SRC = '../assets/point.png';
@@ -307,6 +306,8 @@ function enter(next, dur = 0) {
   if (!String(next).startsWith('desk') && !String(next).startsWith('work') && document.getElementById('desk')) resetDesk();
   // 攀爬安全绳只在 climbup 期间存在：到顶/爬不动/被拖走/菜单切动作等任何离开路径都收绳
   if (next !== 'climbup' && climb && climb.rope) { climb.rope = false; window.pet.ropeEnd(); }
+  // 敲门的玻璃层只在 knock 状态链内存在：敲完/被打断/切动作等任何离开路径都淡出收掉
+  if (!KNOCK_GLASS_STATES.has(next)) hideKnockGlass();
 }
 
 function say(text, ms = 1800) {
@@ -948,9 +949,74 @@ async function doWallBang() {
 
 // ---------- 敲门求关注 ----------
 // 跑到活跃窗口的侧边，侧身对着边沿「棒！棒！棒！」敲门，喊你理理我嘛
-// 侧身图 493x1298，显示高 512 → 显示半宽约 97px；身体在窗口内居中，左右沿 = 窗心∓97
-const SIDE_HALF_W = 97;
+// 人物图 512x768 只抠人物本体（tools/cutout_knock.js 抹掉了原图右侧粘着的玻璃条），
+// 显示高 512 → 显示宽 341；拳头右沿在图内 x≈418 → fx 坐标 278，即窗心 +108
+const SIDE_HALF_W = 108;
 let knock = null;
+
+// 被敲的玻璃：独立 SVG 层画在 #fx 里（叠在立绘之上，人物在玻璃后面敲）。
+// 竖窗立在身体贴沿一侧，敲一下：敲击点闪光 + 涟漪圈 + 玻璃轻震，节奏与 rap 相位对齐；
+// 动作结束（离开 knock 状态链）整体淡出移除，无残留
+const KNOCK_GLASS_STATES = new Set(['knockin', 'knockgo', 'knock', 'knockdone']);
+const GLASS_TOP = 100, GLASS_BOT = 616;          // 玻璃竖向范围（fx 坐标）
+const GLASS_X0 = 272, GLASS_X1 = 338;            // 右置版横向范围（左置镜像）
+const KNOCK_POINT = { x: 276, y: 188 };          // 敲击点（右置版，左置取 340-x）
+let knockGlass = null;                           // { g, inner, dir, shakeT }
+
+function knockGlassBaseTf(dir) {
+  return dir === 1 ? '' : 'translate(340,0) scale(-1,1)';
+}
+
+function showKnockGlass(dir) {
+  hideKnockGlass(true);
+  const g = fxRaw('g', { id: 'knockGlass' });
+  g.setAttribute('transform', knockGlassBaseTf(dir));
+  g.style.opacity = 0;
+  g.style.transition = 'opacity .3s ease';
+  const inner = fxRaw('g', {}, g); // 震动层：与镜像 transform 分离，抖动不破坏镜像
+  // 窗框 + 玻璃面（半透蓝，能透出后面的人）
+  fxRaw('rect', {
+    x: GLASS_X0, y: GLASS_TOP, width: GLASS_X1 - GLASS_X0, height: GLASS_BOT - GLASS_TOP,
+    rx: 8, fill: 'rgba(238,243,252,0.92)', stroke: '#b9c4da', 'stroke-width': 2,
+  }, inner);
+  fxRaw('rect', {
+    x: GLASS_X0 + 7, y: GLASS_TOP + 7, width: GLASS_X1 - GLASS_X0 - 14, height: GLASS_BOT - GLASS_TOP - 14,
+    rx: 4, fill: 'rgba(158,198,244,0.38)', stroke: 'rgba(255,255,255,0.7)', 'stroke-width': 1.5,
+  }, inner);
+  // 两道斜高光，玻璃质感
+  fxRaw('polygon', {
+    points: `${GLASS_X0 + 12},${GLASS_BOT - 20} ${GLASS_X0 + 30},${GLASS_TOP + 14} ${GLASS_X0 + 40},${GLASS_TOP + 14} ${GLASS_X0 + 22},${GLASS_BOT - 20}`,
+    fill: 'rgba(255,255,255,0.22)',
+  }, inner);
+  fxRaw('polygon', {
+    points: `${GLASS_X0 + 34},${GLASS_BOT - 20} ${GLASS_X0 + 52},${GLASS_TOP + 14} ${GLASS_X0 + 56},${GLASS_TOP + 14} ${GLASS_X0 + 38},${GLASS_BOT - 20}`,
+    fill: 'rgba(255,255,255,0.12)',
+  }, inner);
+  knockGlass = { g, inner, dir, shakeT: 0 };
+  requestAnimationFrame(() => { g.style.opacity = 1; });
+}
+
+// 叩上去的瞬间：敲击点闪光 + 两圈涟漪 + 拟声词 + 玻璃轻震（由 knock tick 驱动 shakeT 衰减）
+function fxKnockImpact() {
+  if (!knockGlass) return;
+  const x = knockGlass.dir === 1 ? KNOCK_POINT.x : LOGIC_W - KNOCK_POINT.x;
+  const y = KNOCK_POINT.y;
+  fxBurst(x, y, 10, 6, 26);
+  fxEl('circle', { cx: x, cy: y, r: 12, fill: 'none', stroke: '#fff', 'stroke-width': 3 }, 'fx-pop');
+  setTimeout(() => fxEl('circle', { cx: x, cy: y, r: 17, fill: 'none', stroke: '#cfe4ff', 'stroke-width': 2 }, 'fx-pop'), 90);
+  fxText(pick(['咚！', '咚咚！', '哐！']), x + knockGlass.dir * rand(24, 40), y - rand(26, 44), 28);
+  knockGlass.shakeT = 0.28;
+}
+
+function hideKnockGlass(immediate = false) {
+  if (!knockGlass) return;
+  const { g } = knockGlass;
+  knockGlass = null;
+  if (immediate) { g.remove(); return; }
+  g.style.transition = 'opacity .4s ease';
+  g.style.opacity = 0;
+  setTimeout(() => g.remove(), 420); // 只移除这一个旧 group，不影响之后新建的
+}
 
 async function doKnock() {
   const st = await window.pet.getStage();
@@ -958,8 +1024,8 @@ async function doKnock() {
   const aw = await window.pet.activeWindow();
   let tx, dir;
   if (aw) {
-    // 贴的是「身体边缘」不是窗口框：侧身图显示半宽约 97px，居中在窗口里，
-    // 身体左沿 = 窗心-97，右沿 = 窗心+97；让贴墙一侧的身体边和窗口边重合（再多吃 4px 像真贴上）
+    // 贴的是「身体边缘」不是窗口框：人物图显示半宽（到拳尖）约 108px，居中在窗口里，
+    // 身体左沿 = 窗心-108，右沿 = 窗心+108；让贴墙一侧的身体边和窗口边重合（再多吃 4px 像真贴上）
     const cx = winW() / 2;
     const leftTx = aw.x - (cx + SIDE_HALF_W * sizeK) + 4;          // 敲窗口左沿：她站左边，身体右边贴上
     const rightTx = aw.x + aw.w - (cx - SIDE_HALF_W * sizeK) - 4;  // 敲窗口右沿：她站右边，身体左边贴上
@@ -3212,9 +3278,11 @@ function frame(now) {
         window.pet.moveBy(dx, dy);
         knock.px = knock.tx; knock.py = knock.ty;
         knock.phase = 'aim'; knock.phaseT = 0;
-        // 到位：换上备敲真图（朝右 = 敲左边沿；右边沿镜像），朝向 = 敲的方向
+        // 到位：换上备敲真图（朝右 = 敲左边沿；右边沿镜像），朝向 = 敲的方向；
+        // 玻璃层贴敲击一侧立起来（独立 overlay，不抠在人物图上）
         swapSprite(KNOCK_READY_SRC);
         facing = knock.dir;
+        showKnockGlass(knock.dir);
         enter('knock');
       } else {
         const mx = dx / dist * step, my = dy / dist * step;
@@ -3226,17 +3294,27 @@ function frame(now) {
       break;
     }
     case 'knock': {
-      // 敲门循环：抬手后仰 → 叩上去（棒！+ 星光 + 小幅震）→ 收回，三声收工
+      // 敲门循环：后仰蓄力 → 叩上去（玻璃层闪光+涟漪+轻震，节奏对齐）→ 收回，三声收工
       knock.phaseT += dt;
       const d = knock.dir; // 朝窗口的方向
+      // 玻璃轻震衰减：fxKnockImpact 把 shakeT 置满，这里逐帧抖完复位
+      if (knockGlass && knockGlass.shakeT > 0) {
+        knockGlass.shakeT = Math.max(0, knockGlass.shakeT - dt);
+        const k = knockGlass.shakeT / 0.28;
+        knockGlass.inner.setAttribute('transform', k > 0
+          ? `translate(${Math.sin(knockGlass.shakeT * 90) * 2.2 * k},${Math.cos(knockGlass.shakeT * 70) * 1.4 * k})`
+          : '');
+      }
       if (knock.phase === 'aim') {
-        // 抬手蓄力：微微后仰抬手
-        rot = -d * 10 * Math.min(knock.phaseT / 0.22, 1);
-        if (knock.phaseT >= 0.22) { knock.phase = 'rap'; knock.phaseT = 0; }
+        // 抬手蓄力：微微后仰
+        rot = -d * 6 * Math.min(knock.phaseT / 0.22, 1);
+        if (knock.phaseT >= 0.22) {
+          knock.phase = 'rap'; knock.phaseT = 0;
+          fxKnockImpact(); // 叩上的一瞬间：敲击点闪光 + 涟漪 + 拟声词 + 玻璃轻震
+        }
       } else if (knock.phase === 'rap') {
-        // 叩上去：换「咚！！」真图，前倾 + 轻轻顶一下，像真磕在边上
-        rot = d * 12;
-        swapSprite(KNOCK_HIT_SRC);
+        // 叩上去：前倾压向玻璃，像真磕在边上
+        rot = d * 5;
         if (knock.phaseT >= 0.16) {
           knock.phase = 'recoil'; knock.phaseT = 0;
           knock.count++;
@@ -3244,9 +3322,8 @@ function frame(now) {
           if (knock.count === 2) say(pick(LINES.knock), 1500);
         }
       } else if (knock.phase === 'recoil') {
-        // 收回来（切回备敲图），缓一下敲下一声
-        rot = d * 4 * (1 - knock.phaseT / 0.34);
-        swapSprite(KNOCK_READY_SRC);
+        // 收回来，缓一下敲下一声
+        rot = d * 2 * (1 - knock.phaseT / 0.34);
         if (knock.phaseT >= 0.34) {
           knock.phase = 'aim'; knock.phaseT = 0;
           if (knock.count >= knock.maxCount) enter('knockdone', 1.4);
