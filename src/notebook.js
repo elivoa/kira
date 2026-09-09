@@ -180,7 +180,8 @@ function submit(text) {
     if (!hasMira || miraState.readonly) return; // 只读降级时输入框已禁用，这里双保险
     addMsg(miraMsgs, 'me', text, false, 'mira');
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子 mira tab 发言：${text.slice(0, 30)}` });
-    // 乐观上屏：inject 若把同一条消息回显为 user.input，onMiraEvent 命中即跳过防双显
+    // 发送点即截 2000（与 bot 路径 main.js yomi-send/feishu-send 同口径）：pending 登记与发送同源，
+    // inject 若把同一条消息回显为 user.input，onMiraEvent 命中即跳过防双显，>2000 字也不会失配
     const sentText = text.slice(0, 2000);
     pendingMiraSends.push(sentText);
     if (pendingMiraSends.length > 20) pendingMiraSends.shift();
@@ -200,7 +201,8 @@ function submit(text) {
         window.MarkdownStream.render(typing, '（发出去了，mira 还没回，稍后再看看）');
       }
     }, 120000);
-    window.pet.miraSend(text).then((r) => {
+    window.pet.miraSend(sentText).then((r) => {
+      consumePendingMiraSend(sentText); // 回显必在回答之前来（或不会来），到这里清掉防呆（同 bot 约定）
       if (r && r.ok) {
         if (r.reply && typing.classList.contains('typing')) {
           clearTimeout(bail);
@@ -215,6 +217,7 @@ function submit(text) {
       clearTimeout(bail);
       fail();
     }).catch(() => {
+      consumePendingMiraSend(sentText);
       clearTimeout(bail);
       fail();
     });
@@ -1079,6 +1082,8 @@ const miraMsgs = document.getElementById('miraMsgs');
 const MIRA_DEFAULT_WS = 'wss://mira.msh.team/api/stream';
 // 连接器（M27）未合入前 preload 没有 mira 通道：全部 mira 功能静默关闭，不影响其他页签
 const hasMira = typeof window.pet.getMiraConfig === 'function';
+// 配置区与 tab 同守卫：无 mira 通道时藏掉（HTML 默认 display:none），避免保存/清除静默 no-op
+if (hasMira) document.getElementById('miraSec').style.display = '';
 let miraState = { status: 'off', error: '', sessionId: '', enabled: false, wsUrl: '', token: '', projectId: '', readonly: false };
 
 const MIRA_STATUS_TEXT = {
@@ -1155,7 +1160,7 @@ document.getElementById('miraClear').addEventListener('click', () => {
   miraToken.value = '';
   miraProjectId.value = '';
   miraEnabled.checked = false;
-  miraState = { ...miraState, enabled: false, wsUrl: '', token: '', projectId: '', sessionId: '' };
+  miraState = { ...miraState, enabled: false, wsUrl: '', token: '', projectId: '', sessionId: '', status: 'off', error: '' };
   renderMiraStatus();
   updateMiraTab();
   window.pet.logAppend({ t: Date.now(), type: '系统', text: '清除了 mira 链接配置' });
@@ -1177,8 +1182,17 @@ let miraHasMore = false;
 let miraLoading = false;
 const miraRenderedIds = new Set(); // 已上屏消息的 id/cursor，历史/事件/回显三通道防重
 const pendingMiraSends = [];       // 乐观上屏的发言文本：inject 回显命中即跳过
-let miraStream = null;             // assistant.delta 流式气泡 { bubble, text }
+let miraStream = null;             // assistant.delta 流式气泡 { bubble, session }（MarkdownStream 增量会话）
 let lastMiraReply = null;          // miraSend resolve 先填过的回答：事件再到按同文案跳过一次
+
+// 关流：排空平滑器残余队列（done 后自动加速吐完），带全文则校准一次
+function closeMiraStream(fullText) {
+  if (!miraStream) return null;
+  const s = miraStream;
+  miraStream = null;
+  s.session.finish(typeof fullText === 'string' ? fullText : undefined);
+  return s;
+}
 
 function consumePendingMiraSend(text) {
   const idx = pendingMiraSends.findIndex((p) => p === text);
@@ -1256,9 +1270,9 @@ miraMsgs.addEventListener('scroll', async () => {
 
 function loadMiraTab() {
   if (!hasMira) return;
+  closeMiraStream(); // 重拉历史会清屏：先关流排空，别让平滑器往已 detach 的气泡里吐字
   miraMsgs.innerHTML = '';
   miraRenderedIds.clear();
-  miraStream = null;
   miraHistoryCache = [];
   miraShown = 0;
   miraCursor = null;
@@ -1317,7 +1331,8 @@ if (hasMira && window.pet.onMiraStatus) {
 }
 
 // mira 实时事件：{kind, sessionId, role, text, cursor, ts, source:'mira'}
-// assistant.delta 按增量 append 到打开的流气泡，turn.ended 关流（带全文则校准一次）
+// assistant.delta 走 MarkdownStream 增量会话（同聊天路径，冻结已封口块，避免每 delta 全量重渲），
+// 任何非 delta 事件关流；turn.ended 带全文则 finish 校准一次
 if (hasMira && window.pet.onMiraEvent) {
   window.pet.onMiraEvent((ev) => {
     if (!ev || ev.source !== 'mira') return;
@@ -1342,22 +1357,18 @@ if (hasMira && window.pet.onMiraEvent) {
         } else {
           bubble = addMsg(miraMsgs, 'Kira', '', false, 'mira');
         }
-        miraStream = { bubble, text: '' };
+        const pinScroll = () => { miraMsgs.scrollTop = miraMsgs.scrollHeight; };
+        miraStream = { bubble, session: window.MarkdownStream.create(bubble, pinScroll) };
       }
-      miraStream.text += ev.text || '';
-      window.MarkdownStream.render(miraStream.bubble, miraStream.text);
-      miraMsgs.scrollTop = miraMsgs.scrollHeight;
+      miraStream.session.append(ev.text || '');
       return;
     }
-    const hadStream = miraStream;
-    miraStream = null; // 任何非 delta 事件到来都关流
     if (/^turn/.test(kind)) {
       // turn 结束：流已上屏只校准全文；没流过且有全文才补一条
-      if (hadStream) {
-        if (ev.text && ev.text !== hadStream.text) window.MarkdownStream.render(hadStream.bubble, ev.text);
-        return;
-      }
-      if (!ev.text) return;
+      const hadStream = closeMiraStream(ev.text);
+      if (hadStream || !ev.text) return;
+    } else {
+      closeMiraStream(); // 其他非 delta 事件到来也关流
     }
     // thinking/tool 等事件不上屏：kind 不是消息类且没有显式 role 就跳过
     if (kind && !/^(user|assistant|turn)/.test(kind) && !ev.role) return;
