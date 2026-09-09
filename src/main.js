@@ -558,8 +558,11 @@ function createBubble() {
 // ---------- kira 消息泡泡（独立窗口，UI 同主动搭话粘性气泡） ----------
 // 与气泡窗的区别：初始位置定在人物头顶后就不再跟随人物移动；框边缘可拖动；内容可选中；双击直达 kira tab
 const KB_W = 600, KB_H = 520; // 泡泡加宽到 520px 后窗口同步加宽（两侧各留 40px 给光晕）；内容最高约 490px，480 会裁掉顶部
+const KB_MIN_W = 380, KB_MIN_H = 300; // 右下角手柄拖拽的下限（再小按钮排不开）；上限取光标所在屏工作区
 let kiraBubbleWin = null;
 let kbAnchored = false; // 初始位置定过没有（定过就锁死，不再跟着人物动）
+let kbResizing = false; // 手柄拖拽调大小期间：主进程强制接管鼠标，渲染层的穿透开关先压住
+let kbMutePersist = false; // 程序化锚定（首次/复位）触发的 move/resize 不落盘：没记录就该每次默认锚定
 
 function createKiraBubble() {
   kiraBubbleWin = new BrowserWindow({
@@ -584,16 +587,39 @@ function createKiraBubble() {
   kiraBubbleWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   kiraBubbleWin.setIgnoreMouseEvents(true, { forward: true });
   kiraBubbleWin.loadFile(path.join(__dirname, 'kira_bubble.html'));
+  // 位置+大小持久化到 settings.kiraBubbleBounds：边缘拖拽触发 move、右下角手柄触发 resize，防抖落盘；
+  // 程序化锚定（首次/复位）落盘会顶掉「无记录」状态，用 kbMutePersist 压住
+  let kbBoundsTimer = null;
+  const saveKbBounds = () => {
+    if (!kiraBubbleWin || kbMutePersist) return;
+    settings.kiraBubbleBounds = kiraBubbleWin.getBounds();
+    saveConfig();
+  };
+  const debounceSaveKbBounds = () => {
+    clearTimeout(kbBoundsTimer);
+    kbBoundsTimer = setTimeout(saveKbBounds, 300);
+  };
+  kiraBubbleWin.on('move', debounceSaveKbBounds);
+  kiraBubbleWin.on('resize', debounceSaveKbBounds);
 }
 
-// 初始位置：人物头顶上方居中，夹在人物所在屏工作区内；只定这一次，之后人物怎么动都不影响它
+// 初始位置：有记录用记录的位置+大小，没有才默认锚定人物头顶上方居中（夹在人物所在屏工作区内）；
+// 只定这一次，之后人物怎么动都不影响它
 function anchorKiraBubble() {
   if (kbAnchored || !kiraBubbleWin || !win) return;
-  const b = win.getBounds();
-  const a = petDisplay().workArea;
-  const x = Math.round(Math.min(Math.max(b.x + b.width / 2 - KB_W / 2, a.x), Math.max(a.x, a.x + a.width - KB_W)));
-  const y = Math.round(Math.max(b.y - KB_H - 8, a.y));
-  kiraBubbleWin.setBounds({ x, y, width: KB_W, height: KB_H });
+  const saved = settings.kiraBubbleBounds;
+  kbMutePersist = true;
+  if (boundsOnScreen(saved)) {
+    kiraBubbleWin.setBounds({ x: Math.round(saved.x), y: Math.round(saved.y), width: Math.round(saved.width), height: Math.round(saved.height) });
+  } else {
+    const b = win.getBounds();
+    const a = petDisplay().workArea;
+    const x = Math.round(Math.min(Math.max(b.x + b.width / 2 - KB_W / 2, a.x), Math.max(a.x, a.x + a.width - KB_W)));
+    const y = Math.round(Math.max(b.y - KB_H - 8, a.y));
+    kiraBubbleWin.setBounds({ x, y, width: KB_W, height: KB_H });
+  }
+  // move/resize 的防抖落盘是 300ms，盖过它再解封
+  setTimeout(() => { kbMutePersist = false; }, 500);
   kbAnchored = true;
 }
 
@@ -621,8 +647,8 @@ function placeBubble() {
 // 笔记本窗口（普通窗口，单例）；位置和大小持久化到 settings.notebookBounds
 let notebookWin = null;
 
-// 校验记住的位置仍落在某块屏幕内（防拔掉显示器后窗口跑到屏外）
-function notebookBoundsValid(b) {
+// 校验记住的位置仍落在某块屏幕内（防拔掉显示器后窗口跑到屏外）；小本子和 kira 泡泡共用
+function boundsOnScreen(b) {
   if (!b || typeof b.x !== 'number' || typeof b.y !== 'number') return false;
   if (typeof b.width !== 'number' || typeof b.height !== 'number') return false;
   return screen.getAllDisplays().some((d) => {
@@ -653,7 +679,7 @@ function openNotebook(tab) {
     },
   };
   const saved = settings.notebookBounds;
-  if (notebookBoundsValid(saved)) {
+  if (boundsOnScreen(saved)) {
     opts.x = Math.round(saved.x);
     opts.y = Math.round(saved.y);
     opts.width = Math.round(saved.width);
@@ -1202,11 +1228,55 @@ app.whenReady().then(async () => {
     openNotebook('bot');
   });
   ipcMain.on('kb-ignore', (_e, flag) => {
-    if (kiraBubbleWin) kiraBubbleWin.setIgnoreMouseEvents(flag, { forward: true });
+    // 手柄拖拽调大小期间穿透由主进程把守（强制接管鼠标），渲染层的开关先压住
+    if (kiraBubbleWin && !kbResizing) kiraBubbleWin.setIgnoreMouseEvents(flag, { forward: true });
   });
   // 泡泡内链接开系统浏览器；只放行 http/https/mailto，挡渲染层传来的奇怪协议
   ipcMain.on('kb-open-link', (_e, href) => {
     if (typeof href === 'string' && /^(https?|mailto):/i.test(href)) shell.openExternal(href);
+  });
+  // 跳转到飞书里 kira 机器人的私聊：握手拿到的 chat_id 拼 applink 直达会话，没握手过就打开飞书消息页。
+  // https applink 没装客户端也能落地网页版，比 feishu:// 裸协议可靠
+  ipcMain.on('kira-bubble-feishu', () => {
+    const chatId = (config.feishu && config.feishu.lastChatId) || '';
+    shell.openExternal(chatId
+      ? `https://applink.feishu.cn/client/chat/open?openChatId=${encodeURIComponent(chatId)}`
+      : 'https://www.feishu.cn/messenger/');
+  });
+  // 恢复默认位置：清掉记录的 bounds，重新锚定到人物头顶（锚定过程中的 move/resize 有 kbMutePersist 压住不落盘）
+  ipcMain.on('kira-bubble-reset', () => {
+    delete settings.kiraBubbleBounds;
+    saveConfig();
+    kbAnchored = false;
+    anchorKiraBubble();
+  });
+  // 右下角手柄拖拽调大小：笔记本 nb-resize 同款（记光标起点+初始尺寸，move 时差值 setSize）。
+  // 拖拽期间强制接管鼠标：光标滑出泡泡时渲染层本来会把窗口切回穿透，拖拽就断了
+  let kbResize = null;
+  ipcMain.on('kb-resize-start', () => {
+    if (!kiraBubbleWin) return;
+    kbResizing = true;
+    kiraBubbleWin.setIgnoreMouseEvents(false);
+    const c = screen.getCursorScreenPoint();
+    kbResize = { cx: c.x, cy: c.y, size: kiraBubbleWin.getSize() };
+  });
+  ipcMain.on('kb-resize-move', () => {
+    if (!kiraBubbleWin || !kbResize) return;
+    const c = screen.getCursorScreenPoint();
+    const a = screen.getDisplayNearestPoint(c).workArea;
+    const w = Math.min(Math.max(KB_MIN_W, kbResize.size[0] + (c.x - kbResize.cx)), a.width);
+    const h = Math.min(Math.max(KB_MIN_H, kbResize.size[1] + (c.y - kbResize.cy)), a.height);
+    kiraBubbleWin.setSize(Math.round(w), Math.round(h));
+  });
+  // ignore 是渲染层在 mouseup 时算好的穿透状态，直接恢复；最终 bounds 落定落盘
+  ipcMain.on('kb-resize-end', (_e, ignore) => {
+    kbResize = null;
+    kbResizing = false;
+    if (kiraBubbleWin) {
+      settings.kiraBubbleBounds = kiraBubbleWin.getBounds();
+      saveConfig();
+      kiraBubbleWin.setIgnoreMouseEvents(!!ignore, { forward: true });
+    }
   });
 
   // 笔记本自绘边框：最小化和自定义拉伸

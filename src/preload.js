@@ -98,6 +98,11 @@ contextBridge.exposeInMainWorld('pet', {
   kiraBubbleOpen: () => ipcRenderer.send('kira-bubble-open'),
   kiraBubbleIgnore: (flag) => ipcRenderer.send('kb-ignore', flag),
   kbOpenLink: (href) => ipcRenderer.send('kb-open-link', href),
+  kbResizeStart: () => ipcRenderer.send('kb-resize-start'),
+  kbResizeMove: () => ipcRenderer.send('kb-resize-move'),
+  kbResizeEnd: (ignore) => ipcRenderer.send('kb-resize-end', ignore),
+  kiraBubbleFeishu: () => ipcRenderer.send('kira-bubble-feishu'),
+  kiraBubbleReset: () => ipcRenderer.send('kira-bubble-reset'),
   // 归一化飞书消息（事件/轮询/小本子发言的回答）：{t, role, content, id, source}
   onFeishuMsg: (fn) => {
     const h = (_e, m) => fn(m);
