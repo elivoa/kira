@@ -1,10 +1,16 @@
-// kira 消息泡泡渲染层：markdown 渲染走 MarkdownStream 静态渲染（markdown-it 配置与 KaTeX MATH_OPTIONS 同本本）、
-// 链接点击走系统浏览器（不算关闭）、Esc 或右上角 ✕ 关闭、双击或右下角 💬 打开 kira tab、
+// kira 消息泡泡渲染层：迷你聊天窗——左上角 Q 版头像 + 底部输入框，输入经 yomi-send 发给 kira，
+// 自己的消息居右气泡、等待期 typing 态，kira 回复保持 markdown 正文样式（不带气泡）填进等待行；
+// 不带历史：kira-bubble-show 新消息清场只留最新一条（同次打开内滚动可见），聊天记录不持久化。
+// markdown 渲染走 MarkdownStream 静态渲染（markdown-it 配置与 KaTeX MATH_OPTIONS 同本本）、
+// 链接点击走系统浏览器（不算关闭）、Esc 关闭（输入框聚焦时先失焦，再按才关）、双击或右下角 💬 打开 kira tab、
 // 右下角还有：飞书跳转、↺ 复位默认位置、拖拽手柄调大小（位置+大小由主进程持久化）、
 // 左下角放大钮：窗口×2+内容 CSS zoom×2 的临时放大态（不落盘，Esc 优先缩回），
 // 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（框边缘拖，文字不拖）
 const kb = document.getElementById('kb');
+const kbMsgs = document.getElementById('kbMsgs');
 const kbText = document.getElementById('kbText');
+const kbInput = document.getElementById('kbInput');
+const kbSend = document.getElementById('kbSend');
 const kbClose = document.getElementById('kbClose');
 const kbOpen = document.getElementById('kbOpen');
 const kbFeishu = document.getElementById('kbFeishu');
@@ -14,11 +20,93 @@ const kbZoom = document.getElementById('kbZoom');
 
 let shown = false;
 let zoomed = false; // 放大态：窗口×2+内容 zoom×2；临时态不落盘，Esc 优先缩回
+let waiting = false; // 泡泡里发过言、等 kira 回答中：此时 kira-bubble-show 到来填等待行而非清场
+let typingRow = null; // 等待行（回复到达后变正式 kira 正文行）
+
+const pinScroll = () => { kbMsgs.scrollTop = kbMsgs.scrollHeight; };
+
+// 等待行 → 正式 kira 行：摘掉 typing、填回复正文（markdown，无气泡）
+function fillKiraRow(row, text) {
+  row.classList.remove('typing');
+  row.classList.add('kb-md');
+  row.innerHTML = '';
+  window.MarkdownStream.render(row, text || '');
+  pinScroll();
+}
 
 window.pet.onKiraBubbleShow(({ text }) => {
-  window.MarkdownStream.render(kbText, text || '');
+  if (waiting && typingRow) {
+    // 泡泡里发问的回答到了：填进等待行，自己的气泡保留
+    fillKiraRow(typingRow, text);
+    waiting = false;
+    typingRow = null;
+  } else {
+    // 新消息/主动搭话：清掉上一轮（用户气泡+旧回复），只留最新一条——不带历史
+    kbMsgs.innerHTML = '';
+    kbText.innerHTML = '';
+    kbMsgs.appendChild(kbText);
+    window.MarkdownStream.render(kbText, text || '');
+    kbMsgs.scrollTop = 0;
+  }
   kb.classList.add('show');
   shown = true;
+});
+
+// 发送：自己的消息上屏为居右气泡 + 起等待行，经 yomi-send 发给 kira（与记事本 bot tab 同一通道）。
+// 回答一般经 kira-bubble-show 事件先回来填等待行；事件流没来（120s 兜底文案）时用 invoke
+// resolve 的文案填——waiting 标志保证两边只填一次，不双显
+function sendChat() {
+  const text = kbInput.value.trim();
+  if (!text) return;
+  kbInput.value = '';
+  kbInput.style.height = '';
+  const me = document.createElement('div');
+  me.className = 'kb-msg me';
+  const b = document.createElement('div');
+  b.className = 'kb-bubble';
+  b.textContent = text;
+  me.appendChild(b);
+  kbMsgs.appendChild(me);
+  typingRow = document.createElement('div');
+  typingRow.className = 'kb-msg kira typing';
+  typingRow.textContent = '正在输入';
+  kbMsgs.appendChild(typingRow);
+  waiting = true;
+  pinScroll();
+  const settle = (reply) => {
+    if (!waiting) return; // 事件流已填过
+    fillKiraRow(typingRow, reply);
+    waiting = false;
+    typingRow = null;
+  };
+  window.pet.yomiSend(text).then((r) => {
+    if (r && r.ok) settle(r.reply || '（发出去了，kira 还没回，稍等飞书上看吧）');
+    else settle(`呜，没发出去…${r && r.error ? `（${r.error}）` : ''}`);
+  }).catch(() => settle('呜，没发出去…'));
+}
+
+kbSend.addEventListener('click', () => {
+  sendChat();
+  if (document.hasFocus()) kbInput.focus();
+});
+
+kbInput.addEventListener('keydown', (e) => {
+  // Esc 分层：输入框聚焦时先失焦（不关泡泡、不发送）；失焦后再按 Esc 才走 window 的缩回/关闭
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    kbInput.blur();
+    return;
+  }
+  // 回车发送、Shift+回车换行；输入法组词中的回车不算
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendChat();
+  }
+});
+// 多行输入自动撑高，封顶四行
+kbInput.addEventListener('input', () => {
+  kbInput.style.height = 'auto';
+  kbInput.style.height = Math.min(kbInput.scrollHeight, 84) + 'px';
 });
 
 function dismiss() {
@@ -109,9 +197,9 @@ window.pet.onKbZoom(({ on, scale }) => {
   kbZoom.title = on ? '缩小（Esc）' : '放大';
 });
 
-// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或按钮上不算
+// 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接、按钮或输入区上不算
 kb.addEventListener('dblclick', (e) => {
-  if (e.target.closest('a') || e.target.closest('button')) return;
+  if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.kb-inputrow')) return;
   if (!shown) return;
   shown = false;
   kb.classList.remove('show');
