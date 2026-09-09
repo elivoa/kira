@@ -27,6 +27,9 @@ const pending = new Map();     // id → {resolve, reject, timer}
 const seenSeq = [];            // 游标去重环（after_cursor 重连回放可能和已收的交叠）
 let lastCursor = null;         // 最近收到的事件 seq：重连后 subscribe 按它续传
 let lastCursorPid = '';        // 游标所属 projectId：换项目后旧游标作废，全量回放
+let lastSessionId = '';        // 最近活跃的 sessionId：发言缺省目标 + getState 带给 UI
+let permanentError = false;    // 鉴权/配置类永久错误：不再自动重连，等用户改配置 restart
+let connGen = 0;               // 连接代际：旧 socket 迟到的事件（close/error/message）按代际丢弃
 let lastFrameAt = 0;           // 最近收到任何帧的时间：半开连接靠看门狗发现
 let watchdogTimer = null;
 let sayWait = null;            // 小本本发言等待 mira 回答的挂起 Promise（带 sessionId + 身份校验，防并发串话）
@@ -42,7 +45,7 @@ function setStatus(s, err) {
 }
 
 function init(d) { deps = d; }
-function getState() { return { status, error: statusErr, projectId: (deps.getConfig() || {}).projectId || '' }; }
+function getState() { return { status, error: statusErr, projectId: (deps.getConfig() || {}).projectId || '', sessionId: lastSessionId }; }
 
 // ---------- JSON-RPC ----------
 function sendMsg(msg) {
@@ -91,15 +94,11 @@ function handleMsg(msg) {
   // 响应优先：ping 的应答也带 method（pong），必须先按 id 认领
   if (msg.id != null) {
     const p = pending.get(String(msg.id));
-    if (p) {
-      pending.delete(String(msg.id));
-      clearTimeout(p.timer);
-      if (msg.error) p.reject(new Error(msg.error.message || 'rpc error'));
-      else p.resolve(msg.result !== undefined ? msg.result : msg);
-      return;
-    }
-    // 服务端主动发来的请求（带 id 要应答的）：本连接器不提供服务端方法，回 error 别让它干等
-    if (msg.method) sendMsg({ id: msg.id, error: { message: 'not supported' } });
+    if (!p) return; // 无主的带 id 消息（迟到的 pong 等）直接吞：对响应回响应是协议噪音
+    pending.delete(String(msg.id));
+    clearTimeout(p.timer);
+    if (msg.error) p.reject(new Error(msg.error.message || 'rpc error'));
+    else p.resolve(msg.result !== undefined ? msg.result : msg);
     return;
   }
   if (msg.method) onPush(msg.method, msg.params);
@@ -128,11 +127,20 @@ function emitEvent(kind, sessionId, role, text, id) {
   }
 }
 
+// stop()/断连时清在途发言 waiter：不清的话旧 waiter 会挡新发言直到 120s 超时
+function clearSayWait(err) {
+  if (!sayWait) return;
+  const w = sayWait;
+  sayWait = null;
+  clearTimeout(w.timer);
+  w.reject(err);
+}
+
 function onPush(method, params) {
   if (method === 'agent_event') return onAgentEvent(params);
   if (method === 'history_complete') {
-    const pending = params && params.pending_requests;
-    const n = Array.isArray(pending) ? pending.length : 0;
+    const pendReqs = params && params.pending_requests;
+    const n = Array.isArray(pendReqs) ? pendReqs.length : 0;
     emitEvent('history_complete', '', '', n ? `有 ${n} 条待处理请求` : '');
     if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira 历史回放完成${n ? `（${n} 条待处理请求）` : ''}` });
     return;
@@ -140,6 +148,7 @@ function onPush(method, params) {
   if (method === 'session_lifecycle') {
     const p = params || {};
     const sid = p.session_id || p.sessionId || '';
+    if (sid) lastSessionId = sid;
     const state = asText(p.state ?? p.status ?? p.lifecycle ?? p.event) || 'changed';
     // 会话终结前若还有没吐完的回合缓存，先吐出来别丢
     if (/end|close|stop|finish|archive/i.test(state)) flushTurn(sid);
@@ -164,6 +173,7 @@ function onAgentEvent(p) {
   }
   const type = ev.type || p.type || '';
   const sid = ev.session_id || ev.sessionId || p.session_id || p.sessionId || '';
+  if (sid) lastSessionId = sid; // 记录最近活跃会话：发言缺省目标
 
   // 用户输入（mira 侧真人发言，或我们 inject 进去的）
   if (type === 'user.input') {
@@ -222,28 +232,36 @@ async function connectOnce() {
   const cfg = deps.getConfig() || {};
   if (!cfg.enabled || !cfg.wsUrl) { setStatus('off'); return; }
   if (!cfg.projectId) { setStatus('error', '还没配 projectId'); return; } // 配置缺项重连也不会自愈，不排重试
+  const gen = ++connGen; // 本 socket 的代际：之后所有事件处理器先验代，旧代事件直接丢
   setStatus('connecting');
   try {
     ws = new WebSocket(cfg.wsUrl, cfg.token ? { headers: { Authorization: `Bearer ${cfg.token}` } } : {});
   } catch (e) {
+    // 构造抛错基本是 wsUrl 格式问题，重连也不会自愈：粘性 error，等改配置
+    permanentError = true;
     setStatus('error', e.message);
-    scheduleRetry();
     return;
   }
-  ws.on('message', onData);
+  ws.on('message', (d) => { if (gen === connGen) onData(d); });
   ws.on('unexpected-response', (_req, res) => {
+    if (gen !== connGen) return;
     const hint = res.statusCode === 401 ? '（token 不对）' : res.statusCode === 403 ? '（SSO 没放行）' : '';
+    // 401/403 是鉴权类永久错误：重连一万次也是这个码，转粘性 error 等改配置
+    if (res.statusCode === 401 || res.statusCode === 403) permanentError = true;
     setStatus('error', `握手被拒：HTTP ${res.statusCode}${hint}`);
     ws.close();
   });
-  ws.on('error', (e) => { if (status !== 'error') setStatus('error', e.message); });
+  ws.on('error', (e) => { if (gen === connGen && status !== 'error') setStatus('error', e.message); });
   ws.on('close', (code, reason) => {
-    // 拒绝所有挂起的 RPC
+    if (gen !== connGen) return; // 旧 socket 迟到的 close：别误杀新一代的连接
+    // 拒绝所有挂起的 RPC 和在途发言 waiter
     for (const [, p] of pending) { clearTimeout(p.timer); p.reject(new Error('connection closed')); }
     pending.clear();
+    clearSayWait(new Error('mira 连接断了'));
     ws = null;
     stopWatchdog();
     if (!stoppedByUser) {
+      if (permanentError) return; // 粘性 error：保持 error 态不重连，等用户改配置触发 restart
       setStatus('connecting', `连接断了（${code}），重连中…`);
       if (deps.onLog && code !== 1000) deps.onLog({ t: Date.now(), type: '系统', text: `mira 连接断开（${code}${reason ? ' ' + String(reason).slice(0, 80) : ''}），重连中` });
       scheduleRetry();
@@ -255,12 +273,19 @@ async function connectOnce() {
       const params = { project_id: cfg.projectId };
       if (lastCursor != null && lastCursorPid === cfg.projectId) params.after_cursor = lastCursor;
       await call('subscribe', params);
+      if (gen !== connGen) return; // subscribe 等待期间连接已被换掉
       retryDelay = 3000;
       lastFrameAt = Date.now();
       startWatchdog();
       setStatus('online');
       if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira 连上了（项目 ${cfg.projectId}）` });
     } catch (e) {
+      if (gen !== connGen) return;
+      // Forbidden/鉴权类订阅失败是永久错误（非项目成员、token 没权限），转粘性 error
+      if (/forbidden|unauthorized|401|403/i.test(e.message)) {
+        permanentError = true;
+        if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira ${e.message}：不再自动重连，请检查 token / 项目成员资格` });
+      }
       setStatus('error', `订阅失败：${e.message}`);
       try { ws && ws.close(); } catch {}
     }
@@ -285,27 +310,30 @@ function stopWatchdog() {
 }
 
 function scheduleRetry() {
-  if (stoppedByUser || retryTimer) return;
+  if (stoppedByUser || retryTimer || permanentError) return;
   // 指数退避 + jitter（±30%），避免固定节奏打桩
   const wait = Math.round(retryDelay * (0.7 + Math.random() * 0.6));
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    if (!stoppedByUser) connectOnce();
+    if (!stoppedByUser && !permanentError) connectOnce();
   }, wait);
   retryDelay = Math.min(retryDelay * 2, 60000);
 }
 
 function start() {
   stoppedByUser = false;
+  permanentError = false; // 手动 start/restart（改配置后）解除粘性 error，重新尝试
   retryDelay = 3000;
   connectOnce();
 }
 
 function stop() {
   stoppedByUser = true;
+  connGen++; // 作废旧 socket：它迟到的 close/error/message 全部忽略，防误杀下一代连接
   stopWatchdog();
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+  clearSayWait(new Error('mira 已断开'));
   if (ws) { try { ws.close(); } catch {} ws = null; }
   setStatus('off');
 }
@@ -373,16 +401,26 @@ function normalizeHistoryItem(m, sessionId) {
   return out;
 }
 
-// tab 初始化：拉绑定 session 的历史（机器人 tab 同款，对应 yomi 的 listMessages）
-async function handleMiraHistory(sessionId) {
+// tab 初始化 + 向上翻页：拉绑定 session 的历史（机器人 tab 同款，对应 yomi 的 listMessages）。
+// cursor 是上一页最早一条的游标，带 after_cursor 继续向上翻（与 UI normalizeMiraHistory 的对象形式约定）
+async function handleMiraHistory(sessionId, cursor) {
   const cfg = deps.getConfig() || {};
   if (!cfg.projectId) throw new Error('还没配 projectId');
-  if (!sessionId) return [];
-  const url = `${restBase()}/api/projects/${encodeURIComponent(cfg.projectId)}/sessions/${encodeURIComponent(sessionId)}/history`;
+  if (!sessionId) return { items: [], nextCursor: null, hasMore: false };
+  let url = `${restBase()}/api/projects/${encodeURIComponent(cfg.projectId)}/sessions/${encodeURIComponent(sessionId)}/history`;
+  if (cursor != null && cursor !== '') url += `?after_cursor=${encodeURIComponent(cursor)}`;
   const data = await restJson('GET', url, cfg.token);
-  const list = Array.isArray(data) ? data : (data && (data.messages || data.history || data.items || data.events || data.data)) || [];
-  if (!Array.isArray(list)) return [];
-  return list.map((m) => normalizeHistoryItem(m, sessionId)).filter(Boolean).sort((a, b) => a.ts - b.ts);
+  const list = Array.isArray(data) ? data : (data && (data.items || data.messages || data.history || data.events || data.data)) || [];
+  const items = (Array.isArray(list) ? list : []).map((m) => normalizeHistoryItem(m, sessionId)).filter(Boolean).sort((a, b) => a.ts - b.ts);
+  // 游标/翻页标记优先取服务端字段；纯数组响应（无游标字段）退化单页 hasMore=false
+  let nextCursor = null;
+  let hasMore = false;
+  if (!Array.isArray(data) && data && typeof data === 'object') {
+    nextCursor = data.after_cursor ?? data.next_cursor ?? data.nextCursor ?? data.cursor ?? null;
+    hasMore = data.has_more ?? data.hasMore ?? !!nextCursor;
+  }
+  if (nextCursor == null && items.length) nextCursor = items[0].cursor ?? null; // 兜底：本页最早一条的游标
+  return { items, nextCursor, hasMore: !!hasMore };
 }
 
 // 小本本发言：inject 注入并等 mira 的回答（回答经 subscribe 事件流回来）。
@@ -391,7 +429,8 @@ function handleMiraSay(sessionId, text) {
   return new Promise((resolve, reject) => {
     if (status !== 'online') { reject(new Error('mira 还没连上')); return; }
     if (sayWait) { reject(new Error('上一条还没回，等 mira 答完再问')); return; }
-    const w = { resolve, timer: null, sessionId: sessionId || '' };
+    const sid = sessionId || lastSessionId; // 缺省用最近活跃会话（UI 还没从事件流学到 sessionId 时的兜底）
+    const w = { resolve, reject, timer: null, sessionId: sid };
     w.timer = setTimeout(() => {
       if (sayWait === w) { sayWait = null; resolve('（发出去了，mira 还没回，稍等去 mira 那边看看吧）'); }
     }, 120000);

@@ -98,7 +98,7 @@ contextBridge.exposeInMainWorld('pet', {
   miraStart: () => ipcRenderer.send('mira-start'),
   miraStop: () => ipcRenderer.send('mira-stop'),
   miraSend: (sessionId, text) => ipcRenderer.invoke('mira-send', sessionId, text),
-  miraHistory: (sessionId) => ipcRenderer.invoke('mira-history', sessionId),
+  miraHistory: (sessionId, cursor) => ipcRenderer.invoke('mira-history', sessionId, cursor),
   onMiraStatus: (fn) => ipcRenderer.on('mira-status', (_e, s) => fn(s)),
   onMiraEvent: (fn) => {
     const h = (_e, ev) => fn(ev);

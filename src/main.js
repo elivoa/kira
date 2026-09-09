@@ -1260,7 +1260,7 @@ app.whenReady().then(async () => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('mira-history', (_e, sessionId) => mira.handleMiraHistory(String(sessionId || '')));
+  ipcMain.handle('mira-history', (_e, sessionId, cursor) => mira.handleMiraHistory(String(sessionId || ''), cursor));
   // kira 消息泡泡：关闭/双击直达/点击穿透开关
   ipcMain.on('kira-bubble-dismiss', () => { if (kiraBubbleWin) kiraBubbleWin.hide(); });
   ipcMain.on('kira-bubble-open', () => {
