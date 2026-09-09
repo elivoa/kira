@@ -1,10 +1,14 @@
 // kira 消息泡泡渲染层：markdown 渲染走 MarkdownStream 静态渲染（markdown-it 配置与 KaTeX MATH_OPTIONS 同本本）、
 // 链接点击走系统浏览器（不算关闭）、Esc 或右上角 ✕ 关闭、双击或右下角 💬 打开 kira tab、
+// 右下角还有：飞书跳转、↺ 复位默认位置、拖拽手柄调大小（位置+大小由主进程持久化）、
 // 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（框边缘拖，文字不拖）
 const kb = document.getElementById('kb');
 const kbText = document.getElementById('kbText');
 const kbClose = document.getElementById('kbClose');
 const kbOpen = document.getElementById('kbOpen');
+const kbFeishu = document.getElementById('kbFeishu');
+const kbReset = document.getElementById('kbReset');
+const kbResize = document.getElementById('kbResize');
 
 let shown = false;
 
@@ -54,6 +58,37 @@ kbOpen.addEventListener('click', () => {
   shown = false;
   kb.classList.remove('show');
   window.pet.kiraBubbleOpen();
+});
+
+// 右下角飞书按钮：跳转飞书里 kira 机器人的私聊（不关泡泡）
+kbFeishu.addEventListener('click', () => {
+  if (!shown) return;
+  window.pet.kiraBubbleFeishu();
+});
+
+// 右下角 ↺ 复位：清掉记录的位置/大小，泡泡回到人物头顶默认锚定（不关泡泡）
+kbReset.addEventListener('click', () => {
+  if (!shown) return;
+  window.pet.kiraBubbleReset();
+});
+
+// 右下角拖拽手柄调大小：笔记本 nb-resize 同款三段式，主进程按光标差值 setSize。
+// 拖拽期间主进程强制接管鼠标（渲染层的 kb-ignore 被压住），所以 mouseup 时把当前
+// 穿透状态随 end 回传恢复；本地 ignoring 同步成同一值，防下一个 mousemove 重复发
+let resizing = false;
+kbResize.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  resizing = true;
+  window.pet.kbResizeStart();
+});
+window.addEventListener('mousemove', () => { if (resizing) window.pet.kbResizeMove(); });
+window.addEventListener('mouseup', (e) => {
+  if (!resizing) return;
+  resizing = false;
+  const r = kb.getBoundingClientRect();
+  const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  ignoring = !over;
+  window.pet.kbResizeEnd(ignoring);
 });
 
 // 双击打开小本子的 kira tab（同时关掉泡泡）；双击在链接或按钮上不算
