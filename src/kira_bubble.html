@@ -10,7 +10,7 @@
     overflow: hidden;
     background: transparent;
   }
-  /* kira 消息泡泡：哑光深石板底（近发件 box 的 #242631），边框与呼吸光晕留一点紫调以区分 */
+  /* kira 消息泡泡：奶油浅色风，配色直接抄本本 .msg.Kira .bubble（暖浅灰渐变底 + 深色正文） */
   #kb {
     position: absolute;
     /* left:50%+translate 会让 shrink-to-fit 的可用宽度只剩半窗（泡泡永远 ≤280px），
@@ -25,9 +25,9 @@
     max-width: calc(100vw - 80px);
     padding: 12px 32px 14px 20px; /* 右侧给关闭按钮留位，别压正文 */
     border-radius: 18px;
-    background: #262433;
-    border: 1px solid #3c3954;
-    color: #e8eaf4;
+    background: linear-gradient(180deg, #cfccc4, #b3afa5);
+    border: 1px solid #948f83;
+    color: #24231e;
     font: 400 13px/1.6 "PingFang SC", sans-serif; /* 字号/字重对齐小本本 .bubble.md（14px 常规），避免粗体感 */
     opacity: 0;
     transition: opacity .18s ease, zoom .18s ease;
@@ -38,8 +38,8 @@
   }
   #kb.show { opacity: 1; pointer-events: auto; }
   @keyframes stickyGlow {
-    from { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 5px rgba(150, 130, 232, 0.10); }
-    to { box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55), 0 0 14px rgba(150, 130, 232, 0.22); }
+    from { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.30), 0 0 5px rgba(230, 226, 216, 0.20); }
+    to { box-shadow: 0 6px 22px rgba(0, 0, 0, 0.38), 0 0 14px rgba(230, 226, 216, 0.40); }
   }
   #kb::after {
     content: '';
@@ -48,7 +48,7 @@
     bottom: -6px;
     margin-left: -6px;
     border: 6px solid transparent;
-    border-top-color: #262433;
+    border-top-color: #b3afa5; /* 咬住渐变底端色，尾巴不脱节 */
     border-bottom: 0;
   }
   /* 顶部头像行：Q 版小人贴左上角，标识这张卡是 kira 在说话 */
@@ -59,9 +59,9 @@
     border-radius: 50%;
     overflow: hidden;
     flex: none;
-    border: 1.5px solid rgba(150, 130, 232, 0.55);
-    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
-    background: #1c1a28;
+    border: 1.5px solid #948f83;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    background: #e6e3da;
   }
   /* 全身立绘裁出脸部：先 cover 再放大到脸的位置 */
   .kb-avatar img {
@@ -83,16 +83,16 @@
     max-height: calc(100vh - 200px);
     overflow-y: auto;
   }
-  /* 自己的消息：居右深气泡（对齐本本 .msg.me 的深色感，调进泡泡紫调） */
+  /* 自己的消息：居右深气泡（色值抄本本 .msg.me，深底压在奶油浅卡上对比清晰） */
   .kb-msg { margin-top: 8px; }
   .kb-msg.me { display: flex; justify-content: flex-end; }
   .kb-msg.me .kb-bubble {
     max-width: 84%;
     padding: 6px 12px;
     border-radius: 12px 12px 4px 12px;
-    background: #3b3755;
-    border: 1px solid #4c4870;
-    color: #e8eaf4;
+    background: #252422;
+    border: 1px solid #34332d;
+    color: #e7e5de;
     font-size: 13px;
     line-height: 1.55;
     white-space: pre-wrap;
@@ -112,24 +112,28 @@
     50% { content: '  · ·'; }
     75% { content: '  · · ·'; }
   }
-  /* markdown 样式对齐本本 .bubble.md（间距/字号一致）；颜色沿用深底浅字体系 */
+  /* markdown 样式对齐本本 .bubble.md（间距/字号一致）；颜色抄本本浅底体系：正文深色，code/pre 保持深底浅字 */
   .kb-md p { margin: 0 0 8px; }
   .kb-md p:last-child { margin-bottom: 0; }
   .kb-md h1, .kb-md h2, .kb-md h3, .kb-md h4 { margin: 6px 0; font-size: 14px; font-weight: 600; }
   /* PingFang SC 的 bold(700) 在小字号下糊成一团，压到 600 */
   .kb-md strong, .kb-md b { font-weight: 600; }
   .kb-md ul, .kb-md ol { margin: 0 0 8px; padding-left: 20px; }
-  .kb-md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid rgba(255,255,255,.4); opacity: .85; }
-  .kb-md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: rgba(0,0,0,.25); border-radius: 4px; padding: 1px 4px; }
-  .kb-md pre { background: rgba(0,0,0,.25); border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
+  .kb-md blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid #3b3933; color: #44423c; }
+  .kb-md code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: #2f2e29; color: #e7e5de; border-radius: 4px; padding: 1px 4px; }
+  .kb-md pre { background: #2f2e29; color: #e7e5de; border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; overflow-x: auto; }
   .kb-md pre code { background: none; padding: 0; }
   .kb-md table { border-collapse: collapse; margin: 0 0 8px; font-size: 12px; }
-  .kb-md th, .kb-md td { border: 1px solid rgba(255,255,255,.35); padding: 3px 8px; }
-  .kb-md hr { border: none; border-top: 1px dashed rgba(255,255,255,.4); margin: 8px 0; }
+  .kb-md th, .kb-md td { border: 1px solid #3b3933; padding: 3px 8px; }
+  .kb-md hr { border: none; border-top: 1px dashed #3b3933; margin: 8px 0; }
   .kb-md .katex-display { margin: 0 0 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
-  .kb-md a { color: #b7aef0; text-decoration: underline; cursor: pointer; }
+  .kb-md a { color: #6e5622; text-decoration: underline; cursor: pointer; }
   .kb-md a:hover { cursor: pointer; }
-  /* 角落小圆钮（右上 ✕ 关闭 / 右下 💬 打开 kira、飞书、复位、拖拽手柄 / 左下 ⤢ 放大）：半透明，hover 提亮；no-drag 防成拖拽误触区 */
+  /* 消息区滚动条：暖灰细条，融进奶油底 */
+  #kbMsgs::-webkit-scrollbar { width: 6px; }
+  #kbMsgs::-webkit-scrollbar-thumb { background: rgba(36, 35, 30, 0.22); border-radius: 3px; }
+  #kbMsgs::-webkit-scrollbar-track { background: transparent; }
+  /* 角落小圆钮（右上 ✕ 关闭 / 右下 💬 打开 kira、飞书、复位、拖拽手柄 / 左下 ⤢ 放大）：半透明深调，hover 加深；no-drag 防成拖拽误触区 */
   #kbClose, #kbOpen, #kbFeishu, #kbReset, #kbResize, #kbZoom {
     position: absolute;
     right: 8px;
@@ -138,8 +142,8 @@
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(232, 234, 244, 0.65);
+    background: rgba(36, 35, 30, 0.08);
+    color: rgba(36, 35, 30, 0.55);
     font-size: 11px;
     line-height: 18px;
     text-align: center;
@@ -154,10 +158,10 @@
   /* 左下角放大钮：与右下角那排同款但弱化（常驻半透），放大态常亮表示可再点缩回 */
   #kbZoom { left: 8px; right: auto; bottom: 7px; opacity: 0.45; }
   #kbZoom:hover, #kbZoom.on { opacity: 1; }
-  #kbZoom.on { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
+  #kbZoom.on { background: rgba(36, 35, 30, 0.16); color: #24231e; }
   #kbFeishu svg, #kbResize svg, #kbZoom svg { vertical-align: middle; margin-top: -2px; }
-  #kbClose:hover, #kbOpen:hover, #kbFeishu:hover, #kbReset:hover, #kbResize:hover { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
-  /* 底部输入区：对齐记事本 .inputrow 视觉（圆角深色底 + 发送钮），
+  #kbClose:hover, #kbOpen:hover, #kbFeishu:hover, #kbReset:hover, #kbResize:hover { background: rgba(36, 35, 30, 0.16); color: #24231e; }
+  /* 底部输入区：浅底协调款（半透白底 textarea + 本本同款浅色发送钮），
      整体 no-drag 别和边缘拖拽打架；min-width 兜底：fit-content 下短回复时输入区不缩没 */
   .kb-inputrow {
     display: flex;
@@ -165,38 +169,38 @@
     align-items: flex-end;
     margin-top: 10px;
     padding-top: 10px;
-    border-top: 1px dashed rgba(255, 255, 255, 0.14);
+    border-top: 1px dashed rgba(36, 35, 30, 0.18);
     min-width: 250px;
     -webkit-app-region: no-drag;
   }
   #kbInput {
     flex: 1;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(36, 35, 30, 0.25);
     border-radius: 10px;
     padding: 7px 12px;
     font: 13px/1.45 "PingFang SC", sans-serif;
     outline: none;
-    background: rgba(0, 0, 0, 0.28);
-    color: #e8eaf4;
+    background: rgba(255, 255, 255, 0.42);
+    color: #24231e;
     resize: none;
     overflow-y: auto;
     user-select: text;
     -webkit-user-select: text;
   }
-  #kbInput:focus { border-color: rgba(183, 174, 240, 0.6); }
-  #kbInput::placeholder { color: rgba(232, 234, 244, 0.38); }
+  #kbInput:focus { border-color: rgba(36, 35, 30, 0.5); }
+  #kbInput::placeholder { color: #76736a; }
   #kbSend {
     flex: none;
     border: none;
-    background: #cfc9ec;
-    color: #262433;
+    background: #dddad1;
+    color: #1b1a17;
     font: 13px "PingFang SC", sans-serif;
     padding: 0 16px;
     height: 33px;
     border-radius: 10px;
     cursor: pointer;
   }
-  #kbSend:hover { background: #b7aef0; }
+  #kbSend:hover { background: #c2beb2; }
   /* 底部操作提示：跟在输入区后面当页脚，右侧留出右下角四个按钮的位置 */
   .kb-hint {
     display: block;
