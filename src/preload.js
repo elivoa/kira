@@ -92,7 +92,7 @@ contextBridge.exposeInMainWorld('pet', {
   yomiListSessions: () => ipcRenderer.invoke('yomi-list-sessions'),
   yomiHistory: () => ipcRenderer.invoke('yomi-history'),
   onYomiStatus: (fn) => ipcRenderer.on('yomi-status', (_e, s) => fn(s)),
-  // mira 链接（StarForge Mira，JSON-RPC over WebSocket）
+  // mira 链接（Mira Tag，JSON-RPC over WebSocket）
   getMiraConfig: () => ipcRenderer.invoke('get-mira-config'),
   setMiraConfig: (patch) => ipcRenderer.send('set-mira-config', patch),
   miraStart: () => ipcRenderer.send('mira-start'),

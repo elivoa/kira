@@ -181,7 +181,7 @@ function submit(text) {
     addMsg(miraMsgs, 'me', text, false, 'mira');
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子 mira tab 发言：${text.slice(0, 30)}` });
     // 发送点即截 2000（与 bot 路径 main.js yomi-send/feishu-send 同口径）：pending 登记与发送同源，
-    // inject 若把同一条消息回显为 user.input，onMiraEvent 命中即跳过防双显，>2000 字也不会失配
+    // prompt 若把同一条消息回显为 user.input，onMiraEvent 命中即跳过防双显，>2000 字也不会失配
     const sentText = text.slice(0, 2000);
     pendingMiraSends.push(sentText);
     if (pendingMiraSends.length > 20) pendingMiraSends.shift();
@@ -1070,7 +1070,7 @@ window.pet.onFeishuMsg((m) => {
   addMsg(botMsgs, 'Kira', m.content);
 });
 
-// ---------- 链接 mira（StarForge Mira：WS /api/stream 订阅 + inject 发言） ----------
+// ---------- 链接 mira（Mira Tag 子部署：WS /api/stream 订阅 + WS prompt 发言） ----------
 // 通道与 yomi 镜像：get/set-mira-config、mira-status（推送）、mira-event（推送）、mira-send、mira-history
 const miraWsUrl = document.getElementById('miraWsUrl');
 const miraToken = document.getElementById('miraToken');
@@ -1079,7 +1079,7 @@ const miraEnabled = document.getElementById('miraEnabled');
 const miraStatus = document.getElementById('miraStatus');
 const miraTab = document.getElementById('miraTab');
 const miraMsgs = document.getElementById('miraMsgs');
-const MIRA_DEFAULT_WS = 'wss://mira.msh.team/api/stream';
+const MIRA_DEFAULT_WS = 'wss://tag.mira.msh.team/api/stream';
 // 连接器（M27）未合入前 preload 没有 mira 通道：全部 mira 功能静默关闭，不影响其他页签
 const hasMira = typeof window.pet.getMiraConfig === 'function';
 // 配置区与 tab 同守卫：无 mira 通道时藏掉（HTML 默认 display:none），避免保存/清除静默 no-op
@@ -1110,12 +1110,12 @@ function renderMiraStatus() {
   miraStatus.textContent = (MIRA_STATUS_TEXT[miraState.status] || miraState.status) + (miraState.error ? `：${miraState.error}` : '');
 }
 
-// 只读降级（inject 未接入）时禁用输入框并注明；切走 mira tab 即恢复
+// 只读降级时禁用输入框并注明；切走 mira tab 即恢复
 function updateMiraInput() {
   const ro = activeTab === 'mira' && miraState.readonly;
   input.disabled = ro;
   document.getElementById('send').disabled = ro;
-  input.placeholder = ro ? 'mira 暂只读同步（inject 未接入）' : '说点什么，或拖入链接…';
+  input.placeholder = ro ? 'mira 暂只读同步' : '说点什么，或拖入链接…';
 }
 
 function loadMiraConfig() {
@@ -1167,20 +1167,21 @@ document.getElementById('miraClear').addEventListener('click', () => {
 });
 
 // 「给 AI 的接入指南」：hover 预览 prompt 全文，点击复制到剪贴板，按钮短暂变「已复制 ✓」
-const MIRA_AI_PROMPT = `你要帮我自动完成「Link Mira」接入配置。请按下面的步骤自己找齐三项信息（wsUrl / token / projectId）并填好：
+const MIRA_AI_PROMPT = `你要帮我自动完成「Link Mira」接入配置（Mira Tag 子部署，tag.mira.msh.team）。请按下面的步骤自己找齐三项信息（wsUrl / token / projectId）并填好：
 
-1. wsUrl：固定为 wss://mira.msh.team/api/stream（JSON-RPC over WebSocket，用 Bearer token 鉴权）。
+1. wsUrl：固定为 wss://tag.mira.msh.team/api/stream（JSON-RPC over WebSocket）。
 
 2. token：先读 ~/.zshrc 里 export 的 MOONGATE_ACCESS_TOKEN（39 位、MGU 前缀）。如果没有，提示我通过 MoonGate SSO 获取一个 access token 再给你。
 
-3. projectId（按顺序尝试）：
-   a. 带上 token 调 GET https://mira.msh.team/api/mira/projects（请求头 Authorization: Bearer <token>），从返回的 project 列表里按名称认出我的项目；
-   b. 列表为空或认不出来时，去飞书群里找 mira 机器人的回复卡片，卡片链接形如 https://mira.msh.team/space/<projectId>/workspace/...，从链接里反推出 projectId；
-   c. 确认目标 project 绑定的飞书 channel，避免接错项目。
+3. 鉴权是两层：MoonGate Bearer 只过网关，应用层要先换 cookie——
+   带 Bearer 调 GET https://tag.mira.msh.team/api/auth/providers/moongate/complete，从 302 响应的 Set-Cookie 里拿 mira_session（30 天有效）；之后所有 REST 和 WS 请求都要同时带 Bearer + Cookie 两种凭证。
 
-4. 权限：如果 subscribe 返回 Forbidden，说明你的 mira 用户不是该 project 成员。先调 GET https://mira.msh.team/api/me 拿到你的 mira 用户 id，然后告诉我，让我找 project owner 把你加为成员后再重试。
+4. projectId（填 space id，按顺序尝试）：
+   a. 带上 Bearer + Cookie 调 GET https://tag.mira.msh.team/api/mira/spaces，从返回的 space 列表里按名称认出我的 space（私聊 space 名字通常带「私聊」，列表里能看到每个 space 绑定的飞书会话）；
+   b. 认不出来时，去飞书里找 mira 机器人的回复卡片，从卡片链接里反推出 space id；
+   c. 想验证：WS 连 wss://tag.mira.msh.team/api/stream（握手带 Bearer + Cookie），发 {"id":"1","method":"subscribe","space_id":"<space id>","params":{}}，回 {"id":"1","result":{"ok":true}} 就是对了；返回 Forbidden 说明我不是该 space 成员。
 
-5. 三项信息都拿到后，填入 Kira 小本子「配置 → 链接 mira」的 wsUrl / token / project id，打开「启用 mira 链接」并保存连接；最后确认 mira tab 里有消息同步进来，即完成。`;
+5. 三项信息都拿到后，填入 Kira 小本子「配置 → 链接 mira」的 wsUrl / token / project id（填 space id），打开「启用 mira 链接」并保存连接；最后确认 mira tab 里有消息同步进来，即完成。`;
 const miraAiGuide = document.getElementById('miraAiGuide');
 const miraAiTip = document.getElementById('miraAiTip');
 miraAiTip.textContent = `${MIRA_AI_PROMPT}\n\n—— 点击按钮复制完整 prompt ——`;
@@ -1209,7 +1210,7 @@ let miraCursor = null;     // 向上翻页游标（连接器 after_cursor 约定
 let miraHasMore = false;
 let miraLoading = false;
 const miraRenderedIds = new Set(); // 已上屏消息的 id/cursor，历史/事件/回显三通道防重
-const pendingMiraSends = [];       // 乐观上屏的发言文本：inject 回显命中即跳过
+const pendingMiraSends = [];       // 乐观上屏的发言文本：prompt 回显命中即跳过
 let miraStream = null;             // assistant.delta 流式气泡 { bubble, session }（MarkdownStream 增量会话）
 let lastMiraReply = null;          // miraSend resolve 先填过的回答：事件再到按同文案跳过一次
 
@@ -1310,7 +1311,7 @@ function loadMiraTab() {
     d.className = 'empty';
     d.textContent = miraConfigured()
       ? '还没有定位到 mira 会话；连上之后这里会同步会话消息'
-      : '先去「配置」页填好 mira 链接（地址 / token / project id）';
+      : '先去「配置」页填好 mira 链接（地址 / token / space id）';
     miraMsgs.appendChild(d);
     return;
   }
@@ -1404,7 +1405,7 @@ if (hasMira && window.pet.onMiraEvent) {
     const text = ev.text || '';
     if (!text) return; // thinking/tool 等无文本事件不上屏
     if (role === 'user') {
-      // 小本子自己发的经 inject 回显：乐观气泡已上屏，跳过（key 已在上面登记）
+      // 小本子自己发的经 prompt 回显：乐观气泡已上屏，跳过（key 已在上面登记）
       if (consumePendingMiraSend(text)) return;
       addMsg(miraMsgs, 'me', text, false, 'mira');
       return;

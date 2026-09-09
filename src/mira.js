@@ -1,16 +1,22 @@
-// mira 连接器（StarForge Mira，mira.msh.team，MoonGate SSO 后面）：
-// WebSocket 上跑 JSON-RPC（文本帧自带边界，不是 yomi 的 4 字节长度前缀帧），
-// Bearer token 鉴权（与 REST 同一个 MOONGATE_ACCESS_TOKEN）；subscribe 订阅项目事件流，
-// after_cursor 断线续传（等价 yomi 的 after_event_id）。
+// mira 连接器（Mira Tag 子部署，tag.mira.msh.team，MoonGate SSO 后面）：
+// WebSocket 上跑 JSON-RPC（文本帧自带边界，不是 yomi 的 4 字节长度前缀帧）。
 //
-// 协议要点（M26 实测 + 前端 bundle 逆向）：
-//   请求  {"id":"1","method":"ping"/"subscribe"/"prompt", "params":{...}}（无 jsonrpc:"2.0" 字段）
-//   响应  {"id":"1","result":...} 或 {"id":"1","error":{"message":"Forbidden"}}；ping 回 {"id":"1","method":"pong"}
-//   事件  {"method":"agent_event","params":{seq, session_id, event:{type, ...}}}（envelope 带 seq 即续传游标）
-//         另有 history_complete / session_lifecycle / control_event 等推送方法
-//   REST  GET  /api/projects/{pid}/sessions/{sid}/history  拉历史（tab 初始化）
-//         POST /api/mira/projects/{pid}/inject {type,from,content}  注入事件（发言通道，语义见 finding）
-// 订阅按项目成员鉴权，非成员 subscribe 返 Forbidden。
+// 鉴权两层（M26/M34 实测）：MoonGate Bearer 只过网关；先 GET /api/auth/providers/moongate/complete
+// （带 Bearer，302 响应的 Set-Cookie 里拿 mira_session，30 天有效），之后 REST 和 WS 握手都要
+// Bearer + Cookie 双带；401 时自动重换一次，再失败才转粘性鉴权错误。
+//
+// 协议要点（M26 实测 + tag 前端 bundle 逆向）：
+//   订阅  {"id","method":"subscribe","space_id":<space>,"params":{"after_cursor"?}}——space_id 是顶层字段
+//         （主部署是 params.project_id，写错返 Invalid stream request）；成功回 {"id","result":{"ok":true}}
+//   游标  after_cursor = {per_turn:{"<sessionId>:live:<turnId>":maxSeq}}：seq 是回合内序号，水位按回合记
+//   事件  {"method":"agent_event","space_id","session_uuid","params":{"seq,"event":{"type","turnId",...}}}
+//         类型 user.input / assistant.delta / assistant.record / thinking.delta / tool.call.* / turn.started/ended
+//         另有 history_complete（agents 快照 + pending_requests）/ mira_team_status / prompt_queue 等推送
+//   历史  GET /api/mira/spaces/{space}/sessions/{session}/replay?fromRecordIdx=<n>&count=<n>
+//         fromRecordIdx 负数 = 从末尾倒数（前端首屏 -100）；pageInfo.hasOlder/startRecordIdx 翻页
+//   发言  WS prompt：{"id","method":"prompt","session_uuid","space_id","params":{"session_uuid,"content"}}
+//         （tag 没有主部署的 REST inject 端点）
+//   space 列表  GET /api/mira/spaces（不是主部署的 /projects）
 const WebSocket = require('ws');
 const https = require('https');
 const http = require('http'); // 仅本地 mock/开发环境走 http 时用；线上 wss→https 永远走上面那个
@@ -25,10 +31,12 @@ let retryDelay = 3000;
 let nextId = 1;
 const pending = new Map();     // id → {resolve, reject, timer}
 const seenSeq = [];            // 游标去重环（after_cursor 重连回放可能和已收的交叠）
-let lastCursor = null;         // 最近收到的事件 seq：重连后 subscribe 按它续传
-let lastCursorPid = '';        // 游标所属 projectId：换项目后旧游标作废，全量回放
+const cursorPerTurn = {};      // 续传水位：{"<sessionId>:live:<turnId>": maxSeq}（seq 是回合内序号）
+let cursorSpace = '';          // 水位所属 space：换 space 后旧水位作废，全量回放
+let lastSeq = null;            // 最近收到的事件 seq：只作事件 cursor 字段带给 UI
 let lastSessionId = '';        // 最近活跃的 sessionId：发言缺省目标 + getState 带给 UI
 let permanentError = false;    // 鉴权/配置类永久错误：不再自动重连，等用户改配置 restart
+let authRetried = false;       // 本次连接已因 401 重换过 cookie：再 401 就是真鉴权失败
 let connGen = 0;               // 连接代际：旧 socket 迟到的事件（close/error/message）按代际丢弃
 let lastFrameAt = 0;           // 最近收到任何帧的时间：半开连接靠看门狗发现
 let watchdogTimer = null;
@@ -54,12 +62,15 @@ function sendMsg(msg) {
   return true;
 }
 
-function call(method, params, timeoutMs = 15000) {
+// topLevel：tag 的 subscribe/prompt 要把 space_id/session_uuid 放在顶层（与 params 平级）
+function call(method, params, timeoutMs = 15000, topLevel) {
   const id = String(nextId++);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { if (pending.has(id)) { pending.delete(id); reject(new Error(`timeout: ${method}`)); } }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
-    if (!sendMsg(params === undefined ? { id, method } : { id, method, params })) {
+    const msg = { id, method, ...(topLevel || {}) };
+    if (params !== undefined) msg.params = params;
+    if (!sendMsg(msg)) {
       clearTimeout(timer);
       pending.delete(id);
       reject(new Error('not connected'));
@@ -101,7 +112,7 @@ function handleMsg(msg) {
     else p.resolve(msg.result !== undefined ? msg.result : msg);
     return;
   }
-  if (msg.method) onPush(msg.method, msg.params);
+  if (msg.method) onPush(msg.method, msg.params, msg);
 }
 
 // ---------- 事件归一化 ----------
@@ -114,9 +125,16 @@ function asText(v) {
   return '';
 }
 
+// <system> 开头的是服务端注入的内部消息，前端也不上屏
+function isSystemText(v) {
+  if (typeof v === 'string') return v.startsWith('<system>');
+  if (Array.isArray(v)) return !!(v[0] && typeof v[0].text === 'string' && v[0].text.startsWith('<system>'));
+  return false;
+}
+
 // 统一出口：{kind, sessionId, role, text, cursor, ts, source:'mira'}（与 M28 约定的事件格式）
 function emitEvent(kind, sessionId, role, text, id) {
-  const out = { kind, sessionId: sessionId || '', role: role || '', text: text || '', cursor: lastCursor, ts: Date.now(), source: 'mira' };
+  const out = { kind, sessionId: sessionId || '', role: role || '', text: text || '', cursor: lastSeq, ts: Date.now(), source: 'mira' };
   if (id != null) out.id = id;
   if (deps.onEvent) deps.onEvent(out);
   if (kind === 'message' && role === 'assistant' && sayWait && sessionId === sayWait.sessionId) {
@@ -136,49 +154,76 @@ function clearSayWait(err) {
   w.reject(err);
 }
 
-function onPush(method, params) {
-  if (method === 'agent_event') return onAgentEvent(params);
+// history_complete / mira_team_status 的 agents 快照带 sessions：借此定位最近活跃会话
+function learnSessions(agents) {
+  if (!Array.isArray(agents)) return;
+  for (const a of agents) {
+    for (const s of (a && a.sessions) || []) {
+      const sid = s && (s.session_uuid || s.session_id || s.id);
+      if (sid) lastSessionId = sid;
+    }
+  }
+}
+
+function onPush(method, params, msg) {
+  if (method === 'agent_event') return onAgentEvent(params, msg);
   if (method === 'history_complete') {
+    if (msg && !msg.space_id) return; // 全局预告帧（无 agents/requests），等 space 级那一帧
+    learnSessions(params && params.agents);
     const pendReqs = params && params.pending_requests;
     const n = Array.isArray(pendReqs) ? pendReqs.length : 0;
     emitEvent('history_complete', '', '', n ? `有 ${n} 条待处理请求` : '');
     if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira 历史回放完成${n ? `（${n} 条待处理请求）` : ''}` });
     return;
   }
-  if (method === 'session_lifecycle') {
-    const p = params || {};
-    const sid = p.session_id || p.sessionId || '';
-    if (sid) lastSessionId = sid;
-    const state = asText(p.state ?? p.status ?? p.lifecycle ?? p.event) || 'changed';
-    // 会话终结前若还有没吐完的回合缓存，先吐出来别丢
-    if (/end|close|stop|finish|archive/i.test(state)) flushTurn(sid);
-    emitEvent('status', sid, '', `session.${state}`);
+  if (method === 'mira_team_status') {
+    learnSessions(params && params.agents);
     return;
   }
-  // control_event / mira_team_status / mira_worklog_update / mira_changes_update /
-  // mira_project_update / prompt_queue / flow_stats_update 等推送：与对话上屏无关，忽略（帧本身已刷新看门狗）
+  // control_event / prompt_queue / mira_worklog_update / mira_space_update / mira_product_update /
+  // flow_stats_update 等推送：与对话上屏无关，忽略（帧本身已刷新看门狗）
 }
 
-function onAgentEvent(p) {
+function onAgentEvent(p, msg) {
   p = p || {};
   const ev = p.event || p;
   const seq = p.seq ?? p.cursor ?? ev.seq ?? ev.id;
+  const sid = (msg && msg.session_uuid) || ev.session_id || ev.sessionId || p.session_id || p.sessionId || '';
+  if (sid) lastSessionId = sid; // 记录最近活跃会话：发言缺省目标
+
+  // seq 是回合内序号（续传水位按 per_turn 记），去重键必须带上回合，否则误杀其他回合的同号事件；
+  // 缺 turnId 的兜底事件也至少带上 sid，防跨会话撞号
+  const turnKey = sid && ev.turnId != null ? `${sid}:live:${ev.turnId}` : '';
   if (seq != null) {
-    const k = String(seq);
+    const k = turnKey ? `${turnKey}:${seq}` : `${sid}:${seq}`;
     if (seenSeq.includes(k)) return;
     seenSeq.push(k);
     if (seenSeq.length > 500) seenSeq.splice(0, 200);
-    lastCursor = seq; // 水位：重连后按它续传
-    lastCursorPid = (deps.getConfig() || {}).projectId || '';
+    lastSeq = seq;
+    if (turnKey) {
+      const n = typeof seq === 'number' ? seq : Number(seq);
+      if (Number.isFinite(n) && (cursorPerTurn[turnKey] ?? -1) < n) cursorPerTurn[turnKey] = n;
+      const keys = Object.keys(cursorPerTurn);
+      if (keys.length > 600) for (const old of keys.slice(0, 200)) delete cursorPerTurn[old];
+    }
+    cursorSpace = (deps.getConfig() || {}).projectId || '';
   }
   const type = ev.type || p.type || '';
-  const sid = ev.session_id || ev.sessionId || p.session_id || p.sessionId || '';
-  if (sid) lastSessionId = sid; // 记录最近活跃会话：发言缺省目标
 
-  // 用户输入（mira 侧真人发言，或我们 inject 进去的）
+  // 用户输入（mira 侧真人发言，飞书 channel 进来的也算）
   if (type === 'user.input') {
-    const text = asText(ev.text ?? ev.content ?? ev.input);
+    const raw = ev.input ?? ev.text ?? ev.content;
+    if (isSystemText(raw)) return;
+    const text = asText(raw);
     if (text) emitEvent('message', sid, 'user', text, ev.message_id ?? ev.id);
+    return;
+  }
+
+  // assistant.record：整段回答全量（回放合成或某些回合直发），顶掉 delta 缓存防重复上屏
+  if (type === 'assistant.record') {
+    const text = asText(ev.text ?? ev.content);
+    turnBuf.delete(sid);
+    if (text) emitEvent('message', sid, 'assistant', text, ev.id);
     return;
   }
 
@@ -231,11 +276,30 @@ function flushTurn(sid) {
 async function connectOnce() {
   const cfg = deps.getConfig() || {};
   if (!cfg.enabled || !cfg.wsUrl) { setStatus('off'); return; }
-  if (!cfg.projectId) { setStatus('error', '还没配 projectId'); return; } // 配置缺项重连也不会自愈，不排重试
+  if (!cfg.projectId) { setStatus('error', '还没配 projectId（space id）'); return; } // 配置缺项重连也不会自愈，不排重试
   const gen = ++connGen; // 本 socket 的代际：之后所有事件处理器先验代，旧代事件直接丢
   setStatus('connecting');
+  let cookie = '';
   try {
-    ws = new WebSocket(cfg.wsUrl, cfg.token ? { headers: { Authorization: `Bearer ${cfg.token}` } } : {});
+    cookie = await ensureCookie();
+  } catch (e) {
+    if (gen !== connGen) return;
+    // 换 cookie 就 401/403 或服务端确定性回绝（4xx/SSO 重定向）是粘性错误；网络类失败排重试
+    if (e.permanent || /401|403/.test(e.message)) {
+      permanentError = true;
+      setStatus('error', `鉴权失败：${e.message}`);
+      return;
+    }
+    setStatus('connecting', `cookie 换取失败：${e.message}`);
+    scheduleRetry();
+    return;
+  }
+  if (gen !== connGen) return; // 等 cookie 期间已被 stop/restart 换代
+  try {
+    const headers = {};
+    if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`;
+    if (cookie) headers.Cookie = cookie;
+    ws = new WebSocket(cfg.wsUrl, { headers });
   } catch (e) {
     // 构造抛错基本是 wsUrl 格式问题，重连也不会自愈：粘性 error，等改配置
     permanentError = true;
@@ -245,6 +309,16 @@ async function connectOnce() {
   ws.on('message', (d) => { if (gen === connGen) onData(d); });
   ws.on('unexpected-response', (_req, res) => {
     if (gen !== connGen) return;
+    // 401 先当是 cookie 失效：重换一次再连；还 401 才转粘性 error
+    if (res.statusCode === 401 && !authRetried && cfg.token) {
+      authRetried = true;
+      sessionCookie = '';
+      cookieFetchedAt = 0;
+      try { ws.close(); } catch {}
+      if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: 'mira 握手 401，重换 cookie 后再连' });
+      connectOnce();
+      return;
+    }
     const hint = res.statusCode === 401 ? '（token 不对）' : res.statusCode === 403 ? '（SSO 没放行）' : '';
     // 401/403 是鉴权类永久错误：重连一万次也是这个码，转粘性 error 等改配置
     if (res.statusCode === 401 || res.statusCode === 403) permanentError = true;
@@ -269,22 +343,31 @@ async function connectOnce() {
   });
   ws.on('open', async () => {
     try {
-      // 有水位（且没换项目）就 after_cursor 续传，否则全量回放
-      const params = { project_id: cfg.projectId };
-      if (lastCursor != null && lastCursorPid === cfg.projectId) params.after_cursor = lastCursor;
-      await call('subscribe', params);
+      // 有水位（且没换 space）就 after_cursor 续传，否则全量回放
+      const hasCursor = cursorSpace === cfg.projectId && Object.keys(cursorPerTurn).length > 0;
+      const params = {};
+      if (hasCursor) params.after_cursor = { per_turn: cursorPerTurn };
+      try {
+        await call('subscribe', params, 15000, { space_id: cfg.projectId });
+      } catch (e) {
+        // 水位不被接受（格式不认/部署变了）时清掉全量回放；鉴权类错误直接抛
+        if (!hasCursor || /forbidden|unauthorized|401|403/i.test(e.message)) throw e;
+        for (const k of Object.keys(cursorPerTurn)) delete cursorPerTurn[k];
+        await call('subscribe', {}, 15000, { space_id: cfg.projectId });
+      }
       if (gen !== connGen) return; // subscribe 等待期间连接已被换掉
+      authRetried = false;
       retryDelay = 3000;
       lastFrameAt = Date.now();
       startWatchdog();
       setStatus('online');
-      if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira 连上了（项目 ${cfg.projectId}）` });
+      if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira 连上了（space ${cfg.projectId}）` });
     } catch (e) {
       if (gen !== connGen) return;
-      // Forbidden/鉴权类订阅失败是永久错误（非项目成员、token 没权限），转粘性 error
+      // Forbidden/鉴权类订阅失败是永久错误（非 space 成员、token 没权限），转粘性 error
       if (/forbidden|unauthorized|401|403/i.test(e.message)) {
         permanentError = true;
-        if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira ${e.message}：不再自动重连，请检查 token / 项目成员资格` });
+        if (deps.onLog) deps.onLog({ t: Date.now(), type: '系统', text: `mira ${e.message}：不再自动重连，请检查 token / space 成员资格` });
       }
       setStatus('error', `订阅失败：${e.message}`);
       try { ws && ws.close(); } catch {}
@@ -323,6 +406,7 @@ function scheduleRetry() {
 function start() {
   stoppedByUser = false;
   permanentError = false; // 手动 start/restart（改配置后）解除粘性 error，重新尝试
+  authRetried = false;
   retryDelay = 3000;
   connectOnce();
 }
@@ -343,38 +427,40 @@ function restart() {
   restartTimer = setTimeout(() => { restartTimer = null; start(); }, 300);
 }
 
-// ---------- REST（历史回填 + inject 发言） ----------
+// ---------- 应用层鉴权：mira_session cookie ----------
+// MoonGate Bearer 只过网关；complete 接口换 mira_session（30 天），REST/WS 都 Bearer+Cookie 双带
+let sessionCookie = '';
+let cookieFetchedAt = 0;
+let cookiePromise = null;    // 在途换取：并发调用共享同一个 Promise，防打桩
+const COOKIE_TTL = 29 * 24 * 3600 * 1000; // 30 天 Max-Age，提前一天主动重换
+
+// ---------- REST（cookie 换取 + 历史回填） ----------
 // 注意：必须用 Node https 而不是全局 fetch —— Electron 主进程的全局 fetch 走
 // Chromium network service，长连接/大响应上有坑（main.js 的 kimiChat 同款教训）
 function restBase() {
   const cfg = deps.getConfig() || {};
   const wsUrl = String(cfg.wsUrl || '');
   if (!wsUrl) throw new Error('还没配 wsUrl');
-  // wss://mira.msh.team/api/stream → https://mira.msh.team
+  // wss://tag.mira.msh.team/api/stream → https://tag.mira.msh.team
   return wsUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/api\/stream\/?$/, '');
 }
 
-function restJson(method, url, token, payload, timeoutMs = 20000) {
+// 裸请求：不拦截状态码（complete 的 302 和 401 重试都要读原始响应）
+function restRaw(method, url, token, cookie, payload, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const body = payload === undefined ? null : JSON.stringify(payload);
     const req = (/^https:/i.test(url) ? https : http).request(url, {
       method,
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(cookie ? { Cookie: cookie } : {}),
         ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
       },
     }, (res) => {
       res.setEncoding('utf8');
       let raw = '';
       res.on('data', (c) => { raw += c; });
-      res.on('end', () => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          const hint = res.statusCode === 401 ? '（token 不对）' : res.statusCode === 403 ? '（不是项目成员）' : '';
-          reject(new Error(`HTTP ${res.statusCode}${hint}：${raw.slice(0, 120)}`));
-          return;
-        }
-        try { resolve(raw ? JSON.parse(raw) : null); } catch { reject(new Error('响应不是 JSON')); }
-      });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: raw }));
     });
     req.setTimeout(timeoutMs, () => req.destroy(new Error('请求超时')));
     req.on('error', reject);
@@ -383,79 +469,113 @@ function restJson(method, url, token, payload, timeoutMs = 20000) {
   });
 }
 
-// 历史消息归一化成与实时事件相同的 {kind:'message', ...} 格式，UI 只需要一种渲染路径
-function normalizeHistoryItem(m, sessionId) {
-  if (!m || typeof m !== 'object') return null;
-  const kind = String(m.role || m.kind || m.type || m.from || '');
-  let role = '';
-  if (/user|human|input|operator/i.test(kind)) role = 'user';
-  else if (/assistant|agent|model|mira/i.test(kind)) role = 'assistant';
-  else return null; // tool/system/别的事件不上屏
-  const text = asText(m.text ?? m.content ?? m.message ?? m.delta);
+async function ensureCookie(force) {
+  const cfg = deps.getConfig() || {};
+  if (!cfg.token) return ''; // 没 token 就没法换（本地 mock 场景允许裸连）
+  if (!force && sessionCookie && Date.now() - cookieFetchedAt < COOKIE_TTL) return sessionCookie;
+  if (cookiePromise) return cookiePromise;
+  cookiePromise = (async () => {
+    const res = await restRaw('GET', `${restBase()}/api/auth/providers/moongate/complete`, cfg.token, '');
+    const found = (res.headers['set-cookie'] || []).map((c) => c.split(';')[0]).filter((c) => c.startsWith('mira_session='));
+    if (!found.length) {
+      const err = new Error(`complete 没发 mira_session（HTTP ${res.status}）`);
+      // 服务端明确回了 4xx/3xx 异常（SSO 重定向、部署变了 404）：重试不会自愈，转粘性错误
+      err.permanent = res.status < 500;
+      throw err;
+    }
+    sessionCookie = found.join('; ');
+    cookieFetchedAt = Date.now();
+    return sessionCookie;
+  })();
+  try { return await cookiePromise; } finally { cookiePromise = null; }
+}
+
+async function restJson(method, url, payload, timeoutMs = 20000) {
+  const cfg = deps.getConfig() || {};
+  let cookie = await ensureCookie();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await restRaw(method, url, cfg.token, cookie, payload, timeoutMs);
+    if (res.status >= 200 && res.status < 300) {
+      try { return res.body ? JSON.parse(res.body) : null; } catch { throw new Error('响应不是 JSON'); }
+    }
+    // 401 当是 cookie 提前失效：重换一次再试；第二次还 401 才是真的鉴权失败
+    if (res.status === 401 && attempt === 0 && cfg.token) { cookie = await ensureCookie(true); continue; }
+    const hint = res.status === 401 ? '（token 不对或 cookie 已失效）' : res.status === 403 ? '（不是该 space 成员）' : '';
+    throw new Error(`HTTP ${res.status}${hint}：${res.body.slice(0, 120)}`);
+  }
+  throw new Error('unreachable');
+}
+
+// replay 记录：{recordIdx, turnId?, record:{type, time, message:{role, content, origin}}}；只上屏 user/assistant 消息
+function normalizeReplayItem(it, sessionId) {
+  const rec = it && it.record;
+  if (!rec || rec.type !== 'message' || !rec.message) return null;
+  const m = rec.message;
+  const role = m.role === 'user' ? 'user' : m.role === 'assistant' ? 'assistant' : '';
+  if (!role) return null; // tool/system 等记录不上屏
+  if (isSystemText(m.content)) return null;
+  const text = asText(m.content ?? m.text);
   if (!text) return null;
-  let ts = m.created_at ?? m.ts ?? m.time ?? m.timestamp;
-  ts = typeof ts === 'number' ? (ts < 1e12 ? ts * 1000 : ts) : Date.parse(ts) || Date.now();
-  const out = { kind: 'message', sessionId, role, text, cursor: m.seq ?? m.cursor ?? null, ts, source: 'mira' };
-  const id = m.id ?? m.message_id;
-  if (id != null) out.id = id;
+  const ts = typeof rec.time === 'number' ? (rec.time < 1e12 ? rec.time * 1000 : rec.time) : Date.parse(rec.time) || Date.now();
+  const out = { kind: 'message', sessionId, role, text, cursor: it.recordIdx ?? null, ts, source: 'mira' };
+  // id 加 rec# 命名空间：实时事件的键是回合内 seq（裸整数），两边在 UI 的 miraRenderedIds 里
+  // 共用一个集合，裸 recordIdx 稳态必撞 seq 键、实时消息被静默误杀（R1 P1）
+  if (it.recordIdx != null) out.id = `rec#${it.recordIdx}`;
   return out;
 }
 
 // tab 初始化 + 向上翻页：拉绑定 session 的历史（机器人 tab 同款，对应 yomi 的 listMessages）。
-// cursor 是上一页最早一条的游标，带 after_cursor 继续向上翻（与 UI normalizeMiraHistory 的对象形式约定）
+// cursor 是上一页最早一条的 recordIdx；首页不带 cursor 从末尾倒取 100 条（同 tag 前端首屏 -100）
 async function handleMiraHistory(sessionId, cursor) {
   const cfg = deps.getConfig() || {};
-  if (!cfg.projectId) throw new Error('还没配 projectId');
+  if (!cfg.projectId) throw new Error('还没配 projectId（space id）');
   if (!sessionId) return { items: [], nextCursor: null, hasMore: false };
-  let url = `${restBase()}/api/projects/${encodeURIComponent(cfg.projectId)}/sessions/${encodeURIComponent(sessionId)}/history`;
-  if (cursor != null && cursor !== '') url += `?after_cursor=${encodeURIComponent(cursor)}`;
-  const data = await restJson('GET', url, cfg.token);
-  const list = Array.isArray(data) ? data : (data && (data.items || data.messages || data.history || data.events || data.data)) || [];
-  const items = (Array.isArray(list) ? list : []).map((m) => normalizeHistoryItem(m, sessionId)).filter(Boolean).sort((a, b) => a.ts - b.ts);
-  // 游标/翻页标记优先取服务端字段；纯数组响应（无游标字段）退化单页 hasMore=false
-  let nextCursor = null;
-  let hasMore = false;
-  if (!Array.isArray(data) && data && typeof data === 'object') {
-    nextCursor = data.after_cursor ?? data.next_cursor ?? data.nextCursor ?? data.cursor ?? null;
-    hasMore = data.has_more ?? data.hasMore ?? !!nextCursor;
+  let from = -100;
+  let count = 100;
+  if (cursor != null && cursor !== '') {
+    const c = Number(cursor);
+    if (!Number.isFinite(c) || c <= 0) return { items: [], nextCursor: null, hasMore: false };
+    from = Math.max(0, c - 100);
+    count = c - from;
   }
-  if (nextCursor == null && items.length) nextCursor = items[0].cursor ?? null; // 兜底：本页最早一条的游标
-  return { items, nextCursor, hasMore: !!hasMore };
+  const url = `${restBase()}/api/mira/spaces/${encodeURIComponent(cfg.projectId)}/sessions/${encodeURIComponent(sessionId)}/replay?fromRecordIdx=${from}&count=${count}`;
+  const data = await restJson('GET', url);
+  const list = Array.isArray(data) ? data : (data && data.items) || [];
+  const items = (Array.isArray(list) ? list : []).map((it) => normalizeReplayItem(it, sessionId)).filter(Boolean).sort((a, b) => a.ts - b.ts);
+  const page = (!Array.isArray(data) && data && data.pageInfo) || {};
+  const hasMore = page.hasOlder === true;
+  let nextCursor = hasMore ? (page.startRecordIdx ?? null) : null;
+  if (nextCursor == null && hasMore && items.length) nextCursor = items[0].cursor ?? null; // 兜底：本页最早一条
+  return { items, nextCursor, hasMore };
 }
 
-// 小本本发言：inject 注入并等 mira 的回答（回答经 subscribe 事件流回来）。
+// 小本本发言：WS prompt 发出并等 mira 的回答（回答经 subscribe 事件流回来）。
 // 一次只允许一条在途：第二条直接拒绝，避免两条 waiter 互相顶掉、答非所问
 function handleMiraSay(sessionId, text) {
   return new Promise((resolve, reject) => {
     if (status !== 'online') { reject(new Error('mira 还没连上')); return; }
     if (sayWait) { reject(new Error('上一条还没回，等 mira 答完再问')); return; }
     const sid = sessionId || lastSessionId; // 缺省用最近活跃会话（UI 还没从事件流学到 sessionId 时的兜底）
+    if (!sid) { reject(new Error('还没定位到 mira 会话：先在飞书里跟 mira 说句话')); return; }
     const w = { resolve, reject, timer: null, sessionId: sid };
     w.timer = setTimeout(() => {
       if (sayWait === w) { sayWait = null; resolve('（发出去了，mira 还没回，稍等去 mira 那边看看吧）'); }
     }, 120000);
     sayWait = w;
-    injectEvent(text).catch((e) => {
+    promptSession(sid, text).catch((e) => {
       if (sayWait === w) { clearTimeout(w.timer); sayWait = null; reject(e); }
     });
   });
 }
 
-// inject 通道（M26 逆向：{type,from,content}，供 webhook/CI 注入事件）；
-// 语义是否等价「以用户身份发言」未实测确认（高博名下无项目没法试），不行就换 promptSession
-async function injectEvent(text) {
-  const cfg = deps.getConfig() || {};
-  if (!cfg.projectId) throw new Error('还没配 projectId');
-  const url = `${restBase()}/api/mira/projects/${encodeURIComponent(cfg.projectId)}/inject`;
-  return restJson('POST', url, cfg.token, { type: 'event', from: 'kira-desktop', content: String(text).slice(0, 4000) });
-}
-
-// 备用发言通道：WS prompt{session_id,content,model}（bundle 逆向，语义就是给 agent 会话发用户消息）
-function promptSession(sessionId, content, model) {
+// 发言通道：WS prompt（tag 没有 REST inject）；session_uuid 顶层字段，params 带 session_uuid+content
+function promptSession(sessionId, content) {
   if (!sessionId) return Promise.reject(new Error('缺 sessionId'));
-  const params = { session_id: sessionId, content: String(content).slice(0, 4000) };
-  if (model) params.model = model;
-  return call('prompt', params, 20000);
+  const cfg = deps.getConfig() || {};
+  const params = { session_uuid: sessionId, content: String(content).slice(0, 4000) };
+  const topLevel = { session_uuid: sessionId };
+  if (cfg.projectId) topLevel.space_id = cfg.projectId;
+  return call('prompt', params, 20000, topLevel);
 }
 
 module.exports = { init, start, stop, restart, getState, handleMiraHistory, handleMiraSay, promptSession };

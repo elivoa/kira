@@ -1301,8 +1301,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('yomi-list-sessions', () => yomi.listSessions());
   ipcMain.handle('yomi-history', () => yomi.listMessages());
 
-  // ---------- mira 链接（StarForge Mira，JSON-RPC over WebSocket + REST） ----------
-  // subscribe 事件流 → mira-event 推给笔记本 mira tab；发言走 REST inject，历史走 REST 拉取
+  // ---------- mira 链接（Mira Tag 子部署，JSON-RPC over WebSocket + REST） ----------
+  // subscribe 事件流 → mira-event 推给笔记本 mira tab；发言走 WS prompt，历史走 REST replay 拉取
   const dispatchMiraEvent = (ev) => {
     if (notebookWin) notebookWin.webContents.send('mira-event', ev);
   };
@@ -1315,7 +1315,7 @@ app.whenReady().then(async () => {
   if (config.mira && config.mira.enabled) mira.start();
   ipcMain.handle('get-mira-config', () => {
     const m = config.mira || {};
-    return { wsUrl: m.wsUrl || 'wss://mira.msh.team/api/stream', token: m.token || '', projectId: m.projectId || '', enabled: !!m.enabled, ...mira.getState() };
+    return { wsUrl: m.wsUrl || 'wss://tag.mira.msh.team/api/stream', token: m.token || '', projectId: m.projectId || '', enabled: !!m.enabled, ...mira.getState() };
   });
   ipcMain.on('set-mira-config', (_e, patch) => {
     if (!patch || typeof patch !== 'object') return;

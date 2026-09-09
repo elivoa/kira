@@ -564,11 +564,11 @@
               <div id="yomiSessionsOut" class="cfg-status"></div>
             </div>
             <div class="cfg-sec" id="miraSec" style="display:none">
-              <div class="cfg-title">链接 mira（StarForge Mira）</div>
-              <div class="cfg-tip">连上 mira 的 WebSocket 事件流：mira 会话的消息会同步到小本子的 mira tab，小本本的发言经 inject 接口发给 mira。</div>
-              <input id="miraWsUrl" type="text" placeholder="wss://mira.msh.team/api/stream" autocomplete="off">
+              <div class="cfg-title">链接 mira（Mira Tag）</div>
+              <div class="cfg-tip">连上 mira 的 WebSocket 事件流：mira 会话的消息会同步到小本子的 mira tab，小本本的发言经 WS prompt 发给 mira。</div>
+              <input id="miraWsUrl" type="text" placeholder="wss://tag.mira.msh.team/api/stream" autocomplete="off">
               <input id="miraToken" type="text" placeholder="MoonGate access token" autocomplete="off">
-              <input id="miraProjectId" type="text" placeholder="project id" autocomplete="off">
+              <input id="miraProjectId" type="text" placeholder="space id" autocomplete="off">
               <div class="cfg-row" style="padding-left:0">
                 <span>启用 mira 链接</span>
                 <label class="sw"><input id="miraEnabled" type="checkbox"><i></i></label>
