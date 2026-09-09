@@ -702,10 +702,14 @@ function anchorKiraBubble() {
   kbAnchored = true;
 }
 
+// 泡泡消息区本身可滚动，不做短截断；仅防极端超大消息撑爆窗口，超过 4000 字加省略标注
+const KBUBBLE_MAX_LEN = 4000;
+
 function showKiraBubble(text) {
   if (!kiraBubbleWin) return;
   anchorKiraBubble(); // 只有第一次会真正锚定
-  kiraBubbleWin.webContents.send('kira-bubble-show', { text });
+  const show = text.length > KBUBBLE_MAX_LEN ? `${text.slice(0, KBUBBLE_MAX_LEN)}\n……（超长已省略，共 ${text.length} 字）` : text;
+  kiraBubbleWin.webContents.send('kira-bubble-show', { text: show });
   // 不主动 focus（每条回复都抢键盘焦点会打断用户打字）；窗口 focusable，用户点一下泡泡即聚焦，之后 Esc 可关
   if (!kiraBubbleWin.isVisible()) kiraBubbleWin.showInactive();
 }
@@ -1260,7 +1264,7 @@ app.whenReady().then(async () => {
   // daemon 事件流经 SubscribeAll 进来：kira 的回答 → 机器人 tab 上屏 + kira 消息泡泡（独立窗口）
   const dispatchYomiMsg = (m) => {
     if (notebookWin) notebookWin.webContents.send('feishu-msg', m);
-    if (m.role === 'assistant') showKiraBubble(m.content.slice(0, 800));
+    if (m.role === 'assistant') showKiraBubble(m.content);
   };
   yomi.init({
     getConfig: () => config.yomi || {},
@@ -1306,7 +1310,7 @@ app.whenReady().then(async () => {
   // source_reply 回答（kind=message/role=assistant）同步弹 kira 泡泡，和 yomi 消息一致（来源标【mira】）
   const dispatchMiraEvent = (ev) => {
     if (notebookWin) notebookWin.webContents.send('mira-event', ev);
-    if (ev.kind === 'message' && ev.role === 'assistant' && ev.text) showKiraBubble(`【mira】${ev.text.slice(0, 800)}`);
+    if (ev.kind === 'message' && ev.role === 'assistant' && ev.text) showKiraBubble(`【mira】${ev.text}`);
   };
   mira.init({
     getConfig: () => config.mira || {},
