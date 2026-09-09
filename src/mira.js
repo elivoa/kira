@@ -147,9 +147,11 @@ function userInputText(raw) {
 }
 
 // 统一出口：{kind, sessionId, role, text, cursor, ts, source:'mira'}（与 M28 约定的事件格式）
-function emitEvent(kind, sessionId, role, text, id) {
+// key 是跨回合唯一的去重键（turn:seq）：cursor 只是回合内 seq，跨回合会撞号，UI 去重优先用 key
+function emitEvent(kind, sessionId, role, text, id, key) {
   const out = { kind, sessionId: sessionId || '', role: role || '', text: text || '', cursor: lastSeq, ts: Date.now(), source: 'mira' };
   if (id != null) out.id = id;
+  if (key != null) out.key = key;
   if (deps.onEvent) deps.onEvent(out);
   if (kind === 'message' && role === 'assistant' && sayWait && sessionId === sayWait.sessionId) {
     const w = sayWait;
@@ -206,14 +208,16 @@ function onAgentEvent(p, msg) {
   if (sid) lastSessionId = sid; // 记录最近活跃会话：发言缺省目标
 
   // seq 是回合内序号（续传水位按 per_turn 记），去重键必须带上回合，否则误杀其他回合的同号事件；
-  // 缺 turnId 的兜底事件也至少带上 sid，防跨会话撞号
+  // 缺 turnId 的兜底事件也至少带上 sid，防跨会话撞号。evtKey 随事件传出给 UI 做去重键
   const turnKey = sid && ev.turnId != null ? `${sid}:live:${ev.turnId}` : '';
+  let evtKey = null;
   if (seq != null) {
     const k = turnKey ? `${turnKey}:${seq}` : `${sid}:${seq}`;
     if (seenSeq.includes(k)) return;
     seenSeq.push(k);
     if (seenSeq.length > 500) seenSeq.splice(0, 200);
     lastSeq = seq;
+    evtKey = k;
     if (turnKey) {
       const n = typeof seq === 'number' ? seq : Number(seq);
       if (Number.isFinite(n) && (cursorPerTurn[turnKey] ?? -1) < n) cursorPerTurn[turnKey] = n;
@@ -227,7 +231,7 @@ function onAgentEvent(p, msg) {
   // 用户输入（mira 侧真人发言，飞书 channel 进来的也算）
   if (type === 'user.input') {
     const text = userInputText(ev.input ?? ev.text ?? ev.content);
-    if (text) emitEvent('message', sid, 'user', text, ev.message_id ?? ev.id);
+    if (text) emitEvent('message', sid, 'user', text, ev.message_id ?? ev.id, evtKey);
     return;
   }
 
@@ -236,25 +240,25 @@ function onAgentEvent(p, msg) {
   if (type === 'tool.call.started') {
     if (ev.name === 'source_reply') {
       const text = asText(ev.args && ev.args.text);
-      if (text) emitEvent('message', sid, 'assistant', text, ev.toolCallId);
+      if (text) emitEvent('message', sid, 'assistant', text, ev.toolCallId, evtKey);
     }
     return;
   }
 
   // 回合收尾：回答已经随 source_reply 上屏，这里只发状态让 UI 收束等待态
   if (type === 'turn.ended') {
-    emitEvent('status', sid, '', 'turn.ended');
+    emitEvent('status', sid, '', 'turn.ended', undefined, evtKey);
     return;
   }
   if (type === 'turn.started') {
-    emitEvent('status', sid, '', 'turn.started');
+    emitEvent('status', sid, '', 'turn.started', undefined, evtKey);
     return;
   }
 
   // 交互提交（审批/问答的回答）：当用户消息上屏
   if (type === 'interactive.submission') {
     const text = asText(ev.text ?? ev.content ?? ev.value ?? ev.submission);
-    if (text) emitEvent('message', sid, 'user', text, ev.id);
+    if (text) emitEvent('message', sid, 'user', text, ev.id, evtKey);
     return;
   }
   // assistant.delta（agent 内心叙述，不到用户侧）/ thinking.delta / tool.call.delta /

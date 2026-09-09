@@ -179,6 +179,7 @@ function submit(text) {
   } else if (activeTab === 'mira') {
     if (!hasMira || miraState.readonly) return; // 只读降级时输入框已禁用，这里双保险
     addMsg(miraMsgs, 'me', text, false, 'mira');
+    recordMiraShown('user', text, ''); // 乐观气泡也进镜像：切 tab 重进整体重渲，回显被吃掉后这条不能丢
     window.pet.logAppend({ t: Date.now(), type: '交互', text: `在小本子 mira tab 发言：${text.slice(0, 30)}` });
     // 发送点即截 2000（与 bot 路径 main.js yomi-send/feishu-send 同口径）：pending 登记与发送同源，
     // prompt 若把同一条消息回显为 user.input，onMiraEvent 命中即跳过防双显，>2000 字也不会失配
@@ -210,6 +211,7 @@ function submit(text) {
           typing.classList.remove('typing');
           typing.innerHTML = '';
           window.MarkdownStream.render(typing, r.reply);
+          recordMiraShown('assistant', r.reply, ''); // resolve 先填的回答事件侧会按同文案跳过，镜像要自己记
           miraMsgs.scrollTop = miraMsgs.scrollHeight;
         }
         return;
@@ -1204,10 +1206,20 @@ miraEnabled.addEventListener('change', () => {
 
 // mira tab：tag 无 REST 历史端点、after_cursor 回放也不可用——只显示连接后的实时消息，
 // 不做翻页加载；顶部常驻一条说明。不在 mira 页时消息暂存 miraPending，切回补显
-const miraRenderedIds = new Set(); // 已上屏消息的 id/cursor，事件/回显双通道防重
+const miraRenderedIds = new Set(); // 已上屏消息的 id/key/cursor，事件/回显双通道防重
 const pendingMiraSends = [];       // 乐观上屏的发言文本：prompt 回显命中即跳过
 const miraPending = [];            // 不在 mira 页时暂存的实时消息（上限 200，防无限积）
+const miraShownMsgs = [];          // 已上屏消息的内存镜像 {role, text, key}（含乐观气泡，上限 200）：
+//   切 tab 重进时 innerHTML 清空后靠它整体重渲——没有历史端点，清了就没处补
 let lastMiraReply = null;          // miraSend resolve 先填过的回答：事件再到按同文案跳过一次
+
+function recordMiraShown(role, text, key) {
+  miraShownMsgs.push({ role, text, key: key || '' });
+  if (miraShownMsgs.length > 200) {
+    const old = miraShownMsgs.shift();
+    if (old.key) miraRenderedIds.delete(old.key); // 镜像淘汰的键同步放出，防集合只涨不消
+  }
+}
 
 function consumePendingMiraSend(text) {
   const idx = pendingMiraSends.findIndex((p) => p === text);
@@ -1216,7 +1228,9 @@ function consumePendingMiraSend(text) {
   return true;
 }
 
-function miraMsgKey(m) { const k = m.id ?? m.cursor; return k == null ? '' : String(k); }
+// 去重键优先 id（source_reply 的 toolCallId），其次 key（连接器传的 turn:seq，跨回合唯一）；
+// cursor 只是回合内 seq，跨回合撞号，只作兜底
+function miraMsgKey(m) { const k = m.id ?? m.key ?? m.cursor; return k == null ? '' : String(k); }
 
 if (hasMira && window.pet.onMiraStatus) {
   window.pet.onMiraStatus((s) => {
@@ -1236,7 +1250,6 @@ if (hasMira && window.pet.onMiraStatus) {
 function loadMiraTab() {
   if (!hasMira) return;
   miraMsgs.innerHTML = '';
-  miraRenderedIds.clear();
   if (!miraConfigured()) {
     const d = document.createElement('div');
     d.className = 'empty';
@@ -1249,22 +1262,23 @@ function loadMiraTab() {
   note.className = 'empty mira-live-note';
   note.textContent = '—— 只显示连接后的新消息，历史消息去 mira 那边看 ——';
   miraMsgs.appendChild(note);
-  if (!miraPending.length) {
+  // 已上屏消息从内存镜像整体重渲（miraRenderedIds 不清：防重键要跨 tab 切换存活）
+  for (const m of miraShownMsgs) addMsg(miraMsgs, m.role === 'user' ? 'me' : 'Kira', m.text, false, 'mira');
+  // 切走期间暂存的消息补显
+  const queued = miraPending.splice(0, miraPending.length);
+  for (const ev of queued) handleMiraEvent(ev);
+  if (!miraShownMsgs.length) {
     const d = document.createElement('div');
     d.className = 'empty';
     d.textContent = miraState.sessionId
       ? '还没有新消息；之后会话里的对话会实时出现在这里'
       : '还没有定位到 mira 会话；连上之后这里会同步会话消息';
     miraMsgs.appendChild(d);
-    return;
   }
-  // 切走期间暂存的消息补显
-  const queued = miraPending.splice(0, miraPending.length);
-  for (const ev of queued) handleMiraEvent(ev);
   miraMsgs.scrollTop = miraMsgs.scrollHeight;
 }
 
-// mira 实时事件：{kind, sessionId, role, text, cursor, ts, source:'mira'}
+// mira 实时事件：{kind, sessionId, role, text, cursor, key, ts, source:'mira'}
 // 连接器已按真实帧归一化：用户发言 role=user、source_reply 回答 role=assistant（kind 都是 message），
 // thinking/assistant.delta/tool 等已在连接器侧过滤，这里只上屏 message
 function handleMiraEvent(ev) {
@@ -1286,6 +1300,7 @@ function handleMiraEvent(ev) {
     // 小本子自己发的经 prompt 回显：乐观气泡已上屏，跳过（key 已在上面登记）
     if (consumePendingMiraSend(text)) return;
     addMsg(miraMsgs, 'me', text, false, 'mira');
+    recordMiraShown('user', text, key);
     return;
   }
   // resolve 先于事件流回来时回答已填过（见 submit），同文案别再上屏
@@ -1299,10 +1314,12 @@ function handleMiraEvent(ev) {
     typing.classList.remove('typing');
     typing.innerHTML = '';
     window.MarkdownStream.render(typing, text);
+    recordMiraShown('assistant', text, key);
     miraMsgs.scrollTop = miraMsgs.scrollHeight;
     return;
   }
   addMsg(miraMsgs, 'Kira', text, false, 'mira');
+  recordMiraShown('assistant', text, key);
 }
 
 if (hasMira && window.pet.onMiraEvent) {
