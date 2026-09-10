@@ -118,6 +118,8 @@ contextBridge.exposeInMainWorld('pet', {
   kiraBubbleReset: () => ipcRenderer.send('kira-bubble-reset'),
   kbZoom: (on) => ipcRenderer.send('kb-zoom', on),
   onKbZoom: (fn) => ipcRenderer.on('kira-bubble-zoom', (_e, d) => fn(d)),
+  // 输入法候选框被挡修复：输入框聚焦/失焦上报，主进程据此降/复窗口层级
+  kbIme: (on) => ipcRenderer.send('kb-ime', on),
   // 归一化飞书消息（事件/轮询/小本子发言的回答）：{t, role, content, id, source}
   onFeishuMsg: (fn) => {
     const h = (_e, m) => fn(m);
