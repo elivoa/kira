@@ -5,7 +5,8 @@
 // 链接点击走系统浏览器（不算关闭）、Esc 关闭（输入框聚焦时先失焦，再按才关）、双击或右下角 💬 打开 kira tab、
 // 右下角还有：飞书跳转、↺ 复位默认位置、拖拽手柄调大小（位置+大小由主进程持久化）、
 // 左下角放大钮：窗口×2+内容 CSS zoom×2 的临时放大态（不落盘，Esc 优先缩回），
-// 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（顶部条整片可拖，文字不拖）
+// 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（顶部条整片可拖，文字不拖）。
+// 输入框聚焦时窗口临时降到 floating 级（screen-saver 级会压住输入法候选框），失焦恢复
 const kb = document.getElementById('kb');
 const kbMsgs = document.getElementById('kbMsgs');
 const kbText = document.getElementById('kbText');
@@ -109,6 +110,16 @@ kbInput.addEventListener('input', () => {
   kbInput.style.height = 'auto';
   kbInput.style.height = Math.min(kbInput.scrollHeight, 84) + 'px';
 });
+
+// 输入法候选框被挡：泡泡是 screen-saver 高层级，IME 候选窗被压在下面。
+// 输入框聚焦时让主进程把窗口降到 floating，失焦恢复。window blur/focus 兜底：
+// 切去别的 app 时输入框不触发 blur（仍是 activeElement），不兜底层级会卡在 floating。
+// 桥接方法可能不存在（旧 preload），可选调用防崩
+const kbIme = (on) => window.pet.kbIme && window.pet.kbIme(on);
+kbInput.addEventListener('focus', () => kbIme(true));
+kbInput.addEventListener('blur', () => kbIme(false));
+window.addEventListener('blur', () => { if (document.activeElement === kbInput) kbIme(false); });
+window.addEventListener('focus', () => { if (document.activeElement === kbInput) kbIme(true); });
 
 function dismiss() {
   if (!shown) return;

@@ -1363,6 +1363,30 @@ app.whenReady().then(async () => {
     // 手柄拖拽调大小期间穿透由主进程把守（强制接管鼠标），渲染层的开关先压住
     if (kiraBubbleWin && !kbResizing) kiraBubbleWin.setIgnoreMouseEvents(flag, { forward: true });
   });
+  // 输入法候选框被挡修复：泡泡是 screen-saver 高层级，IME 候选窗层级更低被压在下面。
+  // 输入框聚焦期间临时降到 floating（仍高于普通窗口，只让出 IME 层级），失焦恢复。
+  // 恢复做 150ms 防抖：点发送钮等场景输入框会先 blur 再立刻 focus，防抖避免层级来回跳
+  let kbImeTimer = null;
+  const kbRestoreLevel = () => {
+    clearTimeout(kbImeTimer);
+    kbImeTimer = null;
+    if (kiraBubbleWin) kiraBubbleWin.setAlwaysOnTop(true, 'screen-saver');
+  };
+  ipcMain.on('kb-ime', (_e, on) => {
+    if (!kiraBubbleWin) return;
+    clearTimeout(kbImeTimer);
+    kbImeTimer = null;
+    if (on) {
+      kiraBubbleWin.setAlwaysOnTop(true, 'floating');
+    } else {
+      kbImeTimer = setTimeout(() => {
+        kbImeTimer = null;
+        kbRestoreLevel();
+      }, 150);
+    }
+  });
+  // 层级恢复双保险：渲染层 blur 上报（150ms 防抖）之外，hide 事件再兜底一次
+  kiraBubbleWin.on('hide', kbRestoreLevel);
   // 泡泡内链接开系统浏览器；只放行 http/https/mailto，挡渲染层传来的奇怪协议
   ipcMain.on('kb-open-link', (_e, href) => {
     if (typeof href === 'string' && /^(https?|mailto):/i.test(href)) shell.openExternal(href);
