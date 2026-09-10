@@ -5,7 +5,7 @@
 // 链接点击走系统浏览器（不算关闭）、Esc 关闭（输入框聚焦时先失焦，再按才关）、双击或右下角 💬 打开 kira tab、
 // 右下角还有：飞书跳转、↺ 复位默认位置、拖拽手柄调大小（位置+大小由主进程持久化）、
 // 左下角放大钮：窗口×2+内容 CSS zoom×2 的临时放大态（不落盘，Esc 优先缩回），
-// 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（框边缘拖，文字不拖）
+// 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（顶部条整片可拖，文字不拖）
 const kb = document.getElementById('kb');
 const kbMsgs = document.getElementById('kbMsgs');
 const kbText = document.getElementById('kbText');
@@ -17,6 +17,7 @@ const kbFeishu = document.getElementById('kbFeishu');
 const kbReset = document.getElementById('kbReset');
 const kbResize = document.getElementById('kbResize');
 const kbZoom = document.getElementById('kbZoom');
+const kbAvatar = document.querySelector('.kb-avatar');
 
 let shown = false;
 let zoomed = false; // 放大态：窗口×2+内容 zoom×2；临时态不落盘，Esc 优先缩回
@@ -206,13 +207,14 @@ kb.addEventListener('dblclick', (e) => {
   window.pet.kiraBubbleOpen();
 });
 
-// 点击穿透：只有光标落在泡泡上才接管鼠标，其余全部穿透
+// 点击穿透：只有光标落在泡泡上才接管鼠标，其余全部穿透；
+// 人物立绘悬贴在卡体之外（上/左冒出），它的矩形也算「在泡泡上」，否则悬贴部分会成为穿透洞
 let ignoring = true;
 window.addEventListener('mousemove', (e) => {
   let over = false;
   if (shown && kb.classList.contains('show')) {
-    const r = kb.getBoundingClientRect();
-    over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    const inRect = (r) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    over = inRect(kb.getBoundingClientRect()) || inRect(kbAvatar.getBoundingClientRect());
   }
   const want = !over;
   if (want !== ignoring) {

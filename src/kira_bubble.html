@@ -51,36 +51,37 @@
     border-top-color: #b3afa5; /* 咬住渐变底端色，尾巴不脱节 */
     border-bottom: 0;
   }
-  /* 顶部头像行：Q 版小人贴左上角，标识这张卡是 kira 在说话 */
-  .kb-head { display: flex; align-items: center; margin: -2px 0 2px; user-select: none; }
-  .kb-avatar {
-    width: 30px;
+  /* 顶部拖拽条：整片 drag，按住标题栏一带直接拖走泡泡；✕ 按钮自带 no-drag 不受影响 */
+  .kb-head {
     height: 30px;
-    border-radius: 50%;
-    overflow: hidden;
-    flex: none;
-    border: 1.5px solid #948f83;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-    background: #e6e3da;
+    margin: 0 0 2px;
+    user-select: none;
+    -webkit-app-region: drag;
   }
-  /* 全身立绘裁出脸部：先 cover 再放大到脸的位置 */
+  /* Q 版人物完整立绘悬贴卡片左上角：上边、左边各冒出卡体一点（绝对定位不卡流），
+     无圆圈裁切；自身也是 drag 区——按住悬贴的人物同样能拖走泡泡 */
+  .kb-avatar {
+    position: absolute;
+    left: -16px;
+    top: -20px;
+    width: 56px;
+    -webkit-app-region: drag;
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+  }
   .kb-avatar img {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: 50% 20%;
-    transform: scale(2.1);
-    transform-origin: 50% 24%;
+    display: block;
     -webkit-user-drag: none;
   }
   /* 消息区：kira 正文（无气泡，沿用原正文样式）+ 自己的居右气泡，上下滚动；
-     跟窗口高度走（默认 520-200=320）：窗口拖高后长文能少滚动 */
+     跟窗口高度走（默认 520-212=308）：窗口拖高后长文能少滚动；
+     比卡体其余部分多留 12px——给悬贴人物冒出卡顶的 20px 留窗口头部余量，长文顶满时不被窗顶裁切 */
   #kbMsgs {
     -webkit-app-region: no-drag;
     user-select: text;
     -webkit-user-select: text;
     cursor: text;
-    max-height: calc(100vh - 200px);
+    max-height: calc(100vh - 212px);
     overflow-y: auto;
   }
   /* 自己的消息：居右深气泡（色值抄本本 .msg.me，深底压在奶油浅卡上对比清晰） */
