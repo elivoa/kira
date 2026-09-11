@@ -805,6 +805,10 @@ function petDisplay() {
 }
 function petArea() { return petDisplay().workArea; }
 
+// 桌宠可活动范围：所在显示器的整屏 bounds（含 Dock/菜单栏区域），区别于 workArea——
+// 用户要求能拖到/常驻在屏幕最底部；夹取仍保证窗口整体留在屏内，不会丢
+function petBounds(dpy) { return (dpy || petDisplay()).bounds; }
+
 // 覆盖层跟随桌宠（或指定显示器）所在屏：特效/菜单只存在于一块屏上
 function syncOverlay(dpy) {
   if (!overlay) return;
@@ -814,24 +818,25 @@ function syncOverlay(dpy) {
   overlay.setBounds({ x: a.x, y: a.y, width: a.width, height: a.height });
 }
 
-// 把窗口位置限制在某块显示器（默认桌宠当前所在屏）的工作区内
+// 把窗口位置限制在某块显示器（默认桌宠当前所在屏）的整屏范围内（含 Dock/菜单栏区域，
+// 底部可以贴到屏幕最下沿）；窗口整体始终留在屏内，不会掉出屏幕抓不回来。
 // 垂直方向允许高出屏幕顶 winH()-160：攀爬动作要沿高窗爬到顶沿，窗口大部可以出屏，
 // 保留 160px 可见（立绘脚部），拖拽/走路也不会把她弄丢
 function clampToScreen(x, y, dpy) {
-  const area = (dpy || petDisplay()).workArea;
+  const area = petBounds(dpy);
   return {
     x: Math.min(Math.max(x, area.x), area.x + area.width - winW()),
     y: Math.min(Math.max(y, area.y - (winH() - 160)), area.y + area.height - winH()),
   };
 }
 
-// 一块屏的四条边外侧是否还接着别的屏（工作区在该方向越界且另一轴有交叠）
+// 一块屏的四条边外侧是否还接着别的屏（整屏 bounds 在该方向越界且另一轴有交叠）
 function displayNeighbors(d) {
-  const a = d.workArea;
+  const a = d.bounds;
   const n = { left: false, right: false, top: false, bottom: false };
   for (const e of screen.getAllDisplays()) {
     if (e.id === d.id) continue;
-    const b = e.workArea;
+    const b = e.bounds;
     const vOverlap = b.y < a.y + a.height && b.y + b.height > a.y;
     const hOverlap = b.x < a.x + a.width && b.x + b.width > a.x;
     if (vOverlap && b.x < a.x) n.left = true;
@@ -844,10 +849,11 @@ function displayNeighbors(d) {
 
 // 拖拽专用夹取：以「光标所在的屏」为准，且接着别的屏的那一侧完全不夹，
 // 人物才能跨过屏幕交界（光标始终落在窗口内，所以不会被拖丢）；
-// 桌面外沿（没有邻屏的那侧）仍按工作区夹住，不让她掉出屏幕
+// 桌面外沿（没有邻屏的那侧）按整屏 bounds 夹住——能贴到屏幕最底部（Dock 区域），
+// 但窗口整体不拖出屏幕
 function clampToDrag(x, y, cursor) {
   const d = screen.getDisplayNearestPoint(cursor);
-  const a = d.workArea, w = winW(), h = winH();
+  const a = d.bounds, w = winW(), h = winH();
   const n = displayNeighbors(d);
   if (!n.left) x = Math.max(x, a.x);
   if (!n.right) x = Math.min(x, a.x + a.width - w);
@@ -1052,9 +1058,10 @@ app.whenReady().then(async () => {
   // 全局光标位置（惊吓检测轮询用，macOS 读光标不需要权限）
   ipcMain.handle('get-cursor', () => screen.getCursorScreenPoint());
 
-  // 屏幕可活动范围（暴走/御剑飞行用）：桌宠当前所在显示器
+  // 屏幕可活动范围（暴走/御剑飞行/走路的地面用）：桌宠当前所在显示器的整屏 bounds，
+  // floorY 到屏幕最下沿（含 Dock 区域），和拖拽/常驻位置的夹取口径一致
   ipcMain.handle('get-stage', () => {
-    const area = petArea();
+    const area = petBounds();
     return {
       minX: area.x, maxX: area.x + area.width - winW(),
       minY: area.y, floorY: area.y + area.height - winH(),
@@ -1569,7 +1576,9 @@ app.whenReady().then(async () => {
     const minX = Math.round(Math.max(w.x + 20, area.x));
     const maxX = Math.round(Math.min(w.x + w.w - winW() - 20, area.x + area.width - winW()));
     if (maxX <= minX) return null;
-    return { minX, maxX, y: Math.round(w.y), floorY: area.y + area.height - winH() };
+    // 跳下窗台的落点地面：与 get-stage 口径一致，按整屏 bounds 算（含 Dock 区域）
+    const ground = petBounds();
+    return { minX, maxX, y: Math.round(w.y), floorY: ground.y + ground.height - winH() };
   });
 
   // 当前活跃窗口（最前台的普通窗口）：撞墙模式拿它的左右边沿当墙；限桌宠当前屏
