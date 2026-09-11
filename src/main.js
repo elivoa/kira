@@ -1576,7 +1576,9 @@ app.whenReady().then(async () => {
     const minX = Math.round(Math.max(w.x + 20, area.x));
     const maxX = Math.round(Math.min(w.x + w.w - winW() - 20, area.x + area.width - winW()));
     if (maxX <= minX) return null;
-    return { minX, maxX, y: Math.round(w.y), floorY: area.y + area.height - winH() };
+    // 跳下窗台的落点地面：与 get-stage 口径一致，按整屏 bounds 算（含 Dock 区域）
+    const ground = petBounds();
+    return { minX, maxX, y: Math.round(w.y), floorY: ground.y + ground.height - winH() };
   });
 
   // 当前活跃窗口（最前台的普通窗口）：撞墙模式拿它的左右边沿当墙；限桌宠当前屏
