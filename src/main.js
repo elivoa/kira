@@ -565,24 +565,38 @@ let kiraBubbleWin = null;
 let kbAnchored = false; // 初始位置定过没有（定过就锁死，不再跟着人物动）
 let kbResizing = false; // 手柄拖拽调大小期间：主进程强制接管鼠标，渲染层的穿透开关先压住
 let kbMutePersist = false; // 程序化锚定（首次/复位）触发的 move/resize 不落盘：没记录就该每次默认锚定
-let kbZoomed = false; // 左下角放大钮的临时放大态：窗口×2+内容 zoom×2，不落盘
-let kbZoomScale = { sx: 1, sy: 1 }; // 放大时实际生效的轴比例（钳制后可能 <2），持久化换算回基准尺寸用
+let kbZoomed = false; // 左下角放大钮的临时放大态：窗口×1.5+内容 zoom×1.5，不落盘
+let kbZoomScale = { sx: 1, sy: 1 }; // 放大时实际生效的轴比例（钳制后可能 <1.5），持久化换算回基准尺寸用
 let kbZoomAnim = null; // 放大/缩回的窗口尺寸过渡动画定时器
 let kbZoomAnimTarget = null; // 进行中动画的目标 bounds：动画中再次切换时先 settle 到这里，别从插值中间帧读数
+let kbZoomSavedBounds = null; // 放大前的窗口 bounds 快照：缩回逐像素还原用它；放大期间用户拖拽过则改记拖拽后的基准值
+let kbZoomSettledBounds = null; // 最近一次程序化落定的 bounds：move/resize 事件里靠它区分用户拖拽和动画尾帧/settle 帧
 
-// 放大态下窗口 bounds 反推出未放大的基准 bounds（中心对齐换算）：持久化和缩回都用它，
-// 这样放大期间的边缘拖动/手柄调整也能正确折算回基准尺寸
+// 放大态下窗口 bounds 反推出未放大的基准 bounds（中心对齐换算）：持久化和放大期间的用户拖拽记基准都用它，
+// 这样放大期间的边缘拖动/手柄调整也能正确折算回基准尺寸（缩回不走它——中心换算有 ±1px 取整漂移，见 setKbZoom）
 function kbBaseBounds(zb) {
   const w = Math.round(zb.width / kbZoomScale.sx);
   const h = Math.round(zb.height / kbZoomScale.sy);
   return { x: Math.round(zb.x + (zb.width - w) / 2), y: Math.round(zb.y + (zb.height - h) / 2), width: w, height: h };
 }
 
+// 放大期间的用户拖拽（顶条拖动/手柄调大小）检测：move/resize 事件里 bounds 与最近一次程序化落定值
+// 不同才算用户拖拽——动画尾帧和 settle 帧都等于落定值，不能误记成拖拽。确认是拖拽就把缩回基准改记为
+// 拖拽后的值（换算回基准尺寸），缩回时还原到拖拽后位置而非放大前快照
+function noteKbUserBounds() {
+  if (!kiraBubbleWin || !kbZoomed || kbZoomAnim) return;
+  const b = kiraBubbleWin.getBounds();
+  const s = kbZoomSettledBounds;
+  if (s && b.x === s.x && b.y === s.y && b.width === s.width && b.height === s.height) return;
+  kbZoomSavedBounds = kbBaseBounds(b);
+  kbZoomSettledBounds = b;
+}
+
 // 窗口尺寸过渡动画（~180ms ease-out）；instant 时直接落定（关闭/复位等不需要动画的场合）
 function animateKbBounds(target, instant) {
   if (kbZoomAnim) { clearInterval(kbZoomAnim); kbZoomAnim = null; }
   kbZoomAnimTarget = null;
-  if (instant) { kiraBubbleWin.setBounds(target); return; }
+  if (instant) { kbZoomSettledBounds = target; kiraBubbleWin.setBounds(target); return; } // 先记落定值再 setBounds：move/resize 可能同步触发
   const start = kiraBubbleWin.getBounds();
   const t0 = Date.now();
   kbZoomAnimTarget = target;
@@ -596,12 +610,14 @@ function animateKbBounds(target, instant) {
       width: Math.round(start.width + (target.width - start.width) * e),
       height: Math.round(start.height + (target.height - start.height) * e),
     });
-    if (t >= 1) { clearInterval(kbZoomAnim); kbZoomAnim = null; kbZoomAnimTarget = null; }
+    if (t >= 1) { clearInterval(kbZoomAnim); kbZoomAnim = null; kbZoomAnimTarget = null; kbZoomSettledBounds = target; }
   }, 16);
 }
 
-// 放大/缩回切换：尺寸×2（钳制到工作区、保持中心）并通知渲染层同步 CSS zoom；
-// 放大是临时态——kbZoomed 期间 saveKbBounds/kb-resize-end 一律换算成基准 bounds 再落盘
+// 放大/缩回切换：尺寸×1.5（钳制到工作区、保持中心）并通知渲染层同步 CSS zoom；
+// 放大是临时态——kbZoomed 期间 saveKbBounds/kb-resize-end 一律换算成基准 bounds 再落盘。
+// 缩回逐像素还原放大前快照的 bounds（中心反推有取整漂移，不满足「不能有位移」）；
+// 例外：放大期间用户拖 grip/边缘改过位置大小（noteKbUserBounds 把快照改记成拖拽后的基准值），还原到拖拽后位置
 function setKbZoom(on, animate = true) {
   if (!kiraBubbleWin || on === kbZoomed) return;
   // 动画进行中再次触发（快速双击放大钮/连按 Esc）：先 settle 到进行中动画的目标态，
@@ -609,6 +625,7 @@ function setKbZoom(on, animate = true) {
   if (kbZoomAnim) {
     clearInterval(kbZoomAnim);
     kbZoomAnim = null;
+    kbZoomSettledBounds = kbZoomAnimTarget; // 先记落定值再 setBounds：macOS 的 move/resize 事件可能同步触发，别被 noteKbUserBounds 误记成用户拖拽
     kiraBubbleWin.setBounds(kbZoomAnimTarget);
     kbZoomAnimTarget = null;
   }
@@ -616,8 +633,10 @@ function setKbZoom(on, animate = true) {
   const a = screen.getDisplayMatching(b).workArea;
   let target;
   if (on) {
-    const w = Math.round(Math.min(b.width * 2, a.width));
-    const h = Math.round(Math.min(b.height * 2, a.height));
+    kbZoomSavedBounds = { ...b }; // 放大前快照：缩回逐像素还原到这组 bounds
+    kbZoomSettledBounds = { ...b };
+    const w = Math.round(Math.min(b.width * 1.5, a.width));
+    const h = Math.round(Math.min(b.height * 1.5, a.height));
     kbZoomScale = { sx: w / b.width, sy: h / b.height };
     target = {
       x: Math.round(Math.min(Math.max(b.x + b.width / 2 - w / 2, a.x), Math.max(a.x, a.x + a.width - w))),
@@ -627,7 +646,8 @@ function setKbZoom(on, animate = true) {
     };
     kbZoomed = true;
   } else {
-    const base = kbBaseBounds(b);
+    const base = kbZoomSavedBounds || kbBaseBounds(b); // 无快照兜底（理论上不会走到）：中心反推
+    kbZoomSavedBounds = null;
     const w = Math.min(base.width, a.width);
     const h = Math.min(base.height, a.height);
     target = {
@@ -671,7 +691,7 @@ function createKiraBubble() {
   let kbBoundsTimer = null;
   const saveKbBounds = () => {
     if (!kiraBubbleWin || kbMutePersist) return;
-    // 放大态是临时态：落盘一律写换算回的基准 bounds，×2 的尺寸不进 settings
+    // 放大态是临时态：落盘一律写换算回的基准 bounds，×1.5 的尺寸不进 settings
     settings.kiraBubbleBounds = kbZoomed ? kbBaseBounds(kiraBubbleWin.getBounds()) : kiraBubbleWin.getBounds();
     saveConfig();
   };
@@ -679,8 +699,8 @@ function createKiraBubble() {
     clearTimeout(kbBoundsTimer);
     kbBoundsTimer = setTimeout(saveKbBounds, 300);
   };
-  kiraBubbleWin.on('move', debounceSaveKbBounds);
-  kiraBubbleWin.on('resize', debounceSaveKbBounds);
+  kiraBubbleWin.on('move', () => { noteKbUserBounds(); debounceSaveKbBounds(); });
+  kiraBubbleWin.on('resize', () => { noteKbUserBounds(); debounceSaveKbBounds(); });
 }
 
 // 初始位置：有记录用记录的位置+大小，没有才默认锚定人物头顶上方居中（夹在人物所在屏工作区内）；
