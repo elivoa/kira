@@ -73,6 +73,8 @@ let dragOffset = null;
 let lastTypeAt = 0;
 // 输入光标查询缓存：AX 查询有开销，400ms 内复用上次结果（null 也缓存）
 let caretCache = null;
+// 进行中的光标查询：红框 150ms 轮询叠加 NSApp 初始化后单次查询可能 ~0.3s，去重避免并发 caret 进程堆积
+let caretInflight = null;
 
 // ---------- 统一配置（~/.config/kira/config.json） ----------
 // Kimi key、动作开关/频率/点击穿透、笔记本窗口位置都存这一个文件
@@ -457,8 +459,10 @@ function startKeyMonitor() {
 // 读一次输入光标位置（屏幕坐标 {x,y,width,height}）；失败/超时/无输出都回 null，maxAge 毫秒内走缓存
 function getCaret(maxAge = 400) {
   if (caretCache && Date.now() - caretCache.t < maxAge) return Promise.resolve(caretCache.v);
-  return new Promise((resolve) => {
-    execFile(CARET_BIN, [], { timeout: 500 }, (err, stdout) => {
+  if (caretInflight) return caretInflight; // 并发去重：多个调用方共享同一次查询
+  caretInflight = new Promise((resolve) => {
+    // caret 进程内含 ~0.15s NSApp 初始化，冷启动单次可达 ~0.7s，timeout 放宽到 1200ms
+    execFile(CARET_BIN, [], { timeout: 1200 }, (err, stdout) => {
       let v = null;
       if (!err) {
         try {
@@ -467,9 +471,11 @@ function getCaret(maxAge = 400) {
         } catch {}
       }
       caretCache = { t: Date.now(), v };
+      caretInflight = null;
       resolve(v);
     });
   });
+  return caretInflight;
 }
 
 function createWindow() {
@@ -561,6 +567,8 @@ function createBubble() {
 // 聚焦输入框红框：轮询光标矩形，有就框住（外扩 3px）、没有就藏；只画边框线，不抢焦点不吃点击
 const REDFRAME_PAD = 3;
 const REDFRAME_POLL = 150; // 比 input-context 的 400ms 缓存跟手，走 getCaret 快通道
+// frame 回退路径下只框这些文本类 role（marker range 精确光标不过滤，它本身就证明在文本里）
+const REDFRAME_TEXT_ROLES = new Set(['AXTextArea', 'AXTextField', 'AXSearchField', 'AXComboBox', 'AXSecureTextField', 'AXTextGroup']);
 function createRedframe() {
   redframeWin = new BrowserWindow({
     width: 10,
@@ -590,7 +598,10 @@ function trackRedframe() {
   let lastKey = null; // 上一次应用到窗口的矩形，没变就不重复 setBounds
   setInterval(async () => {
     if (!redframeWin || redframeWin.isDestroyed()) return;
-    const c = await getCaret(REDFRAME_POLL);
+    let c = await getCaret(REDFRAME_POLL);
+    // 只框文本输入：marker range 精确光标（kind=caret）直接框；元素 frame 回退只限文本类 role，
+    // 不然红框会跟着 Finder 列表、按钮等任意焦点元素跑（旧版 caret 无 kind/role 字段时放行，向后兼容）
+    if (c && c.kind === 'frame' && c.role && !REDFRAME_TEXT_ROLES.has(c.role)) c = null;
     if (!c) {
       if (lastKey !== null) {
         lastKey = null;
