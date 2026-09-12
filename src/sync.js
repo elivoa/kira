@@ -210,9 +210,9 @@ async function pullFile(name) {
     if (r.status === 'missing') return { ok: true, missing: true };
     if (r.status !== 'ok') throw new Error(`${name} 第 ${want} 段回传格式不对`);
     if (r.name !== name) throw new Error(`回传串文件了（期望 ${name}，收到 ${r.name}）`);
+    if (r.part !== want) throw new Error(`${name} 段号不连续（期望 ${want}，收到 ${r.part}）`); // 先验段序：kira 直接回末段时不能让残缺内容落盘
     content += r.content;
     if (r.part >= r.total) return { ok: true, content };
-    if (r.part !== want) throw new Error(`${name} 段号不连续（期望 ${want}，收到 ${r.part}）`);
     prompt = '继续';
   }
   throw new Error(`${name} 超过 ${PULL_MAX_PARTS} 段还没完，放弃`);
@@ -334,7 +334,7 @@ function stop() {
 function setConfig(patch) {
   const cfg = syncCfg();
   if (typeof patch.enabled === 'boolean') cfg.enabled = patch.enabled;
-  if (patch.intervalHours > 0) cfg.intervalHours = patch.intervalHours;
+  if (patch.intervalHours > 0) cfg.intervalHours = Math.max(1, Math.min(168, patch.intervalHours)); // 主进程侧夹紧：UI 是 1-168，IPC 不能放进秒级轮询
   if (Array.isArray(patch.envBoundExtra)) cfg.envBoundExtra = patch.envBoundExtra;
   if (deps && deps.persist) deps.persist();
   start();

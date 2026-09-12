@@ -128,7 +128,40 @@ yomi.onMsg((m) => sync.onYomiMessage(m));
   assert.strictEqual(count, 1, '指针行不能重复添加');
   console.log('✓ 手动触发 + 索引指针不重复');
 
-  // 3) 纯函数单测：parsePullReply 缺文件/坏格式、chunkText、isEnvBound
+  // 3) 跳段被丢弃：kira 直接回末段（2/2）时拉取必须失败、残缺内容不落盘
+  const home2 = fs.mkdtempSync(path.join(os.tmpdir(), 'memsync-test2-'));
+  fs.mkdirSync(path.join(home2, '.agents/memory'), { recursive: true });
+  fs.writeFileSync(path.join(home2, '.agents/memory/MEMORY.md'), '# 空索引\n');
+  const jumpYomi = {
+    state: { status: 'online', sessionId: 's1' },
+    sent: [],
+    getState() { return this.state; },
+    sayToSession(text) {
+      this.sent.push(text);
+      setTimeout(() => this._emit({ role: 'assistant', content: '«SYNC-BEGIN SKILL.md 2/2»\n末段内容\n«SYNC-END»', sessionId: 's1' }), 5);
+      return Promise.resolve({});
+    },
+    onMsg(fn) { this._emit = fn; },
+  };
+  const sync2 = require('../src/sync.js');
+  // sync 模块是单例，重 init 到跳段桩 + 新 home（上一轮的全局状态不影响：replyWait 已空、定时器未挂）
+  const cfg2 = {};
+  sync2.init({ getConfig: () => cfg2, persist: () => {}, yomi: jumpYomi, home: home2, log: () => {}, onStatus: () => {} });
+  jumpYomi.onMsg((m) => sync2.onYomiMessage(m));
+  const r3 = await sync2.runNow('manual');
+  assert.strictEqual(r3.pull.ok, false, '跳段必须判拉取失败');
+  assert.ok(/段号不连续/.test(r3.pull.error), `失败原因应是段号不连续：${r3.pull.error}`);
+  assert.ok(!fs.existsSync(path.join(home2, '.agents/skills/kira-profile/SKILL.md')), '残缺文件不能落盘');
+  console.log('✓ 跳段被丢弃（拉取失败、残缺不落盘）');
+
+  // 4) setConfig 间隔夹紧：小数值/超上限都按 1-168 收
+  sync2.setConfig({ intervalHours: 0.0001 });
+  assert.strictEqual(sync2.getState().intervalHours, 1, '下限应夹到 1 小时');
+  sync2.setConfig({ intervalHours: 999 });
+  assert.strictEqual(sync2.getState().intervalHours, 168, '上限应夹到 168 小时');
+  console.log('✓ setConfig intervalHours 夹紧 1-168');
+
+  // 5) 纯函数单测：parsePullReply 缺文件/坏格式、chunkText、isEnvBound
   assert.strictEqual(sync.parsePullReply('«SYNC-MISSING X.md»', 'X.md').status, 'missing');
   assert.strictEqual(sync.parsePullReply('随便回了一句', 'X.md').status, 'bad');
   const p = sync.parsePullReply('«SYNC-BEGIN X.md 1/2»\nabc\n«SYNC-END»', 'X.md');
