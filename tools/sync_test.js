@@ -1,6 +1,7 @@
 // sync.js mock 测试（M47 新协议）：yomi read_file 桩 + 真实本地 git（file:// bare 仓当 remote）。
 // 验证：断线跳过 / read_file 拉三件套（mtime 增量、缺失跳过、分页拼接）/ git push（目录结构、
-// 作者 kira-pet、无变化不推、改后再推、删文件同步删除）/ 通知失败补发 / 无凭证跳过 / setConfig 夹紧。
+// 作者 kira-pet、无变化不推、改后再推、删文件同步删除）/ token 不落盘（含 token 的 remote URL 被重写）/
+// 通知失败补发 / 无凭证跳过 / setConfig 夹紧。
 // 直接跑：node tools/sync_test.js（无测试框架，断言失败即非零退出）
 const fs = require('fs');
 const os = require('os');
@@ -169,6 +170,14 @@ function remoteContent(f) {
   assert.strictEqual(yomi.sent.length, 0, '未变不该发 kira 指令');
   assert.ok(/未变/.test(r3.pull.detail) && /无变化/.test(r3.push.detail), '日志应说明未变');
   console.log('✓ 增量判断（mtime 未变不拉、内容未变不推不通知）');
+
+  // 3b) token 不落盘：clone 里被塞了含 token 的 remote URL 时，下轮 ensureRepo 重写成净 URL
+  const cloneDir = path.join(home, '.config', 'kira', 'kira-memsync');
+  gitOut(['-C', cloneDir, 'remote', 'set-url', 'origin', 'https://oauth2:SECRETTOKEN@dev.msh.team/gaobo/kira-memsync.git']);
+  await sync.runNow('manual');
+  assert.strictEqual(gitOut(['-C', cloneDir, 'config', 'remote.origin.url']), `file://${bare}`, 'remote URL 应被重写成净 URL');
+  assert.ok(!fs.readFileSync(path.join(cloneDir, '.git', 'config'), 'utf8').includes('SECRETTOKEN'), '.git/config 不该残留 token');
+  console.log('✓ token 不落盘（含 token 的 remote URL 被重写为净 URL）');
 
   // 4) kira 侧 mtime 变了：只重拉那一个；本地删一个 topic：推送同步删除
   profile['TODO.md'] = { content: profileTodo + '- 事项二\n', mtime_ms: 3000 };

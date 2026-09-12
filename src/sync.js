@@ -4,7 +4,8 @@
 //     没变不拉；并在 ~/.agents/memory/MEMORY.md 索引维护一行指针（没有才加，不重复、不动其他行）。
 // 推：~/.agents/memory/（MEMORY.md + topics/）和各 skill 的 SKILL.md 按目录结构写到
 //     GitLab 私有仓 gaobo/kira-memsync 的 local/ 目录（memory/、skills/<name>/、SYNC-MANIFEST.md
-//     标注 env 绑定），git commit + push（作者 kira-pet <kira-pet@local>，-c 传参不碰全局 git config）；
+//     标注 env 绑定），git commit + push（作者 kira-pet <kira-pet@local>，-c 传参不碰全局 git config；
+//     token 不落盘——remote 用净 URL，凭证经 credential helper + 环境变量按需喂）；
 //     内容无变化不推；推完发一条同步指令让 kira git pull 落到 /root/.agents/skills/。
 // 全程不再产生聊天分块（M43 的 65 块 base64 协议已删）：拉取是纯 RPC，推送是 git，一轮最多一条指令消息。
 // 推拉各自 try/catch 记日志，互不阻断；同步窗口期会话静默（main.js 按 isActive 吞掉窗口内消息）。
@@ -54,8 +55,6 @@ function getState() {
 function isActive() { return running || Date.now() < muteUntil; }
 
 // ---------- 小工具（纯函数，供 mock 测试直接调） ----------
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-
 // 原子写：tmp + rename，进程被强杀不留半截文件（和 saveConfig 同款）
 function atomicWrite(file, content) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -149,9 +148,37 @@ async function pullProfile() {
 // ---------- 推：本地 → kira（GitLab 仓 gaobo/kira-memsync 中转） ----------
 function repoDir() { return path.join(home(), '.config', 'kira', 'kira-memsync'); }
 
+// execFile 的 Promise 封装：全部 git/glab 调用都走异步，同步任务在主进程跑，
+// execFileSync 会把 Electron 事件循环冻结到命令结束（clone/fetch/push 超时 120-180s）
+function execFileAsync(cmd, args, opts) {
+  return new Promise((resolve, reject) => {
+    childProcess.execFile(cmd, args, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
+      if (err) { err.stderr = stderr || ''; reject(err); } else resolve({ stdout, stderr });
+    });
+  });
+}
+
+// token 不落盘：remote URL 用不带凭证的净 URL（.git/config 里也是它），凭证每轮按需经
+// credential helper 喂给 git——helper 是命令行里的 shell 片段（不含 token），token 只活在子进程环境变量里
+const CRED_HELPER_SNIPPET = '!f() { echo username=oauth2; echo "password=$KIRA_MEMSYNC_TOKEN"; }; f';
+function gitEnv(token) {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+  if (token) env.KIRA_MEMSYNC_TOKEN = token;
+  return env;
+}
+function credArgs(token) {
+  // 先 `-c credential.helper=` 清空继承列表（防用户全局 helper 抢答），再挂我们的
+  const pre = ['-c', 'credential.helper='];
+  if (token) pre.push('-c', `credential.helper=${CRED_HELPER_SNIPPET}`);
+  return pre;
+}
+function gitArgs(args, token) {
+  return ['-C', repoDir(), ...credArgs(token), ...args];
+}
+
 // GitLab 凭证：config.sync.gitlabToken → GITLAB_TOKEN 环境变量 → glab 配置文件
 // （打包 app 从 Finder 启动没有 shell 环境，主要靠 glab 配置；都不动用户任何 git 全局配置）
-function gitlabToken() {
+async function gitlabToken() {
   const cfg = syncCfg();
   if (typeof cfg.gitlabToken === 'string' && cfg.gitlabToken.trim()) return cfg.gitlabToken.trim();
   if ((process.env.GITLAB_TOKEN || '').trim()) return process.env.GITLAB_TOKEN.trim();
@@ -165,49 +192,49 @@ function gitlabToken() {
     } catch {}
   }
   try {
-    return childProcess.execFileSync('glab', ['auth', 'token', '-h', 'dev.msh.team'], {
-      encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const { stdout } = await execFileAsync('glab', ['auth', 'token', '-h', 'dev.msh.team'], { timeout: 10000 });
+    return stdout.trim();
   } catch { return ''; }
 }
 
-function remoteUrl(token) {
+// 净 URL（不含 token）：token 只经 credential helper 按需喂，不写进任何配置文件
+function remoteUrl() {
   const cfg = syncCfg();
   if (typeof cfg.gitRemoteUrl === 'string' && cfg.gitRemoteUrl.trim()) return cfg.gitRemoteUrl.trim(); // 测试/自建远端可覆盖
-  return `https://oauth2:${token}@${GIT_HOST_PATH}`;
+  return `https://${GIT_HOST_PATH}`;
 }
 
-// 错误文本脱敏 + 压成一行：git 报错会把带 token 的 remote URL 一起吐出来
+// 错误文本脱敏 + 压成一行：git 报错可能把 remote URL / 凭证片段一起吐出来
 function redact(text, token) {
   let s = String(text == null ? '' : text);
   if (token) s = s.split(token).join('***');
   return s.split('\n').map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ');
 }
 
-function git(args, token) {
+async function git(args, token) {
   try {
-    return childProcess.execFileSync('git', ['-C', repoDir(), ...args], {
-      encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const { stdout } = await execFileAsync('git', gitArgs(args, token), { timeout: 120000, env: gitEnv(token) });
+    return stdout;
   } catch (e) {
     throw new Error(`git ${args[0]} 失败：${redact(e.stderr || e.message, token)}`);
   }
 }
 
 // 确保本地克隆可用（同步专用仓，目录在 ~/.config/kira/kira-memsync）；返回当前分支名
-function ensureRepo(url, token) {
+async function ensureRepo(url, token) {
   const dir = repoDir();
   if (!fs.existsSync(path.join(dir, '.git'))) {
     fs.rmSync(dir, { recursive: true, force: true }); // 上次 clone 半截的话清掉重来
     fs.mkdirSync(dir, { recursive: true });
     try {
-      childProcess.execFileSync('git', ['clone', url, dir], { encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'pipe'] });
+      await execFileAsync('git', [...credArgs(token), 'clone', url, dir], { timeout: 180000, env: gitEnv(token) });
     } catch (e) {
       throw new Error(`git clone 失败：${redact(e.stderr || e.message, token)}`);
     }
   }
-  git(['remote', 'set-url', 'origin', url], token); // 每轮换新 URL：token 轮换后自愈
-  return git(['symbolic-ref', '--short', 'HEAD'], token).trim() || 'master';
+  // 每轮把 remote 写成净 URL：token 轮换自愈，顺带清掉旧版本可能落进 .git/config 的明文 token URL
+  await git(['remote', 'set-url', 'origin', url], token);
+  return (await git(['symbolic-ref', '--short', 'HEAD'], token)).trim() || 'master';
 }
 
 // 推送内容：memory/（MEMORY.md + topics/ 原样镜像）+ skills/<name>/SKILL.md + SYNC-MANIFEST.md
@@ -296,28 +323,28 @@ async function pushAll() {
   const cfg = syncCfg();
   const { files } = buildRepoBundle(home(), { envBoundExtra: cfg.envBoundExtra });
   if (!files.length) throw new Error('本地 memory/skills 都是空的，没东西可推');
-  const token = gitlabToken();
+  const token = await gitlabToken();
   const urlOverride = typeof cfg.gitRemoteUrl === 'string' && cfg.gitRemoteUrl.trim();
   if (!token && !urlOverride) throw new Error('没有 GitLab 凭证（config.sync.gitlabToken / GITLAB_TOKEN / glab 配置都拿不到）');
-  const br = ensureRepo(remoteUrl(token), token);
+  const br = await ensureRepo(remoteUrl(), token);
   // 远端有内容先对齐；空仓首次 fetch 必然失败，跳过即可。同步专用仓内容每轮重新生成，reset 不丢东西
   try {
-    git(['fetch', 'origin', br], token);
-    git(['reset', '--hard', `origin/${br}`], token);
+    await git(['fetch', 'origin', br], token);
+    await git(['reset', '--hard', `origin/${br}`], token);
   } catch {}
   const localDir = path.join(repoDir(), 'local');
   fs.rmSync(localDir, { recursive: true, force: true });
   for (const f of files) atomicWrite(path.join(localDir, f.path), f.content);
-  git(['add', '-A', 'local/'], token);
-  if (!git(['diff', '--cached', '--name-only'], token).trim()) {
+  await git(['add', '-A', 'local/'], token);
+  if (!(await git(['diff', '--cached', '--name-only'], token)).trim()) {
     let detail = '内容无变化，本轮不推';
     if (cfg.pendingKiraNotify && (await notifyKira(cfg))) detail += '，已补发 kira 拉取通知';
     log('系统', `记忆同步推送：${detail}`);
     return { ok: true, detail, changed: false };
   }
-  git(['-c', 'user.name=kira-pet', '-c', 'user.email=kira-pet@local', 'commit', '-m',
+  await git(['-c', 'user.name=kira-pet', '-c', 'user.email=kira-pet@local', 'commit', '-m',
     `memsync: ${new Date().toISOString()}（${files.length} 个文件）`], token);
-  git(['push', 'origin', `HEAD:${br}`], token);
+  await git(['push', 'origin', `HEAD:${br}`], token);
   const notified = await notifyKira(cfg);
   const detail = `${files.length} 个文件已推到 gaobo/kira-memsync:${br}${notified ? '，已通知 kira 拉取' : '（通知 kira 失败，下轮补发）'}`;
   log('系统', `记忆同步推送完成：${detail}`);
