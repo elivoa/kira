@@ -565,8 +565,8 @@ let kiraBubbleWin = null;
 let kbAnchored = false; // 初始位置定过没有（定过就锁死，不再跟着人物动）
 let kbResizing = false; // 手柄拖拽调大小期间：主进程强制接管鼠标，渲染层的穿透开关先压住
 let kbMutePersist = false; // 程序化锚定（首次/复位）触发的 move/resize 不落盘：没记录就该每次默认锚定
-let kbZoomed = false; // 左下角放大钮的临时放大态：窗口×2+内容 zoom×2，不落盘
-let kbZoomScale = { sx: 1, sy: 1 }; // 放大时实际生效的轴比例（钳制后可能 <2），持久化换算回基准尺寸用
+let kbZoomed = false; // 左下角放大钮的临时放大态：窗口×1.5+内容 zoom×1.5，不落盘
+let kbZoomScale = { sx: 1, sy: 1 }; // 放大时实际生效的轴比例（钳制后可能 <1.5），持久化换算回基准尺寸用
 let kbZoomAnim = null; // 放大/缩回的窗口尺寸过渡动画定时器
 let kbZoomAnimTarget = null; // 进行中动画的目标 bounds：动画中再次切换时先 settle 到这里，别从插值中间帧读数
 
@@ -600,7 +600,7 @@ function animateKbBounds(target, instant) {
   }, 16);
 }
 
-// 放大/缩回切换：尺寸×2（钳制到工作区、保持中心）并通知渲染层同步 CSS zoom；
+// 放大/缩回切换：尺寸×1.5（钳制到工作区、保持中心）并通知渲染层同步 CSS zoom；
 // 放大是临时态——kbZoomed 期间 saveKbBounds/kb-resize-end 一律换算成基准 bounds 再落盘
 function setKbZoom(on, animate = true) {
   if (!kiraBubbleWin || on === kbZoomed) return;
@@ -616,8 +616,8 @@ function setKbZoom(on, animate = true) {
   const a = screen.getDisplayMatching(b).workArea;
   let target;
   if (on) {
-    const w = Math.round(Math.min(b.width * 2, a.width));
-    const h = Math.round(Math.min(b.height * 2, a.height));
+    const w = Math.round(Math.min(b.width * 1.5, a.width));
+    const h = Math.round(Math.min(b.height * 1.5, a.height));
     kbZoomScale = { sx: w / b.width, sy: h / b.height };
     target = {
       x: Math.round(Math.min(Math.max(b.x + b.width / 2 - w / 2, a.x), Math.max(a.x, a.x + a.width - w))),
