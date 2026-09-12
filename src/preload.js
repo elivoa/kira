@@ -92,6 +92,15 @@ contextBridge.exposeInMainWorld('pet', {
   yomiListSessions: () => ipcRenderer.invoke('yomi-list-sessions'),
   yomiHistory: () => ipcRenderer.invoke('yomi-history'),
   onYomiStatus: (fn) => ipcRenderer.on('yomi-status', (_e, s) => fn(s)),
+  // 记忆同步（kira ↔ 本地 ~/.agents 双向同步）
+  getSyncConfig: () => ipcRenderer.invoke('get-sync-config'),
+  setSyncConfig: (patch) => ipcRenderer.send('set-sync-config', patch),
+  syncNow: () => ipcRenderer.invoke('sync-now'),
+  onSyncStatus: (fn) => {
+    const h = (_e, s) => fn(s);
+    ipcRenderer.on('sync-status', h);
+    return () => ipcRenderer.removeListener('sync-status', h);
+  },
   // mira 链接（Mira Tag，JSON-RPC over WebSocket）
   getMiraConfig: () => ipcRenderer.invoke('get-mira-config'),
   setMiraConfig: (patch) => ipcRenderer.send('set-mira-config', patch),
