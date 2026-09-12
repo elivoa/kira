@@ -58,6 +58,18 @@
     user-select: none;
     -webkit-app-region: drag;
   }
+  /* 表头带补齐：人物冒头那一高度、人物右边到卡体右缘的一横条（透明不可见），
+     也是 drag 区——视觉上属于表头一带，点住同样能拖走泡泡；
+     与人物右缘略重叠不留缝，JS 侧点击穿透判定并入此矩形 */
+  .kb-headfill {
+    position: absolute;
+    left: 36px;
+    top: -20px;
+    right: 0;
+    height: 20px;
+    user-select: none;
+    -webkit-app-region: drag;
+  }
   /* Q 版人物完整立绘悬贴卡片左上角：上边、左边各冒出卡体一点（绝对定位不卡流），
      无圆圈裁切；自身也是 drag 区——按住悬贴的人物同样能拖走泡泡 */
   .kb-avatar {
@@ -224,7 +236,7 @@
     <button id="kbReset" title="恢复默认位置">↺</button>
     <button id="kbResize" title="拖拽调整大小"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M10.5 1.5 L1.5 10.5 M10.5 5.5 L5.5 10.5 M10.5 9.5 L9.5 10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg></button>
     <button id="kbZoom" title="放大"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1.5 4.2 V1.5 H4.2 M7.8 1.5 H10.5 V4.2 M10.5 7.8 V10.5 H7.8 M4.2 10.5 H1.5 V7.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg></button>
-    <div class="kb-head"><span class="kb-avatar"><img src="../assets/chibi.png" draggable="false" alt="kira"></span></div>
+    <div class="kb-head"><span class="kb-headfill"></span><span class="kb-avatar"><img src="../assets/chibi.png" draggable="false" alt="kira"></span></div>
     <div id="kbMsgs">
       <div id="kbText" class="kb-md"></div>
     </div>
