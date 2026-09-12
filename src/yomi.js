@@ -2,9 +2,9 @@
 // 替代原飞书 SDK 直连：kira daemon 才是飞书机器人本体——SubscribeAll 订阅它的事件流 =
 // 同步飞书侧全部对话；SendMessage 到主人私聊 session = 小本本对 kira 说话（kira 的回答回飞书）。
 //
-// 协议要点（yomi crates/kernel/src/wire + transport）：
-//   请求  {type:"request", id, method:{hello:{}} / {subscribe_all:{}} / {send_message:{...}}}
-//   响应  {type:"response", id, body:{status:"ok", result} | {status:"err", error}}
+// 协议要点（yomi crates/kernel/src/wire + transport，daemon v0.10.29 proto 30）：
+//   请求  {type:"request", id, method:{hello:{}} / {subscribe_all:{}} / {send_message:{...}} / {read_file:{...}}}
+//   响应  {type:"response", id, body:{status:"ok", result} | {status:"err", error:{code, message}}}
 //   事件  {type:"event", session_id, event_id, event:{user|agent|internal|model|tool}}
 //   心跳  {type:"ping"} → 回 {type:"pong"}
 // assistant 文本走 internal.message_added（message.role=assistant, content 是 ContentBlock 数组）。
@@ -96,7 +96,12 @@ function handleMsg(msg) {
     pending.delete(msg.id);
     clearTimeout(p.timer);
     if (msg.body && msg.body.status === 'ok') p.resolve(msg.body.result);
-    else p.reject(new Error((msg.body && msg.body.error && msg.body.error.message) || 'rpc error'));
+    else {
+      // 错误带上 daemon 的 code（如 read_file_failed），调用方按 code 判类型比匹配文案稳
+      const err = new Error((msg.body && msg.body.error && msg.body.error.message) || 'rpc error');
+      if (msg.body && msg.body.error && msg.body.error.code) err.code = msg.body.error.code;
+      p.reject(err);
+    }
     // 自己 call 的应答不刷新 lastPushAt：socket 活着不代表订阅活着（mira 假死同款教训）
     return;
   }
@@ -320,6 +325,17 @@ async function sayToSession(text) {
   return call('send_message', { session_id: cfg.sessionId, blocks: [{ type: 'text', text: String(text).slice(0, 4000) }] }, 20000);
 }
 
+// 读 kira 容器里的文件（wire read_file）：attachment 类型下绝对路径按原样解析。
+// 返回 {data_base64, start_offset, end_offset, file_size, mime, mtime_ms}——单块默认 ≤2MiB，
+// 大文件用 offset=上一块 end_offset 翻页；limit:0 只回元信息（file_size + mtime_ms），当增量缓存键用
+function readFile(remotePath, opts) {
+  const o = opts || {};
+  const params = { source: { attachment: { path: String(remotePath) } } };
+  if (o.offset > 0) params.offset = o.offset;
+  if (typeof o.limit === 'number') params.limit = o.limit;
+  return call('read_file', params, o.timeoutMs || 30000);
+}
+
 // 小本本发言：发出去并等 kira 的回答（回答经 SubscribeAll 回来）。
 // 一次只允许一条在途：第二条直接拒绝，避免两条 waiter 互相顶掉、答非所问
 function handleNotebook(text) {
@@ -355,4 +371,4 @@ async function listMessages() {
     .filter((m) => m.content);
 }
 
-module.exports = { init, start, stop, restart, getState, handleNotebook, listSessions, listMessages, sayToSession };
+module.exports = { init, start, stop, restart, getState, handleNotebook, listSessions, listMessages, sayToSession, readFile };

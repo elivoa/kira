@@ -1378,8 +1378,7 @@ app.whenReady().then(async () => {
   // ---------- kira 链接（yomi wire 协议，替代飞书 SDK 直连） ----------
   // daemon 事件流经 SubscribeAll 进来：kira 的回答 → 机器人 tab 上屏 + kira 消息泡泡（独立窗口）
   const dispatchYomiMsg = (m) => {
-    sync.onYomiMessage(m); // 同步问答的应答先进同步模块
-    if (sync.isActive()) return; // 一轮同步期间的会话往来不上屏不冒泡（块内容/应答都是程序指令）
+    if (sync.isActive()) return; // 一轮同步期间的会话往来不上屏不冒泡（同步指令/kira 应答都是程序往来）
     if (notebookWin) notebookWin.webContents.send('feishu-msg', m);
     if (m.role === 'assistant') showKiraBubble(m.content);
   };
@@ -1422,8 +1421,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('yomi-list-sessions', () => yomi.listSessions());
   ipcMain.handle('yomi-history', () => yomi.listMessages());
 
-  // ---------- 记忆同步（M43）：kira ↔ 本地 ~/.agents 双向同步 ----------
-  // 启动后 5 分钟首轮，之后按 config.sync.intervalHours；yomi 未连接跳过；同步期间的会话往来静默
+  // ---------- 记忆同步（M47）：kira ↔ 本地 ~/.agents 双向同步 ----------
+  // 拉取走 yomi read_file 直读三件套（mtime 增量）；推送走 GitLab 仓 gaobo/kira-memsync（git push + 一条指令让 kira pull）。
+  // 启动后 5 分钟首轮，之后按 config.sync.intervalHours（默认 24h）；yomi 未连接跳过；同步期间的会话往来静默
   sync.init({
     getConfig: () => config.sync || (config.sync = {}),
     persist: saveConfig,
