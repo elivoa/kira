@@ -691,7 +691,7 @@ function createKiraBubble() {
   let kbBoundsTimer = null;
   const saveKbBounds = () => {
     if (!kiraBubbleWin || kbMutePersist) return;
-    // 放大态是临时态：落盘一律写换算回的基准 bounds，×2 的尺寸不进 settings
+    // 放大态是临时态：落盘一律写换算回的基准 bounds，×1.5 的尺寸不进 settings
     settings.kiraBubbleBounds = kbZoomed ? kbBaseBounds(kiraBubbleWin.getBounds()) : kiraBubbleWin.getBounds();
     saveConfig();
   };
