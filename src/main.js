@@ -64,6 +64,7 @@ function ensureTool(name) {
 let win = null;
 let overlay = null; // 全屏特效覆盖层（点击穿透）
 let bubbleWin = null; // 气泡独立窗口：可以比人物窗口宽很多，字号有下限
+let redframeWin = null; // 聚焦输入框红框：透明点击穿透窗，只画一圈红边框
 let bubbleAnchor = null; // 人物窗口内局部坐标 {x, y, scale}，桌宠每帧上报
 let lastBubbleScale = 1;
 // 拖拽时窗口与鼠标的偏移
@@ -453,9 +454,9 @@ function startKeyMonitor() {
   if (child.stderr) child.stderr.on('data', (c) => console.log('[keys]', String(c).trim()));
 }
 
-// 读一次输入光标位置（屏幕坐标 {x,y,width,height}）；失败/超时/无输出都回 null，400ms 内走缓存
-function getCaret() {
-  if (caretCache && Date.now() - caretCache.t < 400) return Promise.resolve(caretCache.v);
+// 读一次输入光标位置（屏幕坐标 {x,y,width,height}）；失败/超时/无输出都回 null，maxAge 毫秒内走缓存
+function getCaret(maxAge = 400) {
+  if (caretCache && Date.now() - caretCache.t < maxAge) return Promise.resolve(caretCache.v);
   return new Promise((resolve) => {
     execFile(CARET_BIN, [], { timeout: 500 }, (err, stdout) => {
       let v = null;
@@ -555,6 +556,62 @@ function createBubble() {
   bubbleWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   bubbleWin.setIgnoreMouseEvents(true, { forward: true });
   bubbleWin.loadFile(path.join(__dirname, 'bubble.html'));
+}
+
+// 聚焦输入框红框：轮询光标矩形，有就框住（外扩 3px）、没有就藏；只画边框线，不抢焦点不吃点击
+const REDFRAME_PAD = 3;
+const REDFRAME_POLL = 150; // 比 input-context 的 400ms 缓存跟手，走 getCaret 快通道
+function createRedframe() {
+  redframeWin = new BrowserWindow({
+    width: 10,
+    height: 10,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: false,
+    show: false, // 初始隐藏，等到第一个光标矩形再 showInactive
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false, // 呼吸动画挂在 CSS 上，但隐藏/遮挡时也别让页面冻住
+    },
+  });
+  redframeWin.setAlwaysOnTop(true, 'screen-saver');
+  redframeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  redframeWin.setIgnoreMouseEvents(true, { forward: true });
+  redframeWin.loadFile(path.join(__dirname, 'redframe.html'));
+}
+
+function trackRedframe() {
+  let lastKey = null; // 上一次应用到窗口的矩形，没变就不重复 setBounds
+  setInterval(async () => {
+    if (!redframeWin || redframeWin.isDestroyed()) return;
+    const c = await getCaret(REDFRAME_POLL);
+    if (!c) {
+      if (lastKey !== null) {
+        lastKey = null;
+        redframeWin.hide();
+      }
+      return;
+    }
+    const b = {
+      x: Math.round(c.x - REDFRAME_PAD),
+      y: Math.round(c.y - REDFRAME_PAD),
+      // 光标矩形宽可能是 0（竖线），夹个最小尺寸保证红框肉眼可见
+      width: Math.max(12, Math.round(c.width + REDFRAME_PAD * 2)),
+      height: Math.max(12, Math.round(c.height + REDFRAME_PAD * 2)),
+    };
+    const key = `${b.x},${b.y},${b.width},${b.height}`;
+    if (key !== lastKey) {
+      lastKey = key;
+      redframeWin.setBounds(b);
+      if (!redframeWin.isVisible()) redframeWin.showInactive(); // showInactive 绝不抢焦点
+    }
+  }, REDFRAME_POLL);
 }
 
 // ---------- kira 消息泡泡（独立窗口，UI 同主动搭话粘性气泡） ----------
@@ -931,6 +988,8 @@ app.whenReady().then(async () => {
   createOverlay();
   createBubble();
   createKiraBubble();
+  createRedframe();
+  trackRedframe();
   win.on('move', placeBubble); // 拖拽/自主走动时气泡窗口跟着走
 
   // 显示器增删/ Metrics 变化：覆盖层重对屏，桌宠夹回可见区
