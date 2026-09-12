@@ -1033,6 +1033,73 @@ window.pet.onYomiStatus((s) => {
   updateBotTab();
 });
 
+// ---------- 记忆同步（kira ↔ 本地 ~/.agents 双向同步） ----------
+const syncEnabled = document.getElementById('syncEnabled');
+const syncInterval = document.getElementById('syncInterval');
+const syncStatus = document.getElementById('syncStatus');
+const syncNowBtn = document.getElementById('syncNow');
+let syncState = { enabled: true, intervalHours: 6, running: false, lastRun: null };
+
+function fmtSyncTime(t) {
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function renderSyncStatus() {
+  if (syncState.running) {
+    syncStatus.classList.remove('ok');
+    syncStatus.textContent = '同步中…（拉取用户画像 + 推送记忆库，约一两分钟）';
+    return;
+  }
+  const r = syncState.lastRun;
+  if (!r) { syncStatus.textContent = '还没跑过同步（启动 5 分钟后首轮）'; return; }
+  if (r.skipped) { syncStatus.textContent = `上次 ${fmtSyncTime(r.t)}：跳过（${r.skipped}）`; return; }
+  const part = (x) => (x && x.ok ? `✓ ${x.detail}` : `✗ ${(x && x.error) || '失败'}`);
+  syncStatus.textContent = `上次 ${fmtSyncTime(r.t)}：拉取 ${part(r.pull)}；推送 ${part(r.push)}`;
+}
+
+function loadSyncConfig() {
+  window.pet.getSyncConfig().then((s) => {
+    syncState = s;
+    syncEnabled.checked = !!s.enabled;
+    if (document.activeElement !== syncInterval) syncInterval.value = s.intervalHours || 6;
+    renderSyncStatus();
+  });
+}
+
+document.getElementById('syncSave').addEventListener('click', () => {
+  const hours = Math.max(1, Math.min(168, parseInt(syncInterval.value, 10) || 6));
+  syncInterval.value = hours;
+  window.pet.setSyncConfig({ enabled: syncEnabled.checked, intervalHours: hours });
+  syncState = { ...syncState, enabled: syncEnabled.checked, intervalHours: hours };
+  window.pet.notebookSay('记忆同步记好啦');
+  window.pet.logAppend({ t: Date.now(), type: '系统', text: `更新了记忆同步配置（${syncEnabled.checked ? '开' : '关'}，${hours} 小时）` });
+});
+
+syncEnabled.addEventListener('change', () => {
+  window.pet.setSyncConfig({ enabled: syncEnabled.checked });
+  syncState.enabled = syncEnabled.checked;
+});
+
+syncNowBtn.addEventListener('click', async () => {
+  syncNowBtn.disabled = true;
+  syncState.running = true;
+  renderSyncStatus();
+  try {
+    await window.pet.syncNow(); // 状态经 sync-status 推送刷新
+  } finally {
+    syncNowBtn.disabled = false;
+  }
+});
+
+window.pet.onSyncStatus((s) => {
+  syncState = s;
+  syncEnabled.checked = !!s.enabled;
+  if (document.activeElement !== syncInterval) syncInterval.value = s.intervalHours || 6;
+  renderSyncStatus();
+});
+
 // 状态变化：刷状态行和书脊 tab（拿到机器人名字后 tab 会改名）
 window.pet.onFeishuStatus((s) => {
   feishuState = s;
@@ -1343,6 +1410,7 @@ if (hasMira && window.pet.onMiraEvent) {
 loadFeishuConfig(); // 打开本子就备好 tab 显隐/命名，不用等切页签
 loadYomiConfig();   // kira tab 同理：打开本子就拉一次链接状态，不然要等点配置页才出现
 loadMiraConfig();   // mira tab 同理
+loadSyncConfig();   // 记忆同步区块的状态/上次结果
 
 // ---------- 打字避让（typingguard）：输入时通知桌宠别挡本本 ----------
 // 通道复用 notebook-say（主进程原样转发给桌宠窗口），控制消息带哨兵前缀，

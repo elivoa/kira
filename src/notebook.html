@@ -563,6 +563,23 @@
               <div id="yomiStatus" class="cfg-status"></div>
               <div id="yomiSessionsOut" class="cfg-status"></div>
             </div>
+            <div class="cfg-sec" id="syncSec">
+              <div class="cfg-title">记忆同步</div>
+              <div class="cfg-tip">定时和 kira 双向同步记忆：拉回 kira 的用户画像三件套存到 ~/.agents/skills/kira-profile/；把本机 ~/.agents/memory/ 和 skills 推给 kira 参考。kira 未连接时自动跳过。</div>
+              <div class="cfg-row" style="padding-left:0">
+                <span>启用定时同步</span>
+                <label class="sw"><input id="syncEnabled" type="checkbox"><i></i></label>
+              </div>
+              <div class="cfg-row" style="padding-left:0">
+                <span>同步间隔（小时）</span>
+                <input id="syncInterval" type="number" min="1" max="168" step="1" style="width:80px">
+              </div>
+              <div class="cfg-btns">
+                <button id="syncSave" class="cfg-btn">保存</button>
+                <button id="syncNow" class="cfg-btn ghost">立即同步</button>
+              </div>
+              <div id="syncStatus" class="cfg-status"></div>
+            </div>
             <div class="cfg-sec" id="miraSec" style="display:none">
               <div class="cfg-title">链接 mira（Mira Tag）</div>
               <div class="cfg-tip">连上 mira 的 WebSocket 事件流：mira 会话的消息会同步到小本子的 mira tab，小本本的发言经 WS prompt 发给 mira。</div>

@@ -5,6 +5,7 @@ const updater = require('./updater');
 const feishu = require('./feishu');
 const yomi = require('./yomi');
 const mira = require('./mira');
+const sync = require('./sync');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
@@ -1270,6 +1271,8 @@ app.whenReady().then(async () => {
   // ---------- kira 链接（yomi wire 协议，替代飞书 SDK 直连） ----------
   // daemon 事件流经 SubscribeAll 进来：kira 的回答 → 机器人 tab 上屏 + kira 消息泡泡（独立窗口）
   const dispatchYomiMsg = (m) => {
+    sync.onYomiMessage(m); // 同步问答的应答先进同步模块
+    if (sync.isActive()) return; // 一轮同步期间的会话往来不上屏不冒泡（块内容/应答都是程序指令）
     if (notebookWin) notebookWin.webContents.send('feishu-msg', m);
     if (m.role === 'assistant') showKiraBubble(m.content);
   };
@@ -1311,6 +1314,22 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('yomi-list-sessions', () => yomi.listSessions());
   ipcMain.handle('yomi-history', () => yomi.listMessages());
+
+  // ---------- 记忆同步（M43）：kira ↔ 本地 ~/.agents 双向同步 ----------
+  // 启动后 5 分钟首轮，之后按 config.sync.intervalHours；yomi 未连接跳过；同步期间的会话往来静默
+  sync.init({
+    getConfig: () => config.sync || (config.sync = {}),
+    persist: saveConfig,
+    yomi,
+    log: mainLog,
+    onStatus: (s) => { if (notebookWin) notebookWin.webContents.send('sync-status', s); },
+  });
+  sync.start();
+  ipcMain.handle('get-sync-config', () => sync.getState());
+  ipcMain.on('set-sync-config', (_e, patch) => {
+    if (patch && typeof patch === 'object') sync.setConfig(patch);
+  });
+  ipcMain.handle('sync-now', () => sync.runNow('manual'));
 
   // ---------- mira 链接（Mira Tag 子部署，JSON-RPC over WebSocket + REST） ----------
   // subscribe 事件流 → mira-event 推给笔记本 mira tab；发言走 WS prompt
