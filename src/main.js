@@ -48,13 +48,21 @@ let CARET_BIN = path.join(TOOLS_DIR, 'caret');
 function ensureTool(name) {
   return new Promise((resolve) => {
     const bundled = path.join(TOOLS_DIR, name);
-    if (fs.existsSync(bundled)) return resolve(bundled);
-    const out = path.join(TOOLS_BUILD_DIR, name);
-    if (fs.existsSync(out)) return resolve(out);
-    fs.mkdirSync(TOOLS_BUILD_DIR, { recursive: true });
     const src = path.join(TOOLS_SRC_DIR, name + '.swift');
+    // caret 修过恒 NoValue 的 bug：老 checkout 里 8/31 编译的旧二进制还在，
+    // 「存在就跳过」会一直用坏的——源码比二进制新必须重编（只对 caret 启用，其他工具语义不变；
+    // 打包版不含 .swift 源码，stale 恒 false，不受影响）
+    const stale = (bin) =>
+      name === 'caret' && fs.existsSync(bin) && fs.existsSync(src) &&
+      fs.statSync(src).mtimeMs > fs.statSync(bin).mtimeMs;
+    if (fs.existsSync(bundled) && !stale(bundled)) return resolve(bundled);
+    const out = path.join(TOOLS_BUILD_DIR, name);
+    if (fs.existsSync(out) && !stale(out)) return resolve(out);
+    const wasStale = stale(bundled) || stale(out); // 编译会覆盖二进制，先记下是否因过期触发
+    fs.mkdirSync(TOOLS_BUILD_DIR, { recursive: true });
     execFile('swiftc', ['-O', src, '-o', out], { timeout: 180000 }, (err) => {
       if (err) mainLog('系统', `编译 ${name} 失败，相关功能不可用（手动跑：swiftc -O tools/${name}.swift -o tools/${name}）`);
+      else if (wasStale) mainLog('系统', `tools/${name} 源码有更新，已重新编译`);
       else mainLog('系统', `首次启动，自动编译了 tools/${name}`);
       resolve(err ? bundled : out);
     });
@@ -594,21 +602,28 @@ function createRedframe() {
   redframeWin.loadFile(path.join(__dirname, 'redframe.html'));
 }
 
+// 连续查不到光标时逐级退避（数小时无文本输入也不会以 3-4 进程/秒空转），拿到数据立刻回 150ms
+const REDFRAME_BACKOFF = [150, 300, 600, 1500];
+
 function trackRedframe() {
   let lastKey = null; // 上一次应用到窗口的矩形，没变就不重复 setBounds
-  setInterval(async () => {
-    if (!redframeWin || redframeWin.isDestroyed()) return;
+  let misses = 0; // 连续 null 次数，决定退避档位
+  const tick = async () => {
+    if (!redframeWin || redframeWin.isDestroyed()) return; // 窗口没了就停轮（app 退出中）
     let c = await getCaret(REDFRAME_POLL);
     // 只框文本输入：marker range 精确光标（kind=caret）直接框；元素 frame 回退只限文本类 role，
     // 不然红框会跟着 Finder 列表、按钮等任意焦点元素跑（旧版 caret 无 kind/role 字段时放行，向后兼容）
     if (c && c.kind === 'frame' && c.role && !REDFRAME_TEXT_ROLES.has(c.role)) c = null;
     if (!c) {
+      misses = Math.min(misses + 1, REDFRAME_BACKOFF.length - 1);
       if (lastKey !== null) {
         lastKey = null;
         redframeWin.hide();
       }
+      setTimeout(tick, REDFRAME_BACKOFF[misses]);
       return;
     }
+    misses = 0;
     const b = {
       x: Math.round(c.x - REDFRAME_PAD),
       y: Math.round(c.y - REDFRAME_PAD),
@@ -622,7 +637,9 @@ function trackRedframe() {
       redframeWin.setBounds(b);
       if (!redframeWin.isVisible()) redframeWin.showInactive(); // showInactive 绝不抢焦点
     }
-  }, REDFRAME_POLL);
+    setTimeout(tick, REDFRAME_BACKOFF[0]);
+  };
+  setTimeout(tick, REDFRAME_BACKOFF[0]);
 }
 
 // ---------- kira 消息泡泡（独立窗口，UI 同主动搭话粘性气泡） ----------
