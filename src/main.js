@@ -48,13 +48,21 @@ let CARET_BIN = path.join(TOOLS_DIR, 'caret');
 function ensureTool(name) {
   return new Promise((resolve) => {
     const bundled = path.join(TOOLS_DIR, name);
-    if (fs.existsSync(bundled)) return resolve(bundled);
-    const out = path.join(TOOLS_BUILD_DIR, name);
-    if (fs.existsSync(out)) return resolve(out);
-    fs.mkdirSync(TOOLS_BUILD_DIR, { recursive: true });
     const src = path.join(TOOLS_SRC_DIR, name + '.swift');
+    // caret 修过恒 NoValue 的 bug：老 checkout 里 8/31 编译的旧二进制还在，
+    // 「存在就跳过」会一直用坏的——源码比二进制新必须重编（只对 caret 启用，其他工具语义不变；
+    // 打包版不含 .swift 源码，stale 恒 false，不受影响）
+    const stale = (bin) =>
+      name === 'caret' && fs.existsSync(bin) && fs.existsSync(src) &&
+      fs.statSync(src).mtimeMs > fs.statSync(bin).mtimeMs;
+    if (fs.existsSync(bundled) && !stale(bundled)) return resolve(bundled);
+    const out = path.join(TOOLS_BUILD_DIR, name);
+    if (fs.existsSync(out) && !stale(out)) return resolve(out);
+    const wasStale = stale(bundled) || stale(out); // 编译会覆盖二进制，先记下是否因过期触发
+    fs.mkdirSync(TOOLS_BUILD_DIR, { recursive: true });
     execFile('swiftc', ['-O', src, '-o', out], { timeout: 180000 }, (err) => {
       if (err) mainLog('系统', `编译 ${name} 失败，相关功能不可用（手动跑：swiftc -O tools/${name}.swift -o tools/${name}）`);
+      else if (wasStale) mainLog('系统', `tools/${name} 源码有更新，已重新编译`);
       else mainLog('系统', `首次启动，自动编译了 tools/${name}`);
       resolve(err ? bundled : out);
     });
@@ -64,6 +72,7 @@ function ensureTool(name) {
 let win = null;
 let overlay = null; // 全屏特效覆盖层（点击穿透）
 let bubbleWin = null; // 气泡独立窗口：可以比人物窗口宽很多，字号有下限
+let redframeWin = null; // 聚焦输入框红框：透明点击穿透窗，只画一圈红边框
 let bubbleAnchor = null; // 人物窗口内局部坐标 {x, y, scale}，桌宠每帧上报
 let lastBubbleScale = 1;
 // 拖拽时窗口与鼠标的偏移
@@ -72,6 +81,8 @@ let dragOffset = null;
 let lastTypeAt = 0;
 // 输入光标查询缓存：AX 查询有开销，400ms 内复用上次结果（null 也缓存）
 let caretCache = null;
+// 进行中的光标查询：红框 150ms 轮询叠加 NSApp 初始化后单次查询可能 ~0.3s，去重避免并发 caret 进程堆积
+let caretInflight = null;
 
 // ---------- 统一配置（~/.config/kira/config.json） ----------
 // Kimi key、动作开关/频率/点击穿透、笔记本窗口位置都存这一个文件
@@ -453,11 +464,13 @@ function startKeyMonitor() {
   if (child.stderr) child.stderr.on('data', (c) => console.log('[keys]', String(c).trim()));
 }
 
-// 读一次输入光标位置（屏幕坐标 {x,y,width,height}）；失败/超时/无输出都回 null，400ms 内走缓存
-function getCaret() {
-  if (caretCache && Date.now() - caretCache.t < 400) return Promise.resolve(caretCache.v);
-  return new Promise((resolve) => {
-    execFile(CARET_BIN, [], { timeout: 500 }, (err, stdout) => {
+// 读一次输入光标位置（屏幕坐标 {x,y,width,height}）；失败/超时/无输出都回 null，maxAge 毫秒内走缓存
+function getCaret(maxAge = 400) {
+  if (caretCache && Date.now() - caretCache.t < maxAge) return Promise.resolve(caretCache.v);
+  if (caretInflight) return caretInflight; // 并发去重：多个调用方共享同一次查询
+  caretInflight = new Promise((resolve) => {
+    // caret 进程内含 ~0.15s NSApp 初始化，冷启动单次可达 ~0.7s，timeout 放宽到 1200ms
+    execFile(CARET_BIN, [], { timeout: 1200 }, (err, stdout) => {
       let v = null;
       if (!err) {
         try {
@@ -466,9 +479,11 @@ function getCaret() {
         } catch {}
       }
       caretCache = { t: Date.now(), v };
+      caretInflight = null;
       resolve(v);
     });
   });
+  return caretInflight;
 }
 
 function createWindow() {
@@ -555,6 +570,76 @@ function createBubble() {
   bubbleWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   bubbleWin.setIgnoreMouseEvents(true, { forward: true });
   bubbleWin.loadFile(path.join(__dirname, 'bubble.html'));
+}
+
+// 聚焦输入框红框：轮询光标矩形，有就框住（外扩 3px）、没有就藏；只画边框线，不抢焦点不吃点击
+const REDFRAME_PAD = 3;
+const REDFRAME_POLL = 150; // 比 input-context 的 400ms 缓存跟手，走 getCaret 快通道
+// frame 回退路径下只框这些文本类 role（marker range 精确光标不过滤，它本身就证明在文本里）
+const REDFRAME_TEXT_ROLES = new Set(['AXTextArea', 'AXTextField', 'AXSearchField', 'AXComboBox', 'AXSecureTextField', 'AXTextGroup']);
+function createRedframe() {
+  redframeWin = new BrowserWindow({
+    width: 10,
+    height: 10,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: false,
+    show: false, // 初始隐藏，等到第一个光标矩形再 showInactive
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false, // 呼吸动画挂在 CSS 上，但隐藏/遮挡时也别让页面冻住
+    },
+  });
+  redframeWin.setAlwaysOnTop(true, 'screen-saver');
+  redframeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  redframeWin.setIgnoreMouseEvents(true, { forward: true });
+  redframeWin.loadFile(path.join(__dirname, 'redframe.html'));
+}
+
+// 连续查不到光标时逐级退避（数小时无文本输入也不会以 3-4 进程/秒空转），拿到数据立刻回 150ms
+const REDFRAME_BACKOFF = [150, 300, 600, 1500];
+
+function trackRedframe() {
+  let lastKey = null; // 上一次应用到窗口的矩形，没变就不重复 setBounds
+  let misses = 0; // 连续 null 次数，决定退避档位
+  const tick = async () => {
+    if (!redframeWin || redframeWin.isDestroyed()) return; // 窗口没了就停轮（app 退出中）
+    let c = await getCaret(REDFRAME_POLL);
+    // 只框文本输入：marker range 精确光标（kind=caret）直接框；元素 frame 回退只限文本类 role，
+    // 不然红框会跟着 Finder 列表、按钮等任意焦点元素跑（旧版 caret 无 kind/role 字段时放行，向后兼容）
+    if (c && c.kind === 'frame' && c.role && !REDFRAME_TEXT_ROLES.has(c.role)) c = null;
+    if (!c) {
+      misses = Math.min(misses + 1, REDFRAME_BACKOFF.length - 1);
+      if (lastKey !== null) {
+        lastKey = null;
+        redframeWin.hide();
+      }
+      setTimeout(tick, REDFRAME_BACKOFF[misses]);
+      return;
+    }
+    misses = 0;
+    const b = {
+      x: Math.round(c.x - REDFRAME_PAD),
+      y: Math.round(c.y - REDFRAME_PAD),
+      // 光标矩形宽可能是 0（竖线），夹个最小尺寸保证红框肉眼可见
+      width: Math.max(12, Math.round(c.width + REDFRAME_PAD * 2)),
+      height: Math.max(12, Math.round(c.height + REDFRAME_PAD * 2)),
+    };
+    const key = `${b.x},${b.y},${b.width},${b.height}`;
+    if (key !== lastKey) {
+      lastKey = key;
+      redframeWin.setBounds(b);
+      if (!redframeWin.isVisible()) redframeWin.showInactive(); // showInactive 绝不抢焦点
+    }
+    setTimeout(tick, REDFRAME_BACKOFF[0]);
+  };
+  setTimeout(tick, REDFRAME_BACKOFF[0]);
 }
 
 // ---------- kira 消息泡泡（独立窗口，UI 同主动搭话粘性气泡） ----------
@@ -931,6 +1016,8 @@ app.whenReady().then(async () => {
   createOverlay();
   createBubble();
   createKiraBubble();
+  createRedframe();
+  trackRedframe();
   win.on('move', placeBubble); // 拖拽/自主走动时气泡窗口跟着走
 
   // 显示器增删/ Metrics 变化：覆盖层重对屏，桌宠夹回可见区
