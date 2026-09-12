@@ -4,7 +4,7 @@
 // markdown 渲染走 MarkdownStream 静态渲染（markdown-it 配置与 KaTeX MATH_OPTIONS 同本本）、
 // 链接点击走系统浏览器（不算关闭）、Esc 关闭（输入框聚焦时先失焦，再按才关）、双击或右下角 💬 打开 kira tab、
 // 右下角还有：飞书跳转、↺ 复位默认位置、拖拽手柄调大小（位置+大小由主进程持久化）、
-// 左下角放大钮：窗口×2+内容 CSS zoom×2 的临时放大态（不落盘，Esc 优先缩回），
+// 左下角放大钮：窗口×1.5+内容 CSS zoom×1.5 的临时放大态（不落盘，Esc 优先缩回），
 // 光标落在泡泡上才接管鼠标（其余位置穿透），拖拽走 -webkit-app-region（顶部条整片可拖，文字不拖）。
 // 输入框聚焦时窗口临时降到 floating 级（screen-saver 级会压住输入法候选框），失焦恢复
 const kb = document.getElementById('kb');
@@ -19,9 +19,10 @@ const kbReset = document.getElementById('kbReset');
 const kbResize = document.getElementById('kbResize');
 const kbZoom = document.getElementById('kbZoom');
 const kbAvatar = document.querySelector('.kb-avatar');
+const kbHeadFill = document.querySelector('.kb-headfill');
 
 let shown = false;
-let zoomed = false; // 放大态：窗口×2+内容 zoom×2；临时态不落盘，Esc 优先缩回
+let zoomed = false; // 放大态：窗口×1.5+内容 zoom×1.5；临时态不落盘，Esc 优先缩回
 let waiting = false; // 泡泡里发过言、等 kira 回答中：此时 kira-bubble-show 到来填等待行而非清场
 let typingRow = null; // 等待行（回复到达后变正式 kira 正文行）
 
@@ -196,7 +197,7 @@ window.addEventListener('mouseup', (e) => {
   window.pet.kbResizeEnd(ignoring);
 });
 
-// 左下角放大钮：点击切换放大态。窗口尺寸由主进程×2（可能钳制），实际缩放比例随
+// 左下角放大钮：点击切换放大态。窗口尺寸由主进程×1.5（可能钳制），实际缩放比例随
 // kira-bubble-zoom 事件回来后再落到 CSS zoom 上，保证两边比例一致
 kbZoom.addEventListener('click', () => {
   if (!shown) return;
@@ -219,13 +220,14 @@ kb.addEventListener('dblclick', (e) => {
 });
 
 // 点击穿透：只有光标落在泡泡上才接管鼠标，其余全部穿透；
-// 人物立绘悬贴在卡体之外（上/左冒出），它的矩形也算「在泡泡上」，否则悬贴部分会成为穿透洞
+// 人物立绘悬贴在卡体之外（上/左冒出）、表头补齐条（人物冒头高度、人物右边一横条）
+// 都在卡体之外，它们的矩形也算「在泡泡上」，否则悬贴/补齐部分会成为穿透洞
 let ignoring = true;
 window.addEventListener('mousemove', (e) => {
   let over = false;
   if (shown && kb.classList.contains('show')) {
     const inRect = (r) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    over = inRect(kb.getBoundingClientRect()) || inRect(kbAvatar.getBoundingClientRect());
+    over = inRect(kb.getBoundingClientRect()) || inRect(kbAvatar.getBoundingClientRect()) || inRect(kbHeadFill.getBoundingClientRect());
   }
   const want = !over;
   if (want !== ignoring) {
